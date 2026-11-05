@@ -7,17 +7,18 @@ and hear is generated procedurally at load time: no image or sound files.
 
 ## Run it
 
-It's a static site using native ES modules, so it needs to be served over HTTP (not opened as a
-`file://`):
+Just open `index.html` in a browser — it loads the pre-built bundle `dist/pixel-nyc.js`, so it
+works straight from disk, from any static server, or on GitHub Pages. Requires WebGL2 (any recent
+Chrome, Edge, Firefox or Safari).
+
+For development, `dev.html` loads the ES modules in `src/` directly (serve the folder, e.g.
+`python3 -m http.server 8000`, then open `http://localhost:8000/dev.html`). After changing the
+sources, rebuild the bundle with:
 
 ```bash
-# any static server works
-python3 -m http.server 8000
-# then open http://localhost:8000
+npm install
+npm run build
 ```
-
-It also works as-is on GitHub Pages. Requires a browser with WebGL2 (any recent Chrome, Edge,
-Firefox or Safari).
 
 ## What's in the city
 

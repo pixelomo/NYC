@@ -1,0 +1,13 @@
+{
+  "name": "pixel-nyc",
+  "version": "1.0.0",
+  "description": "A living isometric pixel-art New York City in the browser (WebGL2 + WebAudio, fully procedural).",
+  "private": true,
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --target=es2020 --minify-syntax --outfile=dist/pixel-nyc.js",
+    "serve": "python3 -m http.server 8000"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

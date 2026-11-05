@@ -325,6 +325,7 @@ uniform float uTime;
 uniform vec2 uBuf;
 uniform float uRotA;
 uniform vec3 uMoon; // x,y in [0,1], z = visibility
+uniform vec4 uShadowBlob; // centre (buffer px), radius x, radius y
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oGlow;
 float h(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
@@ -357,6 +358,14 @@ void main() {
       float k = (1.0 - (dd - r) / 10.0);
       c += vec3(0.25, 0.28, 0.35) * k * k * uMoon.z * 0.6;
     }
+  }
+  // soft shadow of the floating diorama on the void below
+  if (uShadowBlob.z > 1.0) {
+    vec2 q = (px - uShadowBlob.xy) / uShadowBlob.zw;
+    float dd = dot(q, q);
+    float sh = clamp(1.0 - dd, 0.0, 1.0);
+    sh = floor(sh * 5.0) / 5.0;
+    c *= 1.0 - sh * 0.28;
   }
   oColor = vec4(c, 1.0);
   oGlow = vec4(g, 1.0);
@@ -398,6 +407,7 @@ uniform float uVignette;
 uniform float uOutline;
 uniform float uFlash;
 uniform float uLinear;
+uniform vec4 uFog; // rgb, amount
 out vec4 o;
 void main() {
   vec2 X = gl_FragCoord.xy;
@@ -412,6 +422,12 @@ void main() {
     float dn = min(min(texture(uDepth, q + vec2(e.x, 0.0)).r, texture(uDepth, q - vec2(e.x, 0.0)).r),
                    min(texture(uDepth, q + vec2(0.0, e.y)).r, texture(uDepth, q - vec2(0.0, e.y)).r));
     if (d0 - dn > 0.006) c *= (1.0 - uOutline);
+  }
+  if (uFog.w > 0.001) {
+    float dz = texture(uDepth, (floor(p) + 0.5) / uBuf).r;
+    float back = dz >= 0.9999 ? 1.0 : clamp((dz - 0.35) * 2.2, 0.0, 1.0);
+    float ny = gl_FragCoord.y / uCanvas.y;
+    c = mix(c, uFog.rgb, uFog.w * (0.3 + 0.55 * back + 0.15 * ny));
   }
   vec3 b = texture(uBloom, p / uBuf).rgb + texture(uBloom2, p / uBuf).rgb;
   c += b * uBloomK;

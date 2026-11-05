@@ -120,6 +120,16 @@ export class Particles {
       const bx = c.x - Math.cos(c.h) * (c.len / 2 + 0.1), by = c.y - Math.sin(c.h) * (c.len / 2 + 0.1);
       this.add({ x: bx, y: by, z: 0.15, vx: -Math.cos(c.h) * 0.3, vy: -Math.sin(c.h) * 0.3, vz: 0.3, g: 0, life: 1.2, max: 1.2, kind: 'steam', grow: 2, row: this.row });
     }
+    // winter breath vapour from nearby pedestrians (only when zoomed in)
+    if (env.season === 3 && this.city.camera.scale / (window.devicePixelRatio || 1) >= 2.5) {
+      for (const p of this.city.people.list) {
+        if (p.alpha < 1 || !r.chance(dt * 0.6) || !view.visible(p.x, p.y, p.z, 0)) continue;
+        const d = this.city.camera.screenDir(p.dx || 0, p.dy || 1);
+        const fx = p.flip ? -1 : 1;
+        void d;
+        this.add({ x: p.x + fx * 0.05, y: p.y, z: p.z + (p.kid ? 0.7 : 0.85), vx: wx * 0.3, vy: wy * 0.3, vz: 0.15, g: 0, life: 0.9, max: 0.9, kind: 'steam', grow: 1, row: this.row });
+      }
+    }
     // falling leaves / petals
     if ((env.season === 2 || env.season === 0) && W.trees.length) {
       const n = env.season === 2 ? 3 + wind * 6 : 1.5;

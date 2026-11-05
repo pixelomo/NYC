@@ -244,6 +244,13 @@ export class Renderer {
       gl.uniform2f(p.u.uBuf, bw, bh);
       gl.uniform1f(p.u.uRotA, camera.angle);
       gl.uniform3fv(p.u.uMoon, env.moon);
+      {
+        // project the map centre well below the slab to place the drop shadow
+        const c = camera.project(MAP / 2, MAP / 2, -BASE_DEPTH - 14);
+        const t = camera.project(camera.x, camera.y, 0);
+        const sx = bw / 2 + (c[0] - Math.floor(t[0])), sy = bh / 2 - (c[1] - Math.floor(t[1]));
+        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * 16 * 0.62, MAP * 8 * 0.62);
+      }
       gl.bindVertexArray(this.emptyVAO);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
@@ -329,6 +336,7 @@ export class Renderer {
     gl.uniform1f(u.uOutline, env.outline);
     gl.uniform1f(u.uFlash, env.flash);
     gl.uniform1f(u.uLinear, linear ? 1 : 0);
+    gl.uniform4fv(u.uFog, env.fogv || [0, 0, 0, 0]);
     gl.bindVertexArray(this.emptyVAO);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);

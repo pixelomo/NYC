@@ -50,6 +50,18 @@ export class Animals {
     this.rats = [];
     this.geese = null;
     this.gooseTimer = 30;
+    this.planes = [];
+    this.planeTimer = 8;
+    this.planeRows = { body: city.pal.alloc({ [S.BODY]: 0xd8dce2, [S.BODY_D]: 0x8a9098, [S.BODY_L]: 0xf2f4f8, [S.EYE]: 0x2a2a30, [S.BEAK]: 0xd8dce2, [S.ACCENT]: 0x2a5fb8 }),
+      red: city.pal.alloc({ [S.C1]: [0xff3030, 128] }), white: city.pal.alloc({ [S.C1]: [0xffffff, 128] }), green: city.pal.alloc({ [S.C1]: [0x30ff60, 128] }) };
+    this.planeFrame = city.atlas.add('plane', 13, 5, (sp) => {
+      for (let x = 0; x < 12; x++) sp.set(x, 2, S.BODY, x < 3 ? 150 : 128);
+      for (let x = 3; x < 11; x++) sp.set(x, 3, S.BODY_D, 110);
+      sp.set(12, 2, S.BODY_L, 150);
+      sp.set(1, 1, S.ACCENT, 128); sp.set(0, 0, S.ACCENT, 128); sp.set(1, 0, S.ACCENT, 110);
+      sp.set(5, 1, S.BODY_L, 140); sp.set(6, 0, S.BODY_L, 140); sp.set(6, 4, S.BODY_D, 100); sp.set(7, 4, S.BODY_D, 100);
+      for (let x = 4; x < 10; x += 2) sp.set(x, 2, S.EYE, 128);
+    });
     this.initPigeons();
     this.initOthers();
   }
@@ -304,6 +316,18 @@ export class Animals {
       g.t += dt; g.x += g.vx * dt; g.y += g.vy * dt;
       if (g.x < -30) this.geese = null;
     }
+    // airliners crossing high above (blinking navigation lights)
+    this.planeTimer -= dt;
+    if (this.planeTimer <= 0 && this.planes.length < 2) {
+      this.planeTimer = this.rng.range(25, 70);
+      const fromW = this.rng.chance(0.5);
+      this.planes.push({ x: fromW ? -40 : MAP + 40, y: this.rng.range(0, MAP), z: this.rng.range(70, 90), vx: fromW ? 7 : -7, vy: this.rng.range(-1.5, 1.5), t: 0 });
+    }
+    for (let i = this.planes.length - 1; i >= 0; i--) {
+      const p = this.planes[i];
+      p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt;
+      if (p.x < -60 || p.x > MAP + 60) this.planes.splice(i, 1);
+    }
   }
   update(dt) {
     this.updatePigeons(dt);
@@ -352,6 +376,13 @@ export class Animals {
     for (const rt of this.rats) {
       if (rt.state === 'hide' || !view.visible(rt.x, rt.y, CURB, 1)) continue;
       L.push(rt.x, rt.y, CURB, this.f.rat.run[Math.floor(rt.t * 10) % 2], this.ratRow, this.dirFlip(rt.dx, rt.dy) ? SF.FLIP : 0);
+    }
+    for (const p of this.planes) {
+      const flip = this.dirFlip(p.vx, p.vy);
+      if (env.darkness < 0.6) L.push(p.x, p.y, p.z, this.planeFrame, this.planeRows.body, (flip ? SF.FLIP : 0) | SF.NOSHADOW | SF.NOSHADE);
+      const blink = Math.floor(p.t * 1.6) % 2 === 0;
+      if (blink) L.push(p.x, p.y, p.z + 0.1, this.city.atlas.get('dot2'), this.planeRows.red, SF.EMISSIVE | SF.NOSHADOW, 1, 0);
+      if (env.darkness > 0.4 && Math.floor(p.t * 1.6 + 0.5) % 2 === 0) L.push(p.x - p.vx * 0.12, p.y, p.z + 0.05, this.city.atlas.get('dot'), this.planeRows.white, SF.EMISSIVE | SF.NOSHADOW, 1, 0);
     }
     if (this.geese) {
       const g = this.geese;

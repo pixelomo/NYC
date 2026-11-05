@@ -251,6 +251,12 @@ export class Environment {
     u.grade = [1, 1, 1];
     if (sun.el > 0 && sun.el < 12) u.grade = [1.04, 0.99, 0.94];
     u.outline = 0.22;
+    {
+      // haze: fog days, rain and snowfall; tinted by the sky
+      const f = clamp(this.fog * 0.9 + (this.snowing ? 0.18 * this.precip : 0) + (this.raining ? 0.1 * this.precip : 0), 0, 0.75);
+      const fc = u.skyBottom.map((v, i) => v * 0.55 + [0.62, 0.65, 0.7][i] * 0.45 * (1 - this.darkness * 0.75));
+      u.fogv = [fc[0], fc[1], fc[2], f];
+    }
     u.vis = this.visMask(h, s);
     this.lampsOn = sun.el < 5 || (cloudK > 0.7 && sun.el < 12) || this.fog > 0.3;
   }
