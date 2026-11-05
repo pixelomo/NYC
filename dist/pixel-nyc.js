@@ -371,13 +371,14 @@ layout(location=2) in uvec4 aRect;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uShadowVP;
 uniform uint uVis;
+uniform uint uSkipDetail; // 1: building bodies only (the map trees sample)
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out uint vLayer;
 flat out uint vMat;
 void main() {
   // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aUV; vRect = aRect; vLayer = aInfo.x;
   vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);
@@ -698,15 +699,17 @@ void main() {
       gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), u.uShadowMat && gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), u.uShadowK && gl.uniform2fv(u.uShadowK, ctx.shadowK), u.uDither && gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform1f(u.uEmis, e.emis), gl.uniform1f(u.uSnow, e.snow), gl.uniform1f(u.uWet, e.wet), gl.uniform1f(u.uTime, ctx.time), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.shadowTex), gl.uniform1i(u.uShadow, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, this.lightTex), gl.uniform1i(u.uLightMap, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, this.noiseTex), gl.uniform1i(u.uNoise, 3);
     }
     render(camera, env, time, canvasW, canvasH) {
-      let gl = this.gl, scale = camera.scale, linear = scale < 0.999, bw = Math.ceil(canvasW / scale) + 4, bh = Math.ceil(canvasH / scale) + 4;
+      let gl = this.gl, scale = camera.scale, k = 1;
+      scale < 1 && (k = Math.min(1, scale * 2, 4096 * scale / (canvasW + 8), 4096 * scale / (canvasH + 8)));
+      let bs = scale / k, linear = bs < 0.999, bw = Math.ceil(canvasW / bs) + 4, bh = Math.ceil(canvasH / bs) + 4;
       bw += bw & 1, bh += bh & 1, bw = Math.min(bw, 4096), bh = Math.min(bh, 4096), this._ensureTargets(bw, bh);
-      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
+      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
-        gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+        gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 0), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
         for (let l of this.layers) l.shadow && l.shadow(ctx);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS), gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS), gl.clear(gl.DEPTH_BUFFER_BIT), gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), gl.disable(gl.POLYGON_OFFSET_FILL);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS), gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS), gl.clear(gl.DEPTH_BUFFER_BIT), gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 1), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), gl.disable(gl.POLYGON_OFFSET_FILL);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.lightFBO), gl.viewport(0, 0, this.lightSize, this.lightSize), gl.disable(gl.DEPTH_TEST), gl.clearColor(0, 0, 0, 1), gl.clear(gl.COLOR_BUFFER_BIT), gl.enable(gl.BLEND), gl.blendFunc(gl.ONE, gl.ONE);
       for (let l of this.layers) l.light && l.light(ctx);
@@ -715,8 +718,8 @@ void main() {
         let p2 = this.progSky;
         gl.useProgram(p2.program), gl.uniform3fv(p2.u.uTop, env.skyTop), gl.uniform3fv(p2.u.uBottom, env.skyBottom), gl.uniform1f(p2.u.uStars, env.stars), gl.uniform1f(p2.u.uTime, time), gl.uniform2f(p2.u.uBuf, bw, bh), gl.uniform1f(p2.u.uRotA, camera.angle), gl.uniform3fv(p2.u.uMoon, env.moon);
         {
-          let c = camera.project(117 / 2, 117 / 2, -21), t = camera.project(camera.x, camera.y, 0), sx = bw / 2 + (c[0] - Math.floor(t[0])), sy = bh / 2 - (c[1] - Math.floor(t[1]));
-          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 117 * 32 * 0.62, 117 * (32 / 2) * 0.62);
+          let c = camera.project(117 / 2, 117 / 2, -21), sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
+          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 117 * 32 * 0.62 * k, 117 * (32 / 2) * 0.62 * k);
         }
         gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
@@ -735,7 +738,7 @@ void main() {
       }, hw = bw >> 1, hh = bh >> 1, qw = bw >> 2, qh = bh >> 2;
       blur(this.glowTex, this.fA, hw, hh, 1 / bw, 0, 1), blur(this.bA, this.fB, hw, hh, 0, 1 / hh, 1), blur(this.bB, this.fC, qw, qh, 2 / hw, 0, 1), blur(this.bC, this.fD, qw, qh, 0, 2 / qh, 1), gl.bindFramebuffer(gl.FRAMEBUFFER, null), gl.viewport(0, 0, canvasW, canvasH), setFilter(gl, this.sceneTex, linear ? gl.LINEAR : gl.NEAREST);
       let p = this.progComp, u = p.u;
-      return gl.useProgram(p.program), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.sceneTex), gl.uniform1i(u.uScene, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.bB), gl.uniform1i(u.uBloom, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, this.bD), gl.uniform1i(u.uBloom2, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, this.depthTex), gl.uniform1i(u.uDepth, 3), gl.uniform2f(u.uBuf, bw, bh), gl.uniform2f(u.uCanvas, canvasW, canvasH), gl.uniform1f(u.uScale, scale), gl.uniform2f(u.uFrac, frac[0], frac[1]), gl.uniform1f(u.uBloomK, env.bloom), gl.uniform3fv(u.uGrade, env.grade), gl.uniform1f(u.uSat, env.sat), gl.uniform1f(u.uVignette, 0.35), gl.uniform1f(u.uOutline, env.outline), gl.uniform1f(u.uFlash, env.flash), gl.uniform1f(u.uLinear, linear ? 1 : 0), gl.uniform4fv(u.uFog, env.fogv || [0, 0, 0, 0]), gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3), gl.bindVertexArray(null), ctx;
+      return gl.useProgram(p.program), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.sceneTex), gl.uniform1i(u.uScene, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.bB), gl.uniform1i(u.uBloom, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, this.bD), gl.uniform1i(u.uBloom2, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, this.depthTex), gl.uniform1i(u.uDepth, 3), gl.uniform2f(u.uBuf, bw, bh), gl.uniform2f(u.uCanvas, canvasW, canvasH), gl.uniform1f(u.uScale, bs), gl.uniform2f(u.uFrac, frac[0], frac[1]), gl.uniform1f(u.uBloomK, env.bloom), gl.uniform3fv(u.uGrade, env.grade), gl.uniform1f(u.uSat, env.sat), gl.uniform1f(u.uVignette, 0.35), gl.uniform1f(u.uOutline, env.outline), gl.uniform1f(u.uFlash, env.flash), gl.uniform1f(u.uLinear, linear ? 1 : 0), gl.uniform4fv(u.uFog, env.fogv || [0, 0, 0, 0]), gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3), gl.bindVertexArray(null), ctx;
     }
   };
 
@@ -806,10 +809,11 @@ void main() {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), xr = 1, yr = 1, wx = c * xr + s * yr, wy = -s * xr + c * yr, l = Math.hypot(wx, wy, 1);
       return [wx / l, wy / l, 1 / l];
     }
-    // Build view-projection for a buffer of bw x bh art pixels.
-    matrices(bw, bh) {
-      let c = Math.cos(this.angle), s = Math.sin(this.angle), t = this.project(this.x, this.y, 0), tsx = Math.floor(t[0]), tsy = Math.floor(t[1]), fx = t[0] - tsx, fy = t[1] - tsy, D = DEPTH_RANGE, m = new Float32Array(16), kx = 2 / bw, ky = 2 / bh;
-      return m[0] = HX * (c - s) * kx, m[4] = -HX * (s + c) * kx, m[8] = 0, m[12] = (HX * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx, m[1] = -HY * (c + s) * ky, m[5] = -HY * (c - s) * ky, m[9] = HZ * ky, m[13] = -(HY * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky, m[2] = -(c + s) / D, m[6] = -(c - s) / D, m[10] = 0, m[14] = ((c + s) * CX + (c - s) * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
+    // Build view-projection for a buffer of bw x bh pixels holding k buffer pixels per art pixel
+    // (k = 1 normally; below 1 when zoomed far out, so the buffer never grows past ~2x the canvas).
+    matrices(bw, bh, k = 1) {
+      let c = Math.cos(this.angle), s = Math.sin(this.angle), t0 = this.project(this.x, this.y, 0), t = [t0[0] * k, t0[1] * k], tsx = Math.floor(t[0]), tsy = Math.floor(t[1]), fx = t[0] - tsx, fy = t[1] - tsy, HXk = HX * k, HYk = HY * k, HZk = HZ * k, D = DEPTH_RANGE, m = new Float32Array(16), kx = 2 / bw, ky = 2 / bh;
+      return m[0] = HXk * (c - s) * kx, m[4] = -HXk * (s + c) * kx, m[8] = 0, m[12] = (HXk * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx, m[1] = -HYk * (c + s) * ky, m[5] = -HYk * (c - s) * ky, m[9] = HZk * ky, m[13] = -(HYk * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky, m[2] = -(c + s) / D, m[6] = -(c - s) / D, m[10] = 0, m[14] = ((c + s) * CX + (c - s) * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
     }
   };
 
@@ -1215,7 +1219,7 @@ void main() {
     // does not receive sun shadow (e.g. emissive signage)
     FLAT: 128
     // no directional face shading (sprites-like)
-  }, CAST = { NONE: 128, SOLID: 64 }, GRP = {
+  }, CAST = { NONE: 128, SOLID: 64, DETAIL: 32 }, GRP = {
     ALWAYS: 0,
     SPRING: 1,
     SUMMER: 2,
@@ -1246,7 +1250,17 @@ void main() {
   }
   var MeshBuilder = class {
     constructor() {
-      this.pos = new Float32Array(3 * 4096), this.uv = new Float32Array(2 * 4096), this.rect = new Uint16Array(4 * 4096), this.nrm = new Int8Array(4 * 4096), this.info = new Uint8Array(4 * 4096), this.idx = new Uint32Array(6 * 2048), this.nv = 0, this.ni = 0, this.defaultGroup = GRP.ALWAYS;
+      this.pos = new Float32Array(3 * 4096), this.uv = new Float32Array(2 * 4096), this.rect = new Uint16Array(4 * 4096), this.nrm = new Int8Array(4 * 4096), this.info = new Uint8Array(4 * 4096), this.idx = new Uint32Array(6 * 2048), this.nv = 0, this.ni = 0, this.defaultGroup = GRP.ALWAYS, this.detail = !0;
+    }
+    // geometry created inside fn is a building body (shades trees)
+    body(fn) {
+      let d = this.detail;
+      this.detail = !1;
+      try {
+        return fn();
+      } finally {
+        this.detail = d;
+      }
     }
     _ensure(nv, ni) {
       let v = this.nv + nv, i = this.ni + ni;
@@ -1254,7 +1268,7 @@ void main() {
     }
     _v(p, u, v, tex, n, mat, group, seed) {
       let k = this.nv++;
-      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex.x, this.rect[k * 4 + 1] = tex.y, this.rect[k * 4 + 2] = tex.w, this.rect[k * 4 + 3] = tex.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = 0, this.info[k * 4] = tex.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group | (tex.cast === "none" ? CAST.NONE : tex.cast === "solid" ? CAST.SOLID : 0), this.info[k * 4 + 3] = seed & 255, k;
+      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex.x, this.rect[k * 4 + 1] = tex.y, this.rect[k * 4 + 2] = tex.w, this.rect[k * 4 + 3] = tex.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = 0, this.info[k * 4] = tex.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group | (tex.cast === "none" ? CAST.NONE : tex.cast === "solid" ? CAST.SOLID : 0) | (this.detail ? CAST.DETAIL : 0), this.info[k * 4 + 3] = seed & 255, k;
     }
     // p0..p3: TL, TR, BR, BL as seen from the front. uvs: [[u,v] x4]
     quad(p0, p1, p2, p3, uvs, tex, n, mat = 0, group = this.defaultGroup, seed = 0) {
@@ -2526,13 +2540,13 @@ void main() {
           drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 15921126, sill: 10132120, t: rng.next(), curtain: rng.chance(0.25) ? rng.pick(PAL.curtains) : null, blinds: rng.chance(0.2) }, rng);
         }
       }
-    }), sideTex = style === "brownstone" ? S2.brownstone : style === "limestone" ? S2.limestone : S2.brickRed, top = rng.pick([S2.roofSilver, S2.roofTar, S2.roofSilver, S2.roofGravel]), side = { t: o.sideTex ?? sideTex }, aabb = fr.box(mb, a0, a0 + W, sb, sb + D, z0, z0 + H, {
+    }), sideTex = style === "brownstone" ? S2.brownstone : style === "limestone" ? S2.limestone : S2.brickRed, top = rng.pick([S2.roofSilver, S2.roofTar, S2.roofSilver, S2.roofGravel]), side = { t: o.sideTex ?? sideTex }, aabb = mb.body(() => fr.box(mb, a0, a0 + W, sb, sb + D, z0, z0 + H, {
       front,
       back,
       left: o.leftTex ?? side,
       right: o.rightTex ?? side,
       top: { t: top, world: !0 }
-    });
+    }));
     markHeight(C.world, ...aabb, z0 + H);
     let corn = C.atlas.shared("cornice_" + corniceC, 64, 14, (p) => {
       corniceBand(p, 0, 0, 64, 14, corniceC);
@@ -2681,7 +2695,7 @@ void main() {
     }), top = rng.pick([S2.roofTar, S2.roofSilver, S2.roofGravel]), sides = {
       left: o.cornerSide === "L" ? sideFacade : plainSide,
       right: o.cornerSide === "R" ? sideFacade : plainSide
-    }, aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back, ...sides, top: { t: top, world: !0 } });
+    }, aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back, ...sides, top: { t: top, world: !0 } }));
     markHeight(C.world, ...aabb, z0 + H);
     let zTop = z0 + H, toZ = (ty) => zTop - ty / 32, toA = (tx) => a0 + tx / 32, corn = C.atlas.shared("wcornice_" + corniceC, 64, 22, (p) => {
       corniceBand(p, 0, 0, 64, 22, corniceC);
@@ -2853,11 +2867,11 @@ void main() {
   var seedCounter = 1;
   function section(C, x0, y0, x1, y1, z0, z1, side, top, opt = {}) {
     let seed = opt.seed ?? seedCounter++ % 250 + 1, mat = opt.mat ?? MAT.OFFICE, f = { t: side, mat, seed }, faces = { px: f, nx: f, py: f, ny: f };
-    top && (faces.pz = { t: top, world: !0 }), opt.faces && Object.assign(faces, opt.faces), C.mb.box(x0, y0, z0, x1, y1, z1, faces, { seed }), markHeight(C.world, x0, y0, x1, y1, z1);
+    top && (faces.pz = { t: top, world: !0 }), opt.faces && Object.assign(faces, opt.faces), C.mb.body(() => C.mb.box(x0, y0, z0, x1, y1, z1, faces, { seed })), markHeight(C.world, x0, y0, x1, y1, z1);
   }
   function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
     let h = Math.round((z1 - z0) * 32), wx = Math.round((x1 - x0) * 32), wy = Math.round((y1 - y0) * 32), faces = {}, mk = (w, i) => ({ t: region2(C, w, h, (p) => fn(p, w, h, i)), mat: opt.mat ?? MAT.OFFICE });
-    faces.py = mk(wx, 0), faces.px = mk(wy, 1), faces.ny = mk(wx, 2), faces.nx = mk(wy, 3), top && (faces.pz = { t: top, world: !0 }), C.mb.box(x0, y0, z0, x1, y1, z1, faces), markHeight(C.world, x0, y0, x1, y1, z1);
+    faces.py = mk(wx, 0), faces.px = mk(wy, 1), faces.ny = mk(wx, 2), faces.nx = mk(wy, 3), top && (faces.pz = { t: top, world: !0 }), C.mb.body(() => C.mb.box(x0, y0, z0, x1, y1, z1, faces)), markHeight(C.world, x0, y0, x1, y1, z1);
   }
   function beacon(C, x, y, z) {
     C.world.beacons.push({ x, y, z });
@@ -2922,7 +2936,7 @@ void main() {
       for (let y = 0; y < 64; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 ? 15790838 : x % 8 === 1 ? 13949152 : y % 16 === 0 ? 10133674 : 11844292);
       for (let y = 8; y < 64; y += 16) for (let x = 4; x < 32; x += 8) p.set(x, y, 16777215, 254);
     });
-    C.mb.pyramid(cx - 0.75, cy - 0.75, cx + 0.75, cy + 0.75, z + 6, z + 14, spire, { mat: MAT.GLASS }), beacon(C, cx, cy, z + 14.1), C.world.perches.push({ x: cx + 2, y: cy + 2, z: z + 0.5 }), C.world.lamps.push({ x: cx, y: cy + 3, z, r: 3, color: [1, 0.9, 0.7], k: 0.15, kind: "up" }), C.world.officeDoors.push(...lobbyDoors(cx, cy, 8, 8)), plaza(C, L, { x0: cx - 8, y0: cy - 8, x1: cx + 8, y1: cy + 8 });
+    C.mb.body(() => C.mb.pyramid(cx - 0.75, cy - 0.75, cx + 0.75, cy + 0.75, z + 6, z + 14, spire, { mat: MAT.GLASS })), beacon(C, cx, cy, z + 14.1), C.world.perches.push({ x: cx + 2, y: cy + 2, z: z + 0.5 }), C.world.lamps.push({ x: cx, y: cy + 3, z, r: 3, color: [1, 0.9, 0.7], k: 0.15, kind: "up" }), C.world.officeDoors.push(...lobbyDoors(cx, cy, 8, 8)), plaza(C, L, { x0: cx - 8, y0: cy - 8, x1: cx + 8, y1: cy + 8 });
   }
   function lobbyDoors(cx, cy, rx, ry) {
     return [
@@ -2956,7 +2970,7 @@ void main() {
       for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) p.set(x, y, y % 4 === 0 ? 4874092 : y % 4 === 1 ? 6980498 : 9216946);
       p.vline(0, 0, 24, 12110034), p.vline(1, 0, 24, 10137790);
     });
-    section(C, x0 + 0.75, y0 + 0.75, x1 - 0.75, y1 - 0.75, z0 + 44.5, z0 + 47.5, louv, S2.roofSilver, { mat: MAT.GLASS, seed: 62 }), C.mb.solid(x0, y0, z0 + 44.5, x1, y0 + 0.25, z0 + 48.5, module, S2.metal, { mat: MAT.GLASS }), C.mb.solid(x0 + 4, y0 + 4, z0 + 47.5, x0 + 4.25, y0 + 4.25, z0 + 54, S2.metal, S2.metal), beacon(C, x0 + 4.1, y0 + 4.1, z0 + 54.1), hvacAt(C, x0 + 2, y0 + 3, z0 + 47.5), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y1 + 0.9, dx: (x0 + x1) / 2, dy: y1 - 0.2, kind: "office" }), C.world.officeDoors.push({ x: x1 + 0.9, y: (y0 + y1) / 2, dx: x1 - 0.2, dy: (y0 + y1) / 2, kind: "office" }), band(C, L.x0 + 1, L.y0 + 14, L.x0 + 7, L.y1 - 1, z0, z0 + 2.25, (p, w, h) => {
+    section(C, x0 + 0.75, y0 + 0.75, x1 - 0.75, y1 - 0.75, z0 + 44.5, z0 + 47.5, louv, S2.roofSilver, { mat: MAT.GLASS, seed: 62 }), C.mb.body(() => C.mb.solid(x0, y0, z0 + 44.5, x1, y0 + 0.25, z0 + 48.5, module, S2.metal, { mat: MAT.GLASS })), C.mb.solid(x0 + 4, y0 + 4, z0 + 47.5, x0 + 4.25, y0 + 4.25, z0 + 54, S2.metal, S2.metal), beacon(C, x0 + 4.1, y0 + 4.1, z0 + 54.1), hvacAt(C, x0 + 2, y0 + 3, z0 + 47.5), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y1 + 0.9, dx: (x0 + x1) / 2, dy: y1 - 0.2, kind: "office" }), C.world.officeDoors.push({ x: x1 + 0.9, y: (y0 + y1) / 2, dx: x1 - 0.2, dy: (y0 + y1) / 2, kind: "office" }), band(C, L.x0 + 1, L.y0 + 14, L.x0 + 7, L.y1 - 1, z0, z0 + 2.25, (p, w, h) => {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(6262440, 1.1 - y / h * 0.2), winCode(0.04));
       for (let x = 0; x < w; x += 24)
         p.vline(x, 0, h, 13161692), p.vline(x + 1, 0, h, 10136244);
@@ -3001,7 +3015,7 @@ void main() {
         hash2i(x >> 1, y >> 2, 7) > 0.86 && (c = mixc(c, 9099456, 0.4)), p.set(x, y, c);
       }
     });
-    C.mb.pyramid(x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 30.5, z0 + 36, copper, { mat: MAT.SNOW }), C.mb.solid((x0 + x1) / 2 - 0.05, (y0 + y1) / 2 - 0.05, z0 + 35.5, (x0 + x1) / 2 + 0.05, (y0 + y1) / 2 + 0.05, z0 + 38, S2.metal, S2.metal), beacon(C, (x0 + x1) / 2, (y0 + y1) / 2, z0 + 38.1), waterTower(C, x0 + 3, y0 + 2.5, z0 + 15.5, 0.9), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y0 - 0.9, dx: (x0 + x1) / 2, dy: y0 + 0.2, kind: "office" }), hotel(C, { x0: L.x0 + 1, y0: L.y0 + 12, x1: L.x1 - 1, y1: L.y1 - 0.5 });
+    C.mb.body(() => C.mb.pyramid(x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 30.5, z0 + 36, copper, { mat: MAT.SNOW })), C.mb.solid((x0 + x1) / 2 - 0.05, (y0 + y1) / 2 - 0.05, z0 + 35.5, (x0 + x1) / 2 + 0.05, (y0 + y1) / 2 + 0.05, z0 + 38, S2.metal, S2.metal), beacon(C, (x0 + x1) / 2, (y0 + y1) / 2, z0 + 38.1), waterTower(C, x0 + 3, y0 + 2.5, z0 + 15.5, 0.9), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y0 - 0.9, dx: (x0 + x1) / 2, dy: y0 + 0.2, kind: "office" }), hotel(C, { x0: L.x0 + 1, y0: L.y0 + 12, x1: L.x1 - 1, y1: L.y1 - 0.5 });
   }
   function hotel(C, R2) {
     let S2 = sharedTex(C), { rng } = C, z0 = C.z0, brickMod = C.atlas.shared("hotel_mod", 32, 48, (p) => {
@@ -3012,7 +3026,9 @@ void main() {
         p.rect(x, 26, 28, LH - 26, 14200906), p.rect(x + 2, 28, 24, LH - 28, 4216685, winCode(0.02)), p.vline(x + 14, 28, LH - 28, 14200906), p.hline(x + 2, 38, 24, 14200906), p.rect(x + 11, LH - 26, 2, 8, 15782e3), p.rect(x + 15, LH - 26, 2, 8, 15782e3);
       signBoard(p, 16, 9, p.w - 32, 14, "THE PIXEL HOTEL", { bg: 1776411, fg: 16767055, t: 0.02 });
     }), shaft = { t: brickMod, mat: 0, seed: 91 }, H = 2.5 + 12 * 1.5;
-    C.mb.box(R2.x0, R2.y0, z0, R2.x1, R2.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S2.brickTan }, nx: { t: S2.brickTan } }), C.mb.box(R2.x0, R2.y0, z0 + 2.5, R2.x1, R2.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S2.roofTar, world: !0 } }), markHeight(C.world, R2.x0, R2.y0, R2.x1, R2.y1, z0 + H);
+    C.mb.body(() => {
+      C.mb.box(R2.x0, R2.y0, z0, R2.x1, R2.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S2.brickTan }, nx: { t: S2.brickTan } }), C.mb.box(R2.x0, R2.y0, z0 + 2.5, R2.x1, R2.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S2.roofTar, world: !0 } });
+    }), markHeight(C.world, R2.x0, R2.y0, R2.x1, R2.y1, z0 + H);
     let can = region2(C, Math.round((W - 4) * 32), 10, (p) => {
       p.rect(0, 0, p.w, 10, 1776411), p.hline(0, 0, p.w, 14200906), p.hline(0, 9, p.w, 10123818);
       for (let x = 2; x < p.w; x += 5)
@@ -3048,7 +3064,7 @@ void main() {
       }
       let gy = Math.round((band2 + nF * fH) * 32), kind2 = o.shop ?? rng.pick(["gallery", "boutique", "coffee", "books", "boutique", "diner", "pharmacy"]);
       p.shopInfo = drawShopfront(p, 0, gy, tw, th - gy, kind2, rng, { doorLeft: rng.chance(0.5), signH: 14 });
-    }), side = S2.brickRed, aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: side, left: side, right: side, top: { t: S2.roofTar, world: !0 } });
+    }), side = S2.brickRed, aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: side, left: side, right: side, top: { t: S2.roofTar, world: !0 } }));
     markHeight(C.world, ...aabb, z0 + H);
     let zTop = z0 + H, corn = C.atlas.shared("loft_corn_" + paint, 64, 21, (p) => corniceBand(p, 0, 0, 64, 21, shade(paint, 0.9)));
     fr.box(mb, a0 - 0.0625, a0 + W + 0.0625, -0.35, 0.02, zTop - 0.6, zTop + 0.06, { front: corn, left: corn, right: corn, top: { t: S2.concrete } }), rng.chance(0.6) && fireEscape(C, fr, a0 + W * 0.2, a0 + W * 0.8, 0, z0 + gH, fH, nF);
@@ -3573,7 +3589,7 @@ void main() {
     for (let x = 14; x < 8 + dw - 16; x += 16)
       p.rect(x, gy + 16, 10, 8, 4216685, winCode(0.1)), p.frame(x - 1, gy + 15, 12, 10, 15921126);
     p.text7(Math.floor(8 + dw / 2 - 3), gy + 30, "7", 15909424, 255, 2), drawDoor(p, tw - 26, gy + 12, 18, th - gy - 12, { color: 13119532, glass: !0 });
-    let back = S2.brickRed, aabb = fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back, left: back, right: back, top: { t: S2.roofTar, world: !0 } });
+    let back = S2.brickRed, aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back, left: back, right: back, top: { t: S2.roofTar, world: !0 } }));
     markHeight(C.world, ...aabb, 0.125 + H), C.addFlag(fr, a0 + W - 1, -0.05, 0.125 + 4.2, "us");
     let bay = fr.pt(a0 + (dw / 2 + 8) / 32, -0.5);
     C.world.firehouse = { x: bay[0], y: bay[1], n: fr.n, door: fr.pt(a0 + (dw / 2 + 8) / 32, 1.5) }, C.world.lamps.push({ x: bay[0], y: bay[1], z: 2.5, r: 2.4, color: [1, 0.9, 0.7], k: 0.6, kind: "shop" });
@@ -3591,7 +3607,7 @@ void main() {
       p.rect(x, gy + 24, 20, 44, 14200906), p.rect(x + 2, gy + 26, 16, 42, 4216685, winCode(0.02)), p.vline(x + 10, gy + 26, 42, 14200906), p.rect(x + 7, gy + 44, 2, 6, 15782e3), p.rect(x + 11, gy + 44, 2, 6, 15782e3);
     for (let x of [2, tw - 10])
       p.rect(x, gy + 24, 8, 30, 14200906), p.rect(x + 1, gy + 25, 6, 28, 15918784, winCode(0.02, !0)), p.rect(x + 2, gy + 28, 4, 10, 13119532, winCode(0.02, !0));
-    let aabb = fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back: S2.brickBrown, left: S2.brickBrown, right: S2.brickBrown, top: { t: S2.roofTar, world: !0 } });
+    let aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back: S2.brickBrown, left: S2.brickBrown, right: S2.brickBrown, top: { t: S2.roofTar, world: !0 } }));
     markHeight(C.world, ...aabb, 0.125 + H);
     let mw = Math.round((W - 1) * 32), MH = 28, marq = C.atlas.alloc(mw, MH), q = marq.p;
     q.rect(0, 0, mw, MH, 15921126), q.rect(0, 0, mw, 3, 2763310), q.rect(0, MH - 3, mw, 3, 2763310);
@@ -5065,6 +5081,7 @@ layout(location=4) in vec2 iB; // alpha, depth bias
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
 uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
+uniform float uK;    // buffer pixels per art pixel (below 1 when zoomed far out)
 out vec2 vUV;
 flat out vec4 vInfo;
 out vec3 vWorld;   // on the vertical axis through the anchor
@@ -5076,7 +5093,7 @@ void main() {
   bool flip = mod(flags, 2.0) >= 1.0;
   float w = iRect.z, h = iRect.w;
   float ax = flip ? w - iA.x : iA.x;
-  vec2 off = vec2(aCorner.x * w - ax, iA.y - aCorner.y * h);
+  vec2 off = vec2(aCorner.x * w - ax, iA.y - aCorner.y * h) * uK;
   vec2 sp = px + off;
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
@@ -5218,7 +5235,7 @@ void main() {
     draw(ctx) {
       if (!this.count) return;
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uShadowKS, ctx.shadowKS), gl.uniform2fv(u.uRight, ctx.right), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.activeTexture(gl.TEXTURE5), gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS), gl.uniform1i(u.uShadowS, 5), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uShadowKS, ctx.shadowKS), gl.uniform2fv(u.uRight, ctx.right), gl.uniform1f(u.uK, ctx.k), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.activeTexture(gl.TEXTURE5), gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS), gl.uniform1i(u.uShadowS, 5), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     }
   };
 
@@ -8121,7 +8138,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     computeZoomLevels() {
       let dpr = window.devicePixelRatio || 1;
-      return [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12].filter((d) => d / dpr >= 0.49 && d / dpr <= 6.01);
+      return [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12].filter((d) => d / dpr >= 0.124 && d / dpr <= 6.01);
     }
     h(tag, cls, html) {
       let e = document.createElement(tag);

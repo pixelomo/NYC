@@ -20,6 +20,7 @@ layout(location=4) in vec2 iB; // alpha, depth bias
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
 uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
+uniform float uK;    // buffer pixels per art pixel (below 1 when zoomed far out)
 out vec2 vUV;
 flat out vec4 vInfo;
 out vec3 vWorld;   // on the vertical axis through the anchor
@@ -31,7 +32,7 @@ void main() {
   bool flip = mod(flags, 2.0) >= 1.0;
   float w = iRect.z, h = iRect.w;
   float ax = flip ? w - iA.x : iA.x;
-  vec2 off = vec2(aCorner.x * w - ax, iA.y - aCorner.y * h);
+  vec2 off = vec2(aCorner.x * w - ax, iA.y - aCorner.y * h) * uK;
   vec2 sp = px + off;
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
@@ -225,6 +226,7 @@ export class SpriteLayer {
     gl.uniform2fv(u.uShadowK, ctx.shadowK);
     gl.uniform2fv(u.uShadowKS, ctx.shadowKS);
     gl.uniform2fv(u.uRight, ctx.right);
+    gl.uniform1f(u.uK, ctx.k);
     gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);

@@ -117,25 +117,28 @@ export class Camera {
     const l = Math.hypot(wx, wy, 1);
     return [wx / l, wy / l, 1 / l];
   }
-  // Build view-projection for a buffer of bw x bh art pixels.
-  matrices(bw, bh) {
+  // Build view-projection for a buffer of bw x bh pixels holding k buffer pixels per art pixel
+  // (k = 1 normally; below 1 when zoomed far out, so the buffer never grows past ~2x the canvas).
+  matrices(bw, bh, k = 1) {
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
-    const t = this.project(this.x, this.y, 0);
+    const t0 = this.project(this.x, this.y, 0);
+    const t = [t0[0] * k, t0[1] * k];
     const tsx = Math.floor(t[0]), tsy = Math.floor(t[1]);
     const fx = t[0] - tsx, fy = t[1] - tsy;
+    const HXk = HX * k, HYk = HY * k, HZk = HZ * k;
     const D = DEPTH_RANGE;
     const m = new Float32Array(16);
     const kx = 2 / bw, ky = 2 / bh;
     // clip_x
-    m[0] = HX * (c - s) * kx;
-    m[4] = -HX * (s + c) * kx;
+    m[0] = HXk * (c - s) * kx;
+    m[4] = -HXk * (s + c) * kx;
     m[8] = 0;
-    m[12] = (HX * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx;
+    m[12] = (HXk * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx;
     // clip_y
-    m[1] = -HY * (c + s) * ky;
-    m[5] = -HY * (c - s) * ky;
-    m[9] = HZ * ky;
-    m[13] = -(HY * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky;
+    m[1] = -HYk * (c + s) * ky;
+    m[5] = -HYk * (c - s) * ky;
+    m[9] = HZk * ky;
+    m[13] = -(HYk * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky;
     // clip_z
     m[2] = -(c + s) / D;
     m[6] = -(c - s) / D;

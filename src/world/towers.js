@@ -22,7 +22,7 @@ function section(C, x0, y0, x1, y1, z0, z1, side, top, opt = {}) {
   const faces = { px: f, nx: f, py: f, ny: f };
   if (top) faces.pz = { t: top, world: true };
   if (opt.faces) Object.assign(faces, opt.faces);
-  C.mb.box(x0, y0, z0, x1, y1, z1, faces, { seed });
+  C.mb.body(() => C.mb.box(x0, y0, z0, x1, y1, z1, faces, { seed }));
   markHeight(C.world, x0, y0, x1, y1, z1);
 }
 
@@ -37,7 +37,7 @@ function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
   faces.ny = mk(wx, 2);
   faces.nx = mk(wy, 3);
   if (top) faces.pz = { t: top, world: true };
-  C.mb.box(x0, y0, z0, x1, y1, z1, faces);
+  C.mb.body(() => C.mb.box(x0, y0, z0, x1, y1, z1, faces));
   markHeight(C.world, x0, y0, x1, y1, z1);
 }
 
@@ -136,7 +136,7 @@ export function decoTower(C, L) {
     for (let y = 0; y < 64; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 ? 0xf0f2f6 : x % 8 === 1 ? 0xd4d8e0 : y % 16 === 0 ? 0x9aa0aa : 0xb4bac4);
     for (let y = 8; y < 64; y += 16) for (let x = 4; x < 32; x += 8) p.set(x, y, 0xffffff, 254);
   });
-  C.mb.pyramid(cx - 0.75, cy - 0.75, cx + 0.75, cy + 0.75, z + 6, z + 14, spire, { mat: MAT.GLASS });
+  C.mb.body(() => C.mb.pyramid(cx - 0.75, cy - 0.75, cx + 0.75, cy + 0.75, z + 6, z + 14, spire, { mat: MAT.GLASS }));
   beacon(C, cx, cy, z + 14.1);
   C.world.perches.push({ x: cx + 2, y: cy + 2, z: z + 0.5 });
   // uplights glow at night onto the crown base
@@ -199,7 +199,7 @@ export function glassTower(C, L) {
   });
   section(C, x0 + 0.75, y0 + 0.75, x1 - 0.75, y1 - 0.75, z0 + 44.5, z0 + 47.5, louv, S.roofSilver, { mat: MAT.GLASS, seed: 62 });
   // angled crown fin
-  C.mb.solid(x0, y0, z0 + 44.5, x1, y0 + 0.25, z0 + 48.5, module, S.metal, { mat: MAT.GLASS });
+  C.mb.body(() => C.mb.solid(x0, y0, z0 + 44.5, x1, y0 + 0.25, z0 + 48.5, module, S.metal, { mat: MAT.GLASS }));
   C.mb.solid(x0 + 4, y0 + 4, z0 + 47.5, x0 + 4.25, y0 + 4.25, z0 + 54, S.metal, S.metal);
   beacon(C, x0 + 4.1, y0 + 4.1, z0 + 54.1);
   hvacAt(C, x0 + 2, y0 + 3, z0 + 47.5);
@@ -292,7 +292,7 @@ export function limestoneOffice(C, L) {
       p.set(x, y, c);
     }
   });
-  C.mb.pyramid(x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 30.5, z0 + 36, copper, { mat: MAT.SNOW });
+  C.mb.body(() => C.mb.pyramid(x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 30.5, z0 + 36, copper, { mat: MAT.SNOW }));
   C.mb.solid((x0 + x1) / 2 - 0.05, (y0 + y1) / 2 - 0.05, z0 + 35.5, (x0 + x1) / 2 + 0.05, (y0 + y1) / 2 + 0.05, z0 + 38, S.metal, S.metal);
   beacon(C, (x0 + x1) / 2, (y0 + y1) / 2, z0 + 38.1);
   waterTower(C, x0 + 3, y0 + 2.5, z0 + 15.5, 0.9);
@@ -327,8 +327,10 @@ function hotel(C, R) {
   });
   const shaft = { t: brickMod, mat: 0, seed: 91 };
   const H = 2.5 + 12 * 1.5;
-  C.mb.box(R.x0, R.y0, z0, R.x1, R.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S.brickTan }, nx: { t: S.brickTan } });
-  C.mb.box(R.x0, R.y0, z0 + 2.5, R.x1, R.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S.roofTar, world: true } });
+  C.mb.body(() => {
+    C.mb.box(R.x0, R.y0, z0, R.x1, R.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S.brickTan }, nx: { t: S.brickTan } });
+    C.mb.box(R.x0, R.y0, z0 + 2.5, R.x1, R.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S.roofTar, world: true } });
+  });
   markHeight(C.world, R.x0, R.y0, R.x1, R.y1, z0 + H);
   // marquee canopy
   const can = region(C, Math.round((W - 4) * T), 10, (p) => {
@@ -401,7 +403,7 @@ export function loft(C, fr, a0, W, D, o = {}) {
     p.shopInfo = drawShopfront(p, 0, gy, tw, th - gy, kind, rng, { doorLeft: rng.chance(0.5), signH: 14 });
   });
   const side = S.brickRed;
-  const aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: side, left: side, right: side, top: { t: S.roofTar, world: true } });
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: side, left: side, right: side, top: { t: S.roofTar, world: true } }));
   markHeight(C.world, ...aabb, z0 + H);
   const zTop = z0 + H;
   // cornice

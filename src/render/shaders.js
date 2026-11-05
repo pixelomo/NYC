@@ -311,13 +311,14 @@ layout(location=2) in uvec4 aRect;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uShadowVP;
 uniform uint uVis;
+uniform uint uSkipDetail; // 1: building bodies only (the map trees sample)
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out uint vLayer;
 flat out uint vMat;
 void main() {
   // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aUV; vRect = aRect; vLayer = aInfo.x;
   vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);

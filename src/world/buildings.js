@@ -351,9 +351,9 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
   const sideTex = style === 'brownstone' ? S.brownstone : style === 'limestone' ? S.limestone : style === 'brick' ? S.brickRed : S.brickRed;
   const top = rng.pick([S.roofSilver, S.roofTar, S.roofSilver, S.roofGravel]);
   const side = { t: o.sideTex ?? sideTex };
-  const aabb = fr.box(mb, a0, a0 + W, sb, sb + D, z0, z0 + H, {
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, sb, sb + D, z0, z0 + H, {
     front, back, left: o.leftTex ?? side, right: o.rightTex ?? side, top: { t: top, world: true },
-  });
+  }));
   markHeight(C.world, ...aabb, z0 + H);
 
   // cornice (protruding)
@@ -569,7 +569,7 @@ export function walkup(C, fr, a0, W, D, o = {}) {
     left: o.cornerSide === 'L' ? sideFacade : plainSide,
     right: o.cornerSide === 'R' ? sideFacade : plainSide,
   };
-  const aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back, ...sides, top: { t: top, world: true } });
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back, ...sides, top: { t: top, world: true } }));
   markHeight(C.world, ...aabb, z0 + H);
   const zTop = z0 + H;
   const toZ = (ty) => zTop - ty / T;

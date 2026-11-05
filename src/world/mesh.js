@@ -18,7 +18,9 @@ export const MAT = {
 // Shadow-casting modes stored in the high bits of the group byte. A texture region can set
 // tex.cast = 'none' (fine railings, mesh, glass: their sub-texel shadows would shimmer) or
 // 'solid' (grated platforms, wire baskets: cast one stable shape, ignoring the holes).
-export const CAST = { NONE: 128, SOLID: 64 };
+// DETAIL marks everything except building bodies: details still cast on the ground and on people,
+// but trees (flat billboards) are only shaded by building bodies, so thin poles never streak them.
+export const CAST = { NONE: 128, SOLID: 64, DETAIL: 32 };
 
 // Visibility groups (bit index, below 32). CPU sets a 32-bit mask each frame.
 export const GRP = {
@@ -47,6 +49,13 @@ export class MeshBuilder {
     this.nv = 0;
     this.ni = 0;
     this.defaultGroup = GRP.ALWAYS;
+    this.detail = true;
+  }
+  // geometry created inside fn is a building body (shades trees)
+  body(fn) {
+    const d = this.detail;
+    this.detail = false;
+    try { return fn(); } finally { this.detail = d; }
   }
   _ensure(nv, ni) {
     const v = this.nv + nv, i = this.ni + ni;
@@ -74,7 +83,7 @@ export class MeshBuilder {
     this.nrm[k * 4 + 3] = 0;
     this.info[k * 4] = tex.layer;
     this.info[k * 4 + 1] = mat;
-    this.info[k * 4 + 2] = group | (tex.cast === 'none' ? CAST.NONE : tex.cast === 'solid' ? CAST.SOLID : 0);
+    this.info[k * 4 + 2] = group | (tex.cast === 'none' ? CAST.NONE : tex.cast === 'solid' ? CAST.SOLID : 0) | (this.detail ? CAST.DETAIL : 0);
     this.info[k * 4 + 3] = seed & 255;
     return k;
   }

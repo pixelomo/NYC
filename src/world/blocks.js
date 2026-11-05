@@ -327,7 +327,7 @@ function firehouse(C, fr, a0, W, D) {
   p.text7(Math.floor(8 + dw / 2 - 3), gy + 30, '7', 0xf2c230, 255, 2);
   drawDoor(p, tw - 26, gy + 12, 18, th - gy - 12, { color: 0xc8302c, glass: true });
   const back = S.brickRed;
-  const aabb = fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back, left: back, right: back, top: { t: S.roofTar, world: true } });
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back, left: back, right: back, top: { t: S.roofTar, world: true } }));
   markHeight(C.world, ...aabb, CURB + H);
   C.addFlag(fr, a0 + W - 1, -0.05, CURB + 4.2, 'us');
   const bay = fr.pt(a0 + (dw / 2 + 8) / T, -0.5);
@@ -364,7 +364,7 @@ function theater(C, fr, a0, W, D) {
   }
   // poster cases
   for (const x of [2, tw - 10]) { p.rect(x, gy + 24, 8, 30, 0xd8b04a); p.rect(x + 1, gy + 25, 6, 28, 0xf2e6c0, winCode(0.02, true)); p.rect(x + 2, gy + 28, 4, 10, 0xc8302c, winCode(0.02, true)); }
-  const aabb = fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back: S.brickBrown, left: S.brickBrown, right: S.brickBrown, top: { t: S.roofTar, world: true } });
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back: S.brickBrown, left: S.brickBrown, right: S.brickBrown, top: { t: S.roofTar, world: true } }));
   markHeight(C.world, ...aabb, CURB + H);
   // marquee with chasing bulbs
   const mw = Math.round((W - 1) * T);

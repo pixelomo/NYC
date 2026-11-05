@@ -219,13 +219,18 @@ export class Renderer {
 
   render(camera, env, time, canvasW, canvasH) {
     const gl = this.gl;
-    const scale = camera.scale;
-    const linear = scale < 0.999;
-    let bw = Math.ceil(canvasW / scale) + 4, bh = Math.ceil(canvasH / scale) + 4;
+    const scale = camera.scale; // device pixels per art pixel
+    // Zoomed out (scale < 1): shrink the art itself into the buffer (k buffer px per art px), rendering at
+    // most 2x the canvas resolution and filtering down, instead of a buffer of canvas/scale pixels.
+    let k = 1;
+    if (scale < 1) k = Math.min(1, scale * 2, (4096 * scale) / (canvasW + 8), (4096 * scale) / (canvasH + 8));
+    const bs = scale / k; // device pixels per buffer pixel
+    const linear = bs < 0.999;
+    let bw = Math.ceil(canvasW / bs) + 4, bh = Math.ceil(canvasH / bs) + 4;
     bw += bw & 1; bh += bh & 1;
     bw = Math.min(bw, 4096); bh = Math.min(bh, 4096);
     this._ensureTargets(bw, bh);
-    const { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh);
+    const { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k);
     const shadowOn = env.sunDir[2] > 0.02;
     const shadowMat = this.shadowMatrix(env.sunDir);
     // offset that turns buffer pixels into absolute art pixels (mod 4), so shadow dithering stays put while panning
@@ -233,7 +238,7 @@ export class Renderer {
     // world xy per art pixel along the screen's horizontal axis (sprite billboards lie in this plane)
     const ca = Math.cos(camera.angle), sa = Math.sin(camera.angle);
     const right = [(ca - sa) / (2 * T), -(sa + ca) / (2 * T)];
-    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
+    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
     const vis = env.vis >>> 0;
 
     // 1. Shadow map
@@ -250,6 +255,7 @@ export class Renderer {
       gl.useProgram(p.program);
       gl.uniformMatrix4fv(p.u.uShadowVP, false, shadowMat);
       gl.uniform1ui(p.u.uVis, vis);
+      gl.uniform1ui(p.u.uSkipDetail, 0);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
       gl.uniform1i(p.u.uAtlas, 0);
@@ -263,6 +269,7 @@ export class Renderer {
       gl.useProgram(p.program);
       gl.uniformMatrix4fv(p.u.uShadowVP, false, shadowMat);
       gl.uniform1ui(p.u.uVis, vis);
+      gl.uniform1ui(p.u.uSkipDetail, 1);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
       gl.uniform1i(p.u.uAtlas, 0);
@@ -300,9 +307,8 @@ export class Renderer {
       {
         // project the map centre well below the slab to place the drop shadow
         const c = camera.project(MAP / 2, MAP / 2, -BASE_DEPTH - 14);
-        const t = camera.project(camera.x, camera.y, 0);
-        const sx = bw / 2 + (c[0] - Math.floor(t[0])), sy = bh / 2 - (c[1] - Math.floor(t[1]));
-        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62, MAP * (T / 2) * 0.62);
+        const sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
+        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62 * k, MAP * (T / 2) * 0.62 * k);
       }
       gl.bindVertexArray(this.emptyVAO);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -384,7 +390,7 @@ export class Renderer {
     gl.uniform1i(u.uDepth, 3);
     gl.uniform2f(u.uBuf, bw, bh);
     gl.uniform2f(u.uCanvas, canvasW, canvasH);
-    gl.uniform1f(u.uScale, scale);
+    gl.uniform1f(u.uScale, bs);
     gl.uniform2f(u.uFrac, frac[0], frac[1]);
     gl.uniform1f(u.uBloomK, env.bloom);
     gl.uniform3fv(u.uGrade, env.grade);
