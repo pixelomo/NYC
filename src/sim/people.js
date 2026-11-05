@@ -82,8 +82,9 @@ export class People {
   palette(tpl) {
     const r = this.rng;
     const skin = r.pick(SKIN);
+    const hair = tpl.body === 'elder' ? r.pick([0x9a9a9a, 0xc8c8c4, 0xe8e8e4, 0x6a6a6a]) : r.pick(HAIR.slice(0, 7));
     const P = {
-      [S.SKIN]: skin, [S.HAIR]: r.pick(HAIR), [S.TOP]: r.pick(CLOTH), [S.TOP2]: r.pick(CLOTH), [S.BOTTOM]: tpl.bottom === 'pants' ? r.pick(DARKS.concat([0x3a5a8a, 0x3a5a8a, 0xb8a078])) : r.pick(CLOTH),
+      [S.SKIN]: skin, [S.HAIR]: hair, [S.TOP]: r.pick(CLOTH), [S.TOP2]: r.pick(CLOTH), [S.BOTTOM]: tpl.bottom === 'pants' ? r.pick(DARKS.concat([0x3a5a8a, 0x3a5a8a, 0xb8a078])) : r.pick(CLOTH),
       [S.SHOES]: r.pick([0x1e1e22, 0xf2f2ee, 0x5a3a2a, 0xd8302c, 0x2a5fb8]), [S.COAT]: r.pick([0x1e1e22, 0x7a1f1f, 0x2a3346, 0xb8a078, 0x2f6a3a, 0xd8302c, 0x8a2a8a, 0xf2c230, 0x5aa0d8]),
       [S.HAT]: r.pick(CLOTH), [S.SCARF]: r.pick([0xd8302c, 0xf2c230, 0x2a5fb8, 0xe58fb5, 0x2f8a46]), [S.BAG]: r.pick([0x5a3a2a, 0x1e1e22, 0xd8302c, 0xb8a078, 0x2a5fb8]),
       [S.DARK]: 0x1a1414, [S.WHITE]: 0xf2f2ee, [S.ITEM]: r.pick([0x1e1e22, 0xd8302c, 0x2a5fb8, 0xf2c230, 0x2f8a46, 0xe58fb5, 0x7a4fff]), [S.ITEM2]: r.pick(CLOTH), [S.SOCK]: 0xf2f2ee,
@@ -437,7 +438,9 @@ export class People {
       case 'wait': {
         p.anim = 'idle';
         const w = this.walkState(p.waitCross);
-        if (w === 'walk') {
+        const cw = p.path && p.path[p.pi];
+        const busy = w === 'walk' && this.city.traffic.flashing && cw && this.city.traffic.movingCarNear((p.x + cw.x) / 2, (p.y + cw.y) / 2, 6);
+        if (w === 'walk' && !busy) {
           p.state = 'walk';
           p.crossing = p.waitCross;
           this.cross.set(this.crossKey(p.crossing), (this.cross.get(this.crossKey(p.crossing)) || 0) + 1);
@@ -530,7 +533,9 @@ export class People {
     // crossing check at the start of a crosswalk edge
     if (wp.cross && p.crossing !== wp.cross && !p.passedCheck) {
       const w = this.walkState(wp.cross);
-      if (w !== 'walk') { p.state = 'wait'; p.waitCross = wp.cross; this.faceTo(p, wp.x, wp.y); return; }
+      const prevN = p.path[p.pi - 1];
+      const carNear = w === 'walk' && this.city.traffic.flashing && this.city.traffic.movingCarNear((prevN.x + wp.x) / 2, (prevN.y + wp.y) / 2, 6);
+      if (w !== 'walk' || carNear) { p.state = 'wait'; p.waitCross = wp.cross; this.faceTo(p, wp.x, wp.y); return; }
       p.crossing = wp.cross;
       this.cross.set(this.crossKey(p.crossing), (this.cross.get(this.crossKey(p.crossing)) || 0) + 1);
     }

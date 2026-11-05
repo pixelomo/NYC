@@ -57,3 +57,74 @@ html, body {
 }
 @keyframes load { from { width: 5%; } to { width: 100%; } }
 #loading-msg { font-family: 'VT323', monospace; font-size: 22px; color: #9fb4ff; }
+
+/* ---------- HUD ---------- */
+#ui { position: fixed; inset: 0; pointer-events: none; z-index: 10; }
+#ui .panel, #ui .btn, #ui .slider, #ui .sel, #ui .topright { pointer-events: auto; }
+.panel {
+  background: rgba(14, 18, 38, 0.82);
+  border: 3px solid #f4f1e8;
+  box-shadow: 4px 4px 0 rgba(0, 0, 0, 0.45);
+  color: #f4f1e8;
+}
+.clock { position: absolute; left: 14px; top: 14px; padding: 8px 14px 10px; min-width: 210px; }
+.clock .time { font-family: 'VT323', monospace; font-size: 44px; line-height: 40px; color: #ffcf3f; text-shadow: 3px 3px 0 #d2452b; }
+.clock .day { font-size: 12px; letter-spacing: 1px; margin-top: 4px; }
+.clock .wx { font-size: 12px; color: #9fd8ff; margin-top: 3px; }
+.title {
+  position: absolute; left: 50%; top: 12px; transform: translateX(-50%);
+  font-size: 22px; letter-spacing: 3px; color: #f4f1e8;
+  text-shadow: 3px 3px 0 #1f2a55; pointer-events: none; opacity: 0.92;
+}
+.title span { color: #ffcf3f; text-shadow: 3px 3px 0 #d2452b; margin-left: 4px; }
+.topright { position: absolute; right: 14px; top: 14px; display: flex; gap: 8px; }
+.toolbar {
+  position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+  display: flex; gap: 10px; padding: 8px 10px; align-items: center; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 28px);
+}
+.group { display: flex; gap: 5px; align-items: center; padding: 0 4px; border-right: 2px dashed rgba(244, 241, 232, 0.25); }
+.group:last-child { border-right: none; }
+.btn {
+  font-family: 'Silkscreen', monospace; font-size: 14px; color: #f4f1e8;
+  background: #26305e; border: 2px solid #f4f1e8; min-width: 34px; height: 32px; padding: 0 8px;
+  cursor: pointer; box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.5); line-height: 1;
+}
+.btn:hover { background: #3a4a8a; }
+.btn:active { transform: translate(2px, 2px); box-shadow: none; }
+.btn.on { background: #d2452b; color: #fff; }
+.btn.season { font-size: 16px; min-width: 34px; }
+.btn.small { font-size: 10px; }
+.topright .btn { background: rgba(14, 18, 38, 0.82); border-width: 3px; height: 36px; }
+.topright .btn.on { background: #2f8a46; }
+.slider { width: 150px; accent-color: #ffcf3f; cursor: pointer; }
+.sel {
+  font-family: 'Silkscreen', monospace; font-size: 11px; background: #26305e; color: #f4f1e8;
+  border: 2px solid #f4f1e8; height: 32px; padding: 0 4px; cursor: pointer;
+}
+.card { position: absolute; left: 14px; bottom: 84px; padding: 10px 14px; max-width: 320px; }
+.card .cname { font-size: 16px; color: #ffcf3f; }
+.card .crole { font-size: 11px; color: #9fd8ff; margin-top: 2px; }
+.card .cthought { font-family: 'VT323', monospace; font-size: 22px; margin-top: 6px; line-height: 22px; }
+.card .cclose { font-size: 9px; opacity: 0.6; margin-top: 6px; }
+.toast {
+  position: absolute; left: 50%; top: 60px; transform: translateX(-50%);
+  background: #ffcf3f; color: #1b1b2e; padding: 8px 16px; font-size: 14px;
+  border: 3px solid #1b1b2e; box-shadow: 4px 4px 0 rgba(0,0,0,0.4);
+}
+.help { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 18px 24px; min-width: 320px; max-width: 92vw; }
+.help .htitle { font-size: 16px; color: #ffcf3f; margin-bottom: 10px; }
+.help .hrow { font-size: 12px; margin: 5px 0; }
+.help .hrow b { color: #9fd8ff; font-weight: normal; }
+.help .hnote { font-family: 'VT323', monospace; font-size: 19px; margin-top: 10px; color: #c9d4ff; max-width: 380px; }
+.help .hclose { font-size: 9px; opacity: 0.6; margin-top: 10px; text-align: right; }
+.hidden { display: none !important; }
+@media (max-width: 720px) {
+  .clock { padding: 6px 10px; min-width: 0; }
+  .clock .time { font-size: 32px; line-height: 30px; }
+  .title { display: none; }
+  .slider { width: 100px; }
+  .btn { height: 28px; min-width: 28px; font-size: 12px; }
+  .toolbar { gap: 4px; padding: 6px; bottom: 8px; }
+  .group { padding: 0 2px; }
+}

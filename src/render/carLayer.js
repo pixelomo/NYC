@@ -92,7 +92,8 @@ void main() {
   // snow on roofs of parked cars
   if (vB.z > 0.0 && n.z > 0.6) {
     float h = fract(sin(dot(floor(vWorld.xy * 16.0), vec2(12.9898, 78.233))) * 43758.5453);
-    if (h < vB.z * 1.1) albedo = mix(vec3(0.88, 0.92, 0.98), vec3(1.0), step(0.5, h));
+    float nn = texture(uNoise, vWorld.xy * 0.35).r;
+    if (nn * 0.85 + h * 0.15 < vB.z * 1.35) albedo = mix(vec3(0.86, 0.9, 0.97), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nn));
   }
   float ndl = dot(n, uSunDir);
   float sh = 1.0;

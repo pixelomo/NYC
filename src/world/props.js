@@ -55,7 +55,7 @@ export function propTex(C) {
   P.newsBoxes = ['news_r', 'news_y', 'news_b', 'news_g'].map((k, i) => A.shared(k, 6, 9, (p) => {
     const c = [0xc8302c, 0xe8c030, 0x2a5fb8, 0x2f8a46][i];
     p.rect(0, 0, 6, 9, c);
-    p.rect(1, 1, 4, 3, 0xd8e0e8, winCode(0.3, true));
+    p.rect(1, 1, 4, 3, 0xd8e0e8);
     p.rect(1, 6, 4, 1, shade(c, 0.6));
   }));
   P.basket = A.shared('basket', 8, 10, (p) => {
@@ -303,8 +303,15 @@ export function subwayEntrance(C, x, y, axis) {
     C.world.lamps.push({ x: gx, y: gy, z: z + 1.5, r: 1.6, color: [0.5, 1.0, 0.6], k: 0.5, kind: 'globe' });
   }
   // sign over the far end
-  if (axis === 'x') C.mb.vquad(x1, y0, x1, y1, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
-  else C.mb.vquad(x1, y1, x0, y1, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
+  // two-sided sign (each side readable)
+  const hs = 0.75; // sign is 24 texels wide
+  if (axis === 'x') {
+    C.mb.vquad(x1 + 0.02, y + hs, x1 + 0.02, y - hs, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
+    C.mb.vquad(x1, y - hs, x1, y + hs, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
+  } else {
+    C.mb.vquad(x - hs, y1 + 0.02, x + hs, y1 + 0.02, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
+    C.mb.vquad(x + hs, y1, x - hs, y1, z + rh, z + rh + 0.44, P.subwaySign, { mat: MAT.NOSHADOW });
+  }
   const ent = axis === 'x' ? { x: x0 - 0.6, y } : { x, y: y0 - 0.6 };
   const bottom = axis === 'x' ? { x: x1 - 0.3, y } : { x, y: y1 - 0.3 };
   C.world.subways.push({ x: ent.x, y: ent.y, bx: bottom.x, by: bottom.y, axis });

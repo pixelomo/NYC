@@ -5,18 +5,20 @@ import { Page, SPainter } from '../core/painter.js';
 import { RNG, hash2i, clamp } from '../core/math.js';
 
 const SIZE = 2048;
+const HEIGHT = 4096;
 
 export class SpriteAtlas {
   constructor() {
-    this.page = new Page(SIZE, SIZE);
+    this.page = new Page(SIZE, HEIGHT);
+    this.templates = [];
     this.frames = new Map();
     this.x = 0; this.y = 0; this.rowH = 0;
-    this.dirtyY0 = 0; this.dirtyY1 = SIZE;
+    this.dirtyY0 = 0; this.dirtyY1 = HEIGHT;
     this.tex = null;
   }
   alloc(w, h) {
     if (this.x + w + 1 > SIZE) { this.x = 0; this.y += this.rowH + 1; this.rowH = 0; }
-    if (this.y + h + 1 > SIZE) throw new Error('sprite atlas full');
+    if (this.y + h + 1 > HEIGHT) throw new Error('sprite atlas full');
     const r = { x: this.x, y: this.y, w, h };
     this.x += w + 1;
     this.rowH = Math.max(this.rowH, h);
@@ -34,17 +36,18 @@ export class SpriteAtlas {
     return f;
   }
   get(name) { return this.frames.get(name); }
+  get full() { return this.y > HEIGHT - 400; }
   upload(gl) {
     if (!this.tex) {
       this.tex = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, this.tex);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, SIZE, SIZE, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.page.data);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, SIZE, HEIGHT, 0, gl.RGBA, gl.UNSIGNED_BYTE, this.page.data);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-      this.dirtyY0 = SIZE; this.dirtyY1 = 0;
+      this.dirtyY0 = HEIGHT; this.dirtyY1 = 0;
       return;
     }
     if (this.dirtyY1 > this.dirtyY0) {
@@ -52,7 +55,7 @@ export class SpriteAtlas {
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
       const y0 = this.dirtyY0, h = this.dirtyY1 - y0;
       gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, y0, SIZE, h, gl.RGBA, gl.UNSIGNED_BYTE, this.page.data.subarray(y0 * SIZE * 4, (y0 + h) * SIZE * 4));
-      this.dirtyY0 = SIZE; this.dirtyY1 = 0;
+      this.dirtyY0 = HEIGHT; this.dirtyY1 = 0;
     }
   }
 }
@@ -123,7 +126,7 @@ export const TREE_SPECIES = {
   oak: { w: 48, h: 56, trunkH: 18, canopy: [22, 18], blobs: 14, bark: 0x5a4636 },
   elm: { w: 60, h: 70, trunkH: 26, canopy: [28, 20], blobs: 18, vase: true, bark: 0x5e5246 },
   cherry: { w: 42, h: 44, trunkH: 14, canopy: [19, 13], blobs: 16, bark: 0x4a3030 },
-  pine: { w: 30, h: 60, trunkH: 8, pine: true, bark: 0x4a3626 },
+  pine: { w: 36, h: 54, trunkH: 6, pine: true, bark: 0x4a3626 },
   xmas: { w: 40, h: 76, trunkH: 6, pine: true, xmas: true, bark: 0x4a3626 },
 };
 
@@ -143,24 +146,39 @@ export function paintTree(sp, spec, seed) {
       sp.set(x, y, S.TRUNK, sh, S.TRUNK);
     }
   }
-  // branches (recursive), drawn into alt + main
+  // branches (recursive), drawn into alt + main; thicker near the trunk
   const tips = [];
   const branch = (x, y, ang, len, depth) => {
     const x2 = x + Math.cos(ang) * len, y2 = y - Math.sin(ang) * len;
     const steps = Math.ceil(len);
+    const thick = depth === 0 ? 3 : depth <= 2 ? 2 : 1;
     for (let i = 0; i <= steps; i++) {
       const px = Math.round(x + ((x2 - x) * i) / steps), py = Math.round(y + ((y2 - y) * i) / steps);
-      const above = sp.get(px, py - 1);
-      const slot = above < 0 && depth >= 1 ? S.BR_TOP : S.BRANCH;
-      sp.set(px, py, slot, 128, slot);
-      if (depth < 2 && i < steps * 0.5) sp.set(px + 1, py, S.BRANCH, 100, S.BRANCH);
+      for (let k = 0; k < thick; k++) {
+        const above = sp.get(px + k, py - 1);
+        const slot = above < 0 && depth >= 1 ? S.BR_TOP : S.BRANCH;
+        sp.set(px + k, py, slot, k ? 100 : 128, slot);
+      }
     }
-    if (depth >= 3 || len < 3) { tips.push([x2, y2]); return; }
-    const n = depth === 0 ? 3 : 2;
+    if (depth >= 4 || len < 2.2) {
+      tips.push([x2, y2]);
+      // twigs
+      for (let k = 0; k < 2; k++) {
+        const ta = ang + rng.range(-0.9, 0.9), tl = rng.range(1.5, 3);
+        const tx = Math.round(x2 + Math.cos(ta) * tl), ty = Math.round(y2 - Math.sin(ta) * tl);
+        const steps2 = Math.max(Math.abs(tx - x2), Math.abs(ty - y2));
+        for (let i = 0; i <= steps2; i++) {
+          const qx = Math.round(x2 + ((tx - x2) * i) / Math.max(1, steps2)), qy = Math.round(y2 + ((ty - y2) * i) / Math.max(1, steps2));
+          sp.set(qx, qy, S.BR_TOP, 120, S.BR_TOP);
+        }
+      }
+      return;
+    }
+    const n = depth === 0 ? 3 : rng.chance(0.3) ? 3 : 2;
     for (let k = 0; k < n; k++) {
-      const spread = spec.vase ? 0.55 : 0.75;
+      const spread = spec.vase ? 0.55 : 0.7;
       const na = ang + (k - (n - 1) / 2) * spread + rng.range(-0.25, 0.25);
-      branch(x2, y2, na, len * rng.range(0.6, 0.8), depth + 1);
+      branch(x2, y2, na, len * rng.range(0.62, 0.8), depth + 1);
     }
   };
   const topY = base - th;
@@ -210,19 +228,21 @@ function paintPine(sp, spec, rng) {
   const { w, h } = spec;
   const cx = Math.floor(w / 2), base = h - 1;
   for (let y = base; y > base - spec.trunkH - 4; y--) { sp.set(cx, y, S.TRUNK, 128, S.TRUNK); sp.set(cx - 1, y, S.TRUNK, 150, S.TRUNK); }
-  const layers = spec.xmas ? 7 : 6;
-  const top = 2, bottom = base - spec.trunkH;
+  const layers = spec.xmas ? 7 : 5;
+  const top = 1, bottom = base - spec.trunkH;
   for (let l = 0; l < layers; l++) {
     const ly = top + ((bottom - top) * (l + 1)) / layers;
-    const lw = ((w / 2 - 1) * (l + 1.5)) / (layers + 0.5);
-    const lh = (bottom - top) / layers + 4;
+    const lw = (w / 2 - 1) * (0.35 + (0.65 * (l + 1)) / layers);
+    const lh = (bottom - top) / layers + 5;
     for (let y = Math.floor(ly - lh); y <= ly; y++) {
-      const t = (y - (ly - lh)) / lh;
-      const half = lw * t;
+      const t = clamp((y - (ly - lh)) / lh, 0, 1);
+      const half = lw * Math.pow(t, 0.75);
       for (let x = Math.floor(cx - half); x <= Math.ceil(cx + half); x++) {
         if (x < 0 || x >= w || y < 0) continue;
+        // jagged drooping bottom edge
+        if (y > ly - 2 && hash2i(x, y, 5) < 0.35) continue;
         const edgeTop = sp.get(x, y - 1) < 0;
-        let slot = x < cx - half * 0.3 ? S.LEAF_L : x > cx + half * 0.4 ? S.LEAF_D : S.LEAF_M;
+        let slot = x < cx - half * 0.25 ? S.LEAF_L : x > cx + half * 0.35 ? S.LEAF_D : S.LEAF_M;
         if (y > ly - 1.5) slot = S.LEAF_D;
         if (edgeTop) slot = S.BR_TOP;
         sp.set(x, y, slot, 128, slot === S.BR_TOP ? S.BR_TOP : 0);
@@ -283,9 +303,11 @@ export function treePalette(pal, species, season, snowy, barkColor, row = null) 
   const P = TREE_PALETTES[species] || TREE_PALETTES.plane;
   const r = row ?? pal.alloc();
   const s = P[season];
-  pal.set(r, S.TRUNK, barkColor);
-  pal.set(r, S.BRANCH, shadeHex(barkColor, 0.9));
-  pal.set(r, S.BR_TOP, snowy ? 0xf2f6fa : shadeHex(barkColor, 1.1));
+  const bare = !s;
+  const bark = bare ? shadeHex(barkColor, 0.62) : barkColor;
+  pal.set(r, S.TRUNK, bark);
+  pal.set(r, S.BRANCH, shadeHex(bark, 0.9));
+  pal.set(r, S.BR_TOP, snowy ? 0xf2f6fa : shadeHex(bark, bare ? 1.0 : 1.1));
   if (s) {
     pal.set(r, S.LEAF_L, s.L[0]);
     pal.set(r, S.LEAF_M, s.L[1]);
@@ -558,10 +580,27 @@ function paintLying(sp, tpl) {
 }
 
 // Generates all frames for a template; returns map anim -> [front frames], [back frames]
+const TEMPLATE_BUDGET = 190;
 export function personTemplate(atlas, tpl) {
   const key = 'p:' + JSON.stringify(tpl);
   const cached = atlas.frames.get(key);
   if (cached) return cached;
+  if (atlas.templates.length >= TEMPLATE_BUDGET || atlas.full) {
+    // reuse the most similar existing template (palettes keep people looking different)
+    let best = null, bs = -1;
+    for (const t of atlas.templates) {
+      let sc = 0;
+      if (t.tpl.body === tpl.body) sc += 10;
+      if (!!t.tpl.coat === !!tpl.coat) sc += 6;
+      if (t.tpl.hat === tpl.hat) sc += 3;
+      if (t.tpl.bottom === tpl.bottom) sc += 2;
+      if (t.tpl.top === tpl.top) sc += 2;
+      if (t.tpl.hair === tpl.hair) sc += 1;
+      if (t.tpl.bag === tpl.bag) sc += 1;
+      if (sc > bs) { bs = sc; best = t; }
+    }
+    if (best) return best.out;
+  }
   const out = { front: {}, back: {} };
   const w = 14, h = 22;
   for (const anim in POSES) {
@@ -576,6 +615,7 @@ export function personTemplate(atlas, tpl) {
     }
   }
   atlas.frames.set(key, out);
+  atlas.templates.push({ tpl, out });
   return out;
 }
 

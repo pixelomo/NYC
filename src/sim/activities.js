@@ -250,7 +250,11 @@ export class Activities {
       for (let i = g.length - 1; i >= 0; i--) {
         const p = g[i];
         p.actTimer -= dt;
-        const quit = p.actTimer <= 0 || (kind === 'basketball' && (env.raining || (env.darkness > 0.7 && env.hour > 23))) || (kind === 'hydrant' && !this.hydrantOpen) || p.dead;
+        const h = env.hour;
+        const late = kind === 'basketball' ? (env.season === 1 ? h > 22 || h < 7 : env.darkness > 0.6 || h < 7)
+          : kind === 'dogrun' || kind === 'lawn' ? env.darkness > 0.75 && (h > 22 || h < 6)
+          : (kind === 'snowball' || kind === 'playground' || kind === 'skate' || kind === 'hydrant') ? (env.darkness > 0.55 && h > 18) || h < 7 || h > 21 : false;
+        const quit = p.actTimer <= 0 || late || (kind === 'basketball' && env.raining) || (kind === 'hydrant' && !this.hydrantOpen) || p.dead;
         if (quit) this.leave(p);
       }
     }

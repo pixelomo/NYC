@@ -134,6 +134,13 @@ export class Statics {
         if (s.face[0] * vd[0] + s.face[1] * vd[1] <= 0.05) continue;
         if (!vis(s.x, s.y, s.z, 1)) continue;
         const st = tr.signalState(s.i, s.j);
+        if (s.type === 'car' && st.flash) {
+          const c = s.axis === 'x' ? st.ew : st.ns;
+          if ((time % 1.2) > 0.6) continue;
+          const top = s.z + 0.75;
+          L.push(s.x, s.y, c === 'fr' ? top - 0.19 : top - 0.44, this.frames.lamp2, this.glowRows[c === 'fr' ? 'red' : 'yellow'], SF.EMISSIVE | SF.NOSHADOW, 1, 0.02);
+          continue;
+        }
         if (s.type === 'car') {
           const c = s.axis === 'x' ? st.ew : st.ns; // 'g','y','r'
           const top = s.z + (s.axis === 'x' ? 0.75 : 0.75);

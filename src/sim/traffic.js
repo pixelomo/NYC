@@ -137,7 +137,19 @@ export class Traffic {
     }
   }
   // ---- signals -------------------------------------------------------------
+  get flashing() {
+    const h = this.city.env.hour;
+    return h >= 1 && h < 5;
+  }
+  movingCarNear(x, y, r) {
+    for (const c of this.cars) if (c.state !== 'parked' && c.v > 0.4 && dist2(c.x, c.y, x, y) < r * r) return true;
+    return false;
+  }
   signalState(i, j) {
+    if (this.flashing) {
+      // late night: avenues (N-S) flash yellow, streets (E-W) flash red; pedestrians cross with care
+      return { ew: 'fr', ns: 'fy', walkEW: 'walk', walkNS: 'walk', ewT: 0, nsT: 0, flash: true };
+    }
     const t = (this.clock + this.offsets[i][j]) % CYCLE_LEN;
     const g = CYCLE.green, y = CYCLE.yellow, r = CYCLE.red;
     const half = g + y + r;
@@ -332,6 +344,14 @@ export class Traffic {
     if (car.special === 'fire' && car.siren) {
       // emergency vehicles proceed carefully through reds
       if (light !== 'g' && car.wait < 1.5) return false;
+    } else if (light === 'fr') {
+      // flashing red: full stop, then go when the box is clear and no cross traffic is coming
+      if (car.wait < 1.0) return false;
+      if (this.boxBusy(C, car)) return false;
+      const a = this.inLinks.get(`${C.i},${C.j},1`), b = this.inLinks.get(`${C.i},${C.j},3`);
+      for (const L of [a, b]) if (L) for (const o of L.cars) if (o.state !== 'parked' && L.len - o.s < 9 && o.v > 1) return false;
+    } else if (light === 'fy') {
+      if (this.boxBusy(C, car)) return false;
     } else {
       if (light === 'r') return false;
       if (light === 'y') {
@@ -506,11 +526,16 @@ export class Traffic {
     }
     this.place(car);
   }
+  boxBusy(C, car) {
+    for (const c2 of this.connectors.values()) if (c2.i === C.i && c2.j === C.j && c2.cars.some((o) => o !== car)) return true;
+    return false;
+  }
   canEnterNow(car, C) {
     // final check at the stop line (ignores yellow-distance rule)
     const st = this.signalState(C.i, C.j);
     const light = C.d === 0 || C.d === 2 ? st.ew : st.ns;
     if (light === 'r' && !(car.special === 'fire' && car.wait > 1.5)) return false;
+    if (light === 'fr' && (car.wait < 1.0 || this.boxBusy(C, car))) return false;
     const lk = this.exitLock.get(C.to.id);
     if (lk && lk !== car) return false;
     return true;

@@ -6,6 +6,8 @@ import { Camera } from './render/camera.js';
 import { buildWorld } from './world/world.js';
 import { Environment } from './sim/environment.js';
 import { City } from './sim/city.js';
+import { UI } from './ui/ui.js';
+import { AudioEngine } from './audio/audio.js';
 
 const canvas = document.getElementById('view');
 const loading = document.getElementById('loading');
@@ -14,29 +16,33 @@ const loadingMsg = document.getElementById('loading-msg');
 function setMsg(m) {
   if (loadingMsg) loadingMsg.textContent = m;
 }
+function nextFrame() {
+  return new Promise((r) => requestAnimationFrame(() => r()));
+}
 
 async function boot() {
   let gl;
   try {
     gl = createGL(canvas);
   } catch (e) {
-    setMsg(e.message);
+    setMsg(e.message + ' Try a recent Chrome, Edge, Firefox or Safari.');
     return;
   }
+  setMsg('Pouring concrete…');
   await nextFrame();
   const t0 = performance.now();
   const world = buildWorld(1977, (m) => setMsg(m));
+  setMsg('Waking up the city…');
+  await nextFrame();
   const renderer = new Renderer(gl);
   renderer.setStatic(world.mesh, world.atlas);
-  console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms, tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
+  const q = new URLSearchParams(location.search);
   const env = new Environment();
   const camera = new Camera();
   const dpr = window.devicePixelRatio || 1;
   camera.scale = camera.scaleTo = Math.max(1, Math.round(2 * dpr));
   camera.x = 60;
-  camera.y = 66;
-  // debug/query overrides
-  const q = new URLSearchParams(location.search);
+  camera.y = 70;
   if (q.has('zoom')) camera.scale = camera.scaleTo = parseFloat(q.get('zoom'));
   if (q.has('x')) camera.x = parseFloat(q.get('x'));
   if (q.has('y')) camera.y = parseFloat(q.get('y'));
@@ -45,12 +51,23 @@ async function boot() {
   if (q.has('season')) env.setSeason(parseInt(q.get('season'), 10));
   if (q.has('weather')) env.setWeather(q.get('weather'));
   if (q.has('pause')) env.paused = true;
-
+  env.compute(0);
   const city = new City(gl, renderer, world, env, camera);
-  const app = { gl, world, renderer, env, camera, city, time: 0, canvas };
+  const app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 };
+  const audio = new AudioEngine(app);
+  app.audio = audio;
+  city.audio = audio;
+  env.onEvent((ev, d) => {
+    if (ev === 'lightning') audio.thunder(d.dist);
+    if (ev === 'season') city.activities?.seed();
+  });
+  const ui = new UI(app);
+  app.ui = ui;
   window.__city = app;
+  console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms, tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
 
   let last = performance.now();
+  let fpsAcc = 0, fpsN = 0;
   function resize() {
     const d = window.devicePixelRatio || 1;
     const w = Math.round(canvas.clientWidth * d), h = Math.round(canvas.clientHeight * d);
@@ -64,10 +81,13 @@ async function boot() {
     app.time += dt;
     resize();
     env.update(dt);
+    ui.pan(dt);
     camera.update(dt);
     city.update(dt);
     city.prepare(canvas.width, canvas.height);
     renderer.render(camera, env.u, app.time, canvas.width, canvas.height);
+    audio.update(dt);
+    ui.update(dt);
   }
   app.simulate = (secs, dt = 0.05) => {
     const t = performance.now();
@@ -78,15 +98,20 @@ async function boot() {
   function frame(now) {
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
+    fpsAcc += dt; fpsN++;
+    if (fpsAcc > 1) {
+      app.fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0;
+      // adaptive quality: shrink the shadow map if the GPU struggles
+      app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0;
+      if (app.lowFps >= 4 && renderer.shadowSize > 2048) { renderer.setShadowSize(2048); app.lowFps = 0; console.log('quality: shadow map 2048'); }
+      else if (app.lowFps >= 4 && renderer.shadowSize > 1024) { renderer.setShadowSize(1024); app.lowFps = 0; console.log('quality: shadow map 1024'); }
+    }
     step(dt);
     if (!still) requestAnimationFrame(frame);
   }
   if (loading) loading.classList.add('hidden');
+  ui.toast('♪ Tap the sound button for city sounds');
   if (still) { step(0.016); app.time = 1; } else requestAnimationFrame(frame);
-}
-
-function nextFrame() {
-  return new Promise((r) => requestAnimationFrame(() => r()));
 }
 
 boot();

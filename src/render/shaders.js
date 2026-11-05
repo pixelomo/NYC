@@ -157,7 +157,7 @@ void main() {
     // autumn leaves
     if (uLeaves > 0.0 && (g == 6 || g == 8 || g == 9 || g == 11 || g == 17 || g == 22)) {
       float k = (g == 8 || g == 9) ? 1.0 : 0.55;
-      if (n2 < uLeaves * 0.45 * k * (0.6 + n3)) {
+      if (n2 < uLeaves * 0.26 * k * smoothstep(0.35, 0.75, n3)) {
         float h = hash12(floor(vWorld.xy * 8.0) + 7.0);
         albedo = h < 0.33 ? vec3(0.85, 0.42, 0.12) : h < 0.66 ? vec3(0.72, 0.22, 0.10) : vec3(0.88, 0.66, 0.18);
       }
@@ -186,14 +186,15 @@ void main() {
     } else wetK = uWet * 0.6;
     // snow
     if (uSnow > 0.001) {
-      vec3 snowC = mix(vec3(0.86, 0.9, 0.98), vec3(1.0), step(0.5, n2));
+      float sn = nz(tp * 0.045 + 7.3);
+      vec3 snowC = mix(vec3(0.84, 0.89, 0.97), vec3(0.97, 0.98, 1.0), smoothstep(0.35, 0.65, sn));
       float cover = 0.0;
       if (g == 1 || g == 3 || g == 4 || g == 5 || g == 19 || g == 20 || g == 18) {
         // driven lanes: slush
         float s = smoothstep(0.0, 1.0, uSnow) * (0.55 + 0.45 * n3);
-        vec3 slush = mix(vec3(0.42, 0.42, 0.44), vec3(0.62, 0.60, 0.58), n1);
-        albedo = mix(albedo, slush, s * 0.85);
-        if (n1 * 0.6 + n2 * 0.4 < uSnow * 0.45 - 0.05) albedo = snowC * 0.92;
+        vec3 slush = mix(vec3(0.40, 0.40, 0.43), vec3(0.58, 0.57, 0.56), smoothstep(0.3, 0.7, n1));
+        albedo = mix(albedo, slush, s * 0.8);
+        if (n1 < uSnow * 0.38 - 0.05) albedo = snowC * 0.94;
       } else if (g == 2) {
         cover = uSnow * 1.15;
       } else if (g == 6 || g == 7) {
@@ -203,15 +204,17 @@ void main() {
       } else {
         cover = uSnow * 1.25;
       }
-      if (n1 * 0.7 + n2 * 0.3 < cover - 0.05) { albedo = snowC; wetK *= 0.2; puddle = 0.0; }
+      float thr = n1 * 0.85 + n2 * 0.15;
+      if (thr < cover - 0.05) { albedo = snowC; wetK *= 0.2; puddle = 0.0; }
+      else if (thr < cover + 0.02) { albedo = mix(albedo, snowC, 0.55); }
     }
   } else {
     // non-ground: snow on top-facing surfaces
     if ((mat & 1u) != 0u && n.z > 0.55 && uSnow > 0.001) {
       float n1 = nz(tp * 0.13 + vWorld.z * 0.07);
       float n2 = hash12(floor(vWorld.xy * 8.0));
-      if (n1 * 0.7 + n2 * 0.3 < uSnow * 1.25 - 0.05) {
-        albedo = mix(vec3(0.86, 0.9, 0.98), vec3(1.0), step(0.5, n2));
+      if (n1 * 0.85 + n2 * 0.15 < uSnow * 1.3 - 0.05) {
+        albedo = mix(vec3(0.86, 0.9, 0.98), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nz(tp * 0.05)));
         code = 255.0;
       }
     }
@@ -234,7 +237,7 @@ void main() {
         emis = mix(uCrownA, uCrownB, step(0.5, fract(vWorld.z * 0.5 + 0.25))) * albedo * 2.2 * uCrown;
       } else if (t < lit) {
         float h = hash12(vec2(t * 91.0, fl + float(vInfo.w)));
-        vec3 wc = selfC ? albedo * 1.7 + 0.1 : windowColor(h);
+        vec3 wc = selfC ? albedo * 1.15 + 0.04 : windowColor(h);
         if (!selfC && h > 0.93) wc *= 0.75 + 0.25 * sin(uTime * (7.0 + h * 9.0) + t * 40.0) * sin(uTime * 2.3 + h * 20.0);
         emis = wc * uEmis;
       }

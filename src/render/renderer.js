@@ -33,6 +33,16 @@ export class Renderer {
     this.stats = { tris: 0 };
   }
 
+  setShadowSize(n) {
+    const gl = this.gl;
+    if (n === this.shadowSize) return;
+    gl.deleteTexture(this.shadowTex);
+    gl.deleteFramebuffer(this.shadowFBO);
+    this.shadowSize = n;
+    this.shadowTex = makeDepthTexture(gl, n, n, true);
+    this.shadowFBO = makeFBO(gl, [], this.shadowTex);
+  }
+
   _makeNoise() {
     const gl = this.gl, N = 256;
     const d = new Uint8Array(N * N);

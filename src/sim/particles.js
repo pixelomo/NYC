@@ -13,10 +13,10 @@ export class Particles {
     this.rng = new RNG(1234);
     const A = city.atlas;
     this.fr = { puff: [A.get('puff1'), A.get('puff2'), A.get('puff3'), A.get('puff4')], dot: A.get('dot'), dot2: A.get('dot2'), leaf: A.get('leaf'), glow: A.get('glow') };
-    this.fr.rain = A.add('rain', 1, 4, (sp) => { sp.set(0, 0, S.C2, 90); sp.set(0, 1, S.C2, 110); sp.set(0, 2, S.C2, 128); sp.set(0, 3, S.C2, 150); }, 0, 3);
+    this.fr.rain = A.add('rain', 1, 7, (sp) => { for (let y = 0; y < 7; y++) sp.set(0, y, S.C2, 80 + y * 14); }, 0, 6);
     this.fr.splash = A.add('splash', 3, 2, (sp) => { sp.set(0, 0, S.C2, 128); sp.set(2, 0, S.C2, 128); sp.set(1, 1, S.C2, 150); }, 1, 1);
     const pal = city.pal;
-    this.row = pal.alloc({ [S.C1]: 0xf0f2f6, [S.C2]: 0xb8d0e8, [S.C3]: 0xffffff, [S.C4]: 0xe07a20, [S.C5]: 0xc8402a, [S.C6]: 0xf0c030, [S.C7]: 0xffb8d8, [S.C8]: 0xd8f0ff, [S.C9]: 0x9a9a9a });
+    this.row = pal.alloc({ [S.C1]: 0xf0f2f6, [S.C2]: 0xd0e4f8, [S.C3]: 0xffffff, [S.C4]: 0xe07a20, [S.C5]: 0xc8402a, [S.C6]: 0xf0c030, [S.C7]: 0xffb8d8, [S.C8]: 0xd8f0ff, [S.C9]: 0x9a9a9a });
     this.fwRows = [0xff4040, 0x40ff80, 0x5080ff, 0xffd040, 0xff70e0, 0xffffff, 0xff9030, 0x60f0ff].map((c) => pal.alloc({ [S.C1]: [c, 128] }));
     this.flyRow = pal.alloc({ [S.C1]: [0xd8ff60, 128] });
     this.p = [];
@@ -174,7 +174,7 @@ export class Particles {
       this.fireworkTimer = r.range(0.6, 2.4);
       if (this.forceFireworks > 0) this.forceFireworks--;
       const c = W.parkCenter || { x: MAP / 2, y: MAP / 2 };
-      this.add({ x: c.x + r.range(-6, 6), y: c.y + r.range(-6, 6), z: CURB, vx: r.range(-0.4, 0.4), vy: r.range(-0.4, 0.4), vz: r.range(14, 18), g: 4, life: r.range(1.6, 2.2), max: 2, kind: 'rocket', f: this.fr.dot2, row: this.fwRows[5] });
+      this.add({ x: c.x + r.range(-4, 4), y: c.y + r.range(-4, 4), z: CURB + 1, vx: r.range(-0.4, 0.4), vy: r.range(-0.4, 0.4), vz: r.range(9.5, 12), g: 4, life: r.range(1.8, 2.4), max: 2, kind: 'rocket', f: this.fr.dot2, row: this.fwRows[5] });
       this.city.audio?.event('launch', c);
     }
     // fireflies
@@ -221,7 +221,7 @@ export class Particles {
     const kind = r.int(0, 2);
     for (let i = 0; i < n; i++) {
       const a = r.range(0, 6.28), b = Math.acos(r.range(-1, 1));
-      const s = kind === 1 ? 4.5 : r.range(2.5, 5);
+      const s = kind === 1 ? 3.6 : r.range(2.0, 4.0);
       this.add({ x, y, z, vx: Math.cos(a) * Math.sin(b) * s, vy: Math.sin(a) * Math.sin(b) * s, vz: Math.cos(b) * s * 0.8 + 0.5, g: 1.6, life: r.range(1.1, 1.9), max: 1.9, kind: 'spark', f: r.chance(0.3) ? this.fr.dot2 : this.fr.dot, row: i % 2 ? rowA : rowB });
     }
     const colors = { 0: [1, 0.3, 0.3] };
@@ -248,7 +248,7 @@ export class Particles {
     }
     for (const d of this.rain) {
       if (d.snow) L.push(d.x, d.y, d.z, d.sp > 1.1 ? this.fr.dot2 : this.fr.dot, this.slotRow(S.C3), SF.NOSHADOW | SF.BRIGHT, 1, 0);
-      else L.push(d.x, d.y, d.z, this.fr.rain, this.row, SF.NOSHADOW | SF.BRIGHT, 0.75, 0);
+      else L.push(d.x, d.y, d.z, this.fr.rain, this.row, SF.NOSHADOW | SF.BRIGHT, 0.9, 0);
     }
     for (const f of this.fireflies) {
       if ((Math.sin(f.ph * 2.3) + Math.sin(f.ph * 1.1)) < 0.6) continue;

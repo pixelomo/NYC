@@ -431,13 +431,15 @@ function courtLines(C, x0, y0, x1, y1) {
   for (let y = Y0; y < Y1; y++) { line(X0, y); line(X0 + 1, y); line(X1 - 1, y); line(X1 - 2, y); }
   const mx = Math.round((X0 + X1) / 2), my = Math.round((Y0 + Y1) / 2);
   for (let y = Y0; y < Y1; y++) { line(mx, y); line(mx - 1, y); }
-  g.ring(mx, my, 28, 28, 2, 0xf2f2ee, GC.COURT_LINE);
+  g.ring(mx, my, 15, 15, 2, 0xf2f2ee, GC.COURT_LINE);
   // three point arcs + key outlines
   for (const [ex, dir] of [[X0, 1], [X1, -1]]) {
+    const bx = ex + dir * 14;
     for (let a = -Math.PI / 2; a <= Math.PI / 2; a += 0.01) {
-      const px = Math.round(ex + dir * (8 + Math.cos(a) * 100)), py = Math.round(my + Math.sin(a) * 100);
-      if (py > Y0 + 2 && py < Y1 - 2) { line(px, py); line(px + dir, py); }
+      const px = Math.round(bx + dir * Math.cos(a) * 58), py = Math.round(my + Math.sin(a) * 58);
+      if (py > Y0 + 6 && py < Y1 - 6) { line(px, py); line(px + dir, py); }
     }
+    for (const sy of [my - 54, my + 54]) for (let x = Math.min(ex, bx); x <= Math.max(ex, bx); x++) { line(x, sy); line(x, sy + 1); }
     const kx = ex + dir * 48;
     for (let y = my - 20; y <= my + 20; y++) { line(kx, y); line(kx + dir, y); }
     for (let x = Math.min(ex, kx); x <= Math.max(ex, kx); x++) { line(x, my - 20); line(x, my + 20); }

@@ -31,10 +31,10 @@ const hexv = (h) => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) 
 const SKY_TOP = [[-18, hexv(0x070b1d)], [-8, hexv(0x16204a)], [-2, hexv(0x2f3f7a)], [2, hexv(0x4a6fb0)], [8, hexv(0x5c93d6)], [20, hexv(0x55a3ec)], [50, hexv(0x4597e6)]];
 const SKY_BOT = [[-18, hexv(0x141a38)], [-8, hexv(0x3a3266)], [-2, hexv(0xb0607a)], [2, hexv(0xf59a62)], [8, hexv(0xf6c78f)], [20, hexv(0xb9e0f6)], [50, hexv(0xc4e7fa)]];
 const SUN_COL = [[-2, [0, 0, 0]], [1, [0.55, 0.28, 0.14]], [5, [0.85, 0.55, 0.32]], [12, [0.9, 0.74, 0.55]], [25, [0.82, 0.78, 0.68]], [50, [0.8, 0.78, 0.72]]];
-const AMB = [[-18, [0.13, 0.15, 0.27]], [-8, [0.2, 0.2, 0.36]], [-2, [0.36, 0.3, 0.42]], [3, [0.5, 0.44, 0.48]], [10, [0.56, 0.56, 0.6]], [30, [0.6, 0.63, 0.7]]];
+const AMB = [[-18, [0.17, 0.19, 0.31]], [-8, [0.22, 0.22, 0.38]], [-2, [0.36, 0.3, 0.42]], [3, [0.5, 0.44, 0.48]], [10, [0.56, 0.56, 0.6]], [30, [0.6, 0.63, 0.7]]];
 
-const RES_LIT = [[0, 0.3], [2, 0.14], [4.5, 0.07], [6.5, 0.38], [8.5, 0.2], [12, 0.12], [16.5, 0.2], [19, 0.62], [21.5, 0.7], [23, 0.5], [24, 0.3]];
-const OFF_LIT = [[0, 0.16], [5.5, 0.12], [7.5, 0.55], [9, 0.86], [17, 0.86], [19, 0.6], [21, 0.36], [24, 0.16]];
+const RES_LIT = [[0, 0.24], [2, 0.12], [4.5, 0.06], [6.5, 0.3], [8.5, 0.16], [12, 0.1], [16.5, 0.16], [19, 0.46], [21.5, 0.55], [23, 0.4], [24, 0.24]];
+const OFF_LIT = [[0, 0.12], [5.5, 0.1], [7.5, 0.45], [9, 0.75], [17, 0.75], [19, 0.5], [21, 0.3], [24, 0.12]];
 
 const CROWN = [
   [[1.0, 0.55, 0.8], [1.0, 1.0, 1.0]],
@@ -181,7 +181,7 @@ export class Environment {
     const dh = this.paused ? 0 : dt * (24 / this.dayLength) * this.speed;
     if (this.snowing) this.snowCover = Math.min(1, this.snowCover + dh * 0.35 * this.precip);
     else if (s !== 3) this.snowCover = Math.max(0, this.snowCover - dh * (s === 0 ? 0.25 : 0.8));
-    if (this.raining) this.wetness = Math.min(1, this.wetness + dh * 1.5 * this.precip);
+    if (this.raining) this.wetness = Math.min(1, this.wetness + dh * 3.0 * this.precip + (this.weatherOverride ? dt * 0.3 : 0));
     else this.wetness = Math.max(0, this.wetness - dh * (s === 1 ? 0.5 : 0.25));
     if (s === 3 && this.wetness > 0.3) this.wetness = 0.3;
 
@@ -231,13 +231,13 @@ export class Environment {
     u.amb = amb;
     u.face = [1.0, 0.88, 0.72];
     u.stars = smoothstep(-4, -12, sun.el) * (1 - cloudK);
-    u.emis = 0.3 + 0.75 * this.darkness;
+    u.emis = 0.06 + 0.94 * this.darkness * this.darkness;
     u.snow = this.snowCover;
     u.wet = this.wetness;
     u.cloud = [this.cloudOff[0], this.cloudOff[1], clamp(0.25 + cloudK * 0.75, 0, 1), sun.el > 0 ? 0.45 + cloudK * 0.3 : 0];
     u.flash = this.flash * 0.9;
     const dk = this.darkness;
-    u.resLit = clamp(keyLerp(RES_LIT, h) + dk * 0.15 + cloudK * 0.08, 0, 1);
+    u.resLit = clamp(keyLerp(RES_LIT, h) + dk * 0.08 + cloudK * 0.06, 0, 1);
     u.offLit = clamp(keyLerp(OFF_LIT, h) + dk * 0.05, 0, 1);
     u.leaves = s === 2 ? 0.85 : 0;
     u.season = s;
