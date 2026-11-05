@@ -158,9 +158,22 @@ export class Particles {
     const fountainOn = env.season !== 3 && env.hour >= 7 && env.hour < 23;
     if (fountainOn) for (const f of W.fountains) {
       if (!view.visible(f.x, f.y, f.z, 3)) continue;
-      const n = f.kind === 'center' ? 26 : 10;
+      const n = f.kind === 'center' ? 26 : f.kind === 'tiered' ? 46 : 10;
       for (let k = 0; k < n * dt * 3; k++) {
-        if (f.kind === 'center') {
+        if (f.kind === 'tiered') {
+          const u = r.next(), a = r.range(0, 6.28), ca = Math.cos(a), sa = Math.sin(a);
+          if (u < 0.4) {
+            // jet from the finial, falling back into the top bowl
+            const s = r.range(0.1, 0.32);
+            this.add({ x: f.x, y: f.y, z: f.z + 0.05, vx: ca * s, vy: sa * s, vz: r.range(1.8, 2.5), g: 5, life: 1.0, max: 1.0, kind: 'water', f: this.fr.dot, row: this.row, slot: S.C8, floor: f.bowls[0].z });
+          } else {
+            // curtains spilling over the bowl rims into the tier below
+            const top = u < 0.65;
+            const b = top ? f.bowls[0] : f.bowls[1];
+            const s = r.range(0.12, 0.35);
+            this.add({ x: f.x + ca * b.r, y: f.y + sa * b.r, z: b.z + 0.02, vx: ca * s, vy: sa * s, vz: r.range(0, 0.25), g: 5, life: 0.8, max: 0.8, kind: 'water', f: this.fr.dot, row: this.row, slot: S.C8, floor: top ? f.bowls[1].z : f.floor });
+          }
+        } else if (f.kind === 'center') {
           const a = r.range(0, 6.28), s = r.range(0.2, 0.55);
           this.add({ x: f.x, y: f.y, z: f.z + 0.1, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(2.2, 3.0), g: 5, life: 1.2, max: 1.2, kind: 'water', f: this.fr.dot, row: this.row, slot: S.C8, floor: f.z - 0.5 });
         } else {

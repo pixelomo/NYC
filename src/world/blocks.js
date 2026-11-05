@@ -1,6 +1,6 @@
 // Block-by-block city generation + street furniture.
 
-import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd } from './layout.js';
+import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection } from './layout.js';
 import { GC, COL } from './ground.js';
 import { MAT, GRP } from './mesh.js';
 import { shade, mixc, hash2i, valueNoise } from '../core/math.js';
@@ -12,6 +12,7 @@ import {
 } from './props.js';
 import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard } from './facades.js';
 import { winCode, textWidth } from '../core/painter.js';
+import { bigPark } from './park.js';
 
 export function makeContext(world, mb, atlas, rng) {
   const gp = world.ground.p;
@@ -22,6 +23,17 @@ export function makeContext(world, mb, atlas, rng) {
       const Y0 = Math.round(Math.min(y0, y1) * T), Y1 = Math.round(Math.max(y0, y1) * T);
       for (let y = Y0; y < Y1; y++)
         for (let x = X0; x < X1; x++) {
+          const r = groundFill(kind, x, y, X0, Y0, X1, Y1);
+          if (r) gp.set(x, y, r[0], r[1]);
+        }
+    },
+    // paint texels whose centre satisfies inside(wx, wy) within a bounding box
+    paintWhere(x0, y0, x1, y1, inside, kind) {
+      const X0 = Math.floor(Math.min(x0, x1) * T), X1 = Math.ceil(Math.max(x0, x1) * T);
+      const Y0 = Math.floor(Math.min(y0, y1) * T), Y1 = Math.ceil(Math.max(y0, y1) * T);
+      for (let y = Y0; y < Y1; y++)
+        for (let x = X0; x < X1; x++) {
+          if (!inside((x + 0.5) / T, (y + 0.5) / T)) continue;
           const r = groundFill(kind, x, y, X0, Y0, X1, Y1);
           if (r) gp.set(x, y, r[0], r[1]);
         }
@@ -170,6 +182,36 @@ function groundFill(kind, x, y, X0, Y0, X1, Y1) {
     }
     case 'dirt':
       return [shade(0x8a6a4a, 0.88 + h * 0.24), GC.GRAVEL];
+    case 'lawn': {
+      // freshly mown: alternating light/dark stripes, finer blades than rough grass
+      const n = valueNoise(x * 0.03, y * 0.03, 15);
+      const stripe = Math.floor(x / 48) % 2 === 0;
+      let c = mixc(COL.grass, 0x6cc050, stripe ? 0.35 : 0.0);
+      c = shade(c, (stripe ? 1.0 : 0.93) + h * 0.07 + (n - 0.5) * 0.08);
+      const b = hash2i(x, y >> 1, 78);
+      if (b > 0.94) c = shade(c, 1.1);
+      else if (b < 0.05) c = shade(c, 0.88);
+      return [c, GC.GRASS];
+    }
+    case 'woods': {
+      // woodland floor: shady grass with patches of leaf litter and soil
+      const n = valueNoise(x * 0.09, y * 0.09, 16), n2 = valueNoise(x * 0.3, y * 0.3, 17);
+      let c = mixc(COL.grassDark, 0x2f6a28, 0.35);
+      if (n > 0.66) c = mixc(c, n2 > 0.5 ? 0x5e6a34 : 0x6a5e38, Math.min(0.75, (n - 0.66) * 3.5));
+      c = shade(c, 0.9 + h * 0.16);
+      if (h > 0.985) c = n2 > 0.5 ? 0x8a6a3a : 0x4a7a32; // twigs, clover
+      return [c, GC.GRASS];
+    }
+    case 'pathEdge':
+      return [shade(0x9c978d, 0.92 + h * 0.12), GC.PATH];
+    case 'shore': {
+      // pebbles and rounded rocks at the water's edge
+      const st = hash2i(x >> 2, y >> 2, 23), st2 = hash2i(x >> 1, y >> 1, 24);
+      let c = st > 0.7 ? 0x9a9488 : st > 0.35 ? 0x7e786c : 0x6a6458;
+      if (st2 > 0.85) c = 0xb0aa9c;
+      if ((x & 3) === 0 && (y & 3) === 0) c = shade(c, 0.8);
+      return [shade(c, 0.9 + h * 0.2), GC.GRAVEL];
+    }
   }
   return null;
 }
@@ -188,11 +230,13 @@ function frames(L) {
 export function buildBlocks(C) {
   for (let by = 0; by < NB; by++)
     for (let bx = 0; bx < NB; bx++) {
+      if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const fn = BLOCKS[type];
       if (fn) fn(C, L, bx, by);
     }
+  bigPark(C);
   streetFurniture(C);
 }
 
@@ -631,16 +675,18 @@ function ringWall(C, cx, cy, r, w, h) {
 function streetFurniture(C) {
   const { rng } = C;
   const W = C.world;
-  // signals
+  // signals (none inside the park; T-junctions at its edge lose the heads facing the park)
   for (let i = 0; i <= NB; i++)
     for (let j = 0; j <= NB; j++) {
+      if (isParkIntersection(i, j)) continue;
       const rx = roadCenter(i), ry = roadCenter(j);
       for (const sx of [-1, 1])
-        for (const sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j);
+        for (const sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: isParkIntersection(i + sx, j), closedY: isParkIntersection(i, j + sy) });
     }
   // per block-side furniture
   for (let by = 0; by < NB; by++)
     for (let bx = 0; bx < NB; bx++) {
+      if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts'].includes(type);
@@ -689,30 +735,66 @@ function streetFurniture(C) {
         }
       }
     }
-  // bus shelters
-  busShelter(C, lotStart(1) + 9, lotEnd(1) + 2 - 0.8, 'x', 1);
-  busShelter(C, lotEnd(2) + 2 - 0.8, lotStart(3) + 9, 'y', 1);
+  // the sidewalks round the park
+  const PR = parkRect();
+  const pcx = (PR.x0 + PR.x1) / 2, pcy = (PR.y0 + PR.y1) / 2;
+  // bus shelters on the loop round the park (eastbound on its north side, southbound on its east side)
+  busShelter(C, PR.x0 + 9, PR.y0 - 2 + 0.8, 'x', -1);
+  busShelter(C, PR.x1 + 2 - 0.8, PR.y0 + 9, 'y', 1);
   W.busRoute = true;
+  // subway entrance by the park's west gate, food carts at its gates
+  subwayEntrance(C, PR.x0 - 1.0, pcy - 7.5, 'y');
+  W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4.0, kind: 'pretzel', axis: 'y' });
+  W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: 'hotdog', axis: 'x' });
+  parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4.0], [pcx - 4.2, PR.y1 + 1]]);
   // steam stacks (in parking lanes)
-  steamStack(C, lotStart(1) + 5.5, roadCenter(2) - 1.85);
-  steamStack(C, roadCenter(3) + 1.85, lotStart(1) + 6);
-  steamStack(C, lotStart(2) + 12, roadCenter(4) + 1.85);
-  W.stacksBlock = [
-    { x: lotStart(1) + 5.5, y: roadCenter(2) - 1.85 },
+  const stacks = [
+    { x: roadCenter(1) - 1.85, y: PR.y0 + 13 },
     { x: roadCenter(3) + 1.85, y: lotStart(1) + 6 },
     { x: lotStart(2) + 12, y: roadCenter(4) + 1.85 },
   ];
-  // subway entrance by the park
-  subwayEntrance(C, lotStart(2) - 1.0, lotStart(2) + 4.5, 'y');
+  for (const st of stacks) steamStack(C, st.x, st.y);
+  W.stacksBlock = stacks;
   subwayEntrance(C, lotStart(0) + 14, lotEnd(3) + 1.0, 'x');
   // food carts
   W.carts.push({ x: lotStart(1) + 14, y: lotEnd(0) + 1.3, kind: 'halal', axis: 'x' });
-  W.carts.push({ x: lotEnd(1) + 0.9, y: lotStart(2) + 14.5, kind: 'pretzel', axis: 'y' });
   // food cart geometry
   for (const c of W.carts) buildCart(C, c);
   // manhole steam sources
   for (const m of W.groundInfo.manholes) if (rng.chance(0.35)) W.steam.push({ x: m.x, y: m.y, z: 0.02, kind: 'manhole', rate: 0.4 });
   void PERIOD; void MAP; void GRP; void smoothFill; void drawDoor; void signBoard;
+}
+
+// Furniture on the sidewalks round the park: lamps and trees at the curb, benches along the wall
+function parkSidewalks(C, PR, avoid) {
+  const { rng } = C;
+  const len = PR.x1 - PR.x0;
+  const sides = [
+    { ax: 'x', y: PR.y0 - 2 + 0.35, x0: PR.x0, ny: -1, nx: 0, wall: PR.y0 },
+    { ax: 'x', y: PR.y1 + 2 - 0.35, x0: PR.x0, ny: 1, nx: 0, wall: PR.y1 },
+    { ax: 'y', x: PR.x0 - 2 + 0.35, y0: PR.y0, nx: -1, ny: 0, wall: PR.x0 },
+    { ax: 'y', x: PR.x1 + 2 - 0.35, y0: PR.y0, nx: 1, ny: 0, wall: PR.x1 },
+  ];
+  for (const s of sides) {
+    const at = (t, off = 0) => (s.ax === 'x' ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t]);
+    const free = (t, r) => { const [x, y] = at(t); return avoid.every(([ax, ay]) => Math.hypot(ax - x, ay - y) > r); };
+    for (const t of [4.5, 13.5, 22.5 + 4.2, 31.5, 40.5]) if (free(t, 2.0)) { const [x, y] = at(t); streetLamp(C, x, y, s.nx, s.ny); }
+    for (const t of [1.8, 9.0, 18.0, 22.5, 27.0 + 4.2, 36.0, 43.2]) {
+      if (!free(t, 2.0) || !rng.chance(0.92)) continue;
+      const [x, y] = at(t, 0.35);
+      C.addTree(x, y, rng.pick(['plane', 'plane', 'locust', 'oak']), true);
+    }
+    { const [x, y] = at(rng.pick([11.2, 33.8])); hydrant(C, x, y); }
+    for (const t of [0.8, 44.2]) { const [x, y] = at(t, -0.05); if (rng.chance(0.8)) trashBasket(C, x, y); }
+    // benches against the wall facing the street, Fifth Avenue style
+    for (const t of [6.6, 15.6, 29.4, 38.4]) {
+      if (!free(t, 2.4)) continue;
+      const d = 0.42;
+      if (s.ax === 'x') C.addBench(s.x0 + t, s.wall + (s.ny < 0 ? -d : d), 'x', s.ny);
+      else C.addBench(s.wall + (s.nx < 0 ? -d : d), s.y0 + t, 'y', s.nx);
+    }
+    void len;
+  }
 }
 
 function buildCart(C, c) {

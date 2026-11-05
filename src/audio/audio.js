@@ -2,6 +2,7 @@
 // attenuated by their on-screen position and the zoom level.
 
 import { clamp, RNG } from '../core/math.js';
+import { isParkIntersection } from '../world/layout.js';
 
 export class AudioEngine {
   constructor(app) {
@@ -444,6 +445,7 @@ export class AudioEngine {
       this.chirpT = 0.5;
       const cx = app.camera.x, cy = app.camera.y;
       const i = clamp(Math.round((cx - 4.5) / 27), 0, 4), j = clamp(Math.round((cy - 4.5) / 27), 0, 4);
+      if (isParkIntersection(i, j)) { this.lastWalk = null; return; }
       const st = city.traffic.signalState(i, j);
       const key = `${i},${j},${st.walkEW},${st.walkNS}`;
       if (this.lastWalk && key !== this.lastWalk && (st.walkEW === 'walk' || st.walkNS === 'walk') && css >= 2) this.walkChirp({ x: i * 27 + 4.5, y: j * 27 + 4.5, z: 0 });

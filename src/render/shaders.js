@@ -213,7 +213,8 @@ void main() {
         if (n1 < uSnow * 0.38 - 0.05) albedo = snowC * 0.94;
       } else if (g == 2) {
         cover = uSnow * 1.15;
-      } else if (g == 6 || g == 7) {
+      } else if (g == 6 || g == 7 || g == 11 || g == 16) {
+        // sidewalks, park paths and plazas get shovelled
         cover = uSnow * (0.35 + 0.6 * n3);
       } else if (g == 15) {
         cover = uIce > 0.5 ? uSnow * 0.3 : 0.0;

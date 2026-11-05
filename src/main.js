@@ -41,8 +41,8 @@ async function boot() {
   const camera = new Camera();
   const dpr = window.devicePixelRatio || 1;
   camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr));
-  camera.x = 60;
-  camera.y = 70;
+  camera.x = 62;
+  camera.y = 64;
   if (q.has('zoom')) camera.scale = camera.scaleTo = parseFloat(q.get('zoom'));
   if (q.has('x')) camera.x = parseFloat(q.get('x'));
   if (q.has('y')) camera.y = parseFloat(q.get('y'));

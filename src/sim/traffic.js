@@ -1,6 +1,6 @@
 // Traffic: lanes, signals, cars (IDM following), parking, buses, taxis and special vehicles.
 
-import { NB, MAP, roadCenter, LANE_OFF, PARK_OFF } from '../world/layout.js';
+import { NB, MAP, roadCenter, LANE_OFF, PARK_OFF, roadLegOpen } from '../world/layout.js';
 import { RNG, clamp, dist2 } from '../core/math.js';
 
 export const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]]; // E S W N
@@ -71,6 +71,7 @@ export class Traffic {
       for (let j = 0; j <= NB; j++) this.offsets[i].push(((i * 7 + j * 3) % 5) * 4.3 + (i + j) * 2.1);
     }
     this.exitLock = new Map();
+    this.pedHold = new Map(); // crosswalk key -> time until which pedestrians let a waiting car turn
     this.buildNetwork();
     this.buildParking();
     this.nextId = 1;
@@ -84,7 +85,7 @@ export class Traffic {
         for (let d = 0; d < 4; d++) {
           const [dx, dy] = DIRS[d];
           const ni = i + dx, nj = j + dy;
-          if (ni < 0 || nj < 0 || ni > NB || nj > NB) continue;
+          if (!roadLegOpen(i, j, dx, dy)) continue; // map edge or swallowed by the park
           const [cx, cy] = this.center(i, j);
           const [ex, ey] = this.center(ni, nj);
           // lane offset to the right of travel direction
@@ -275,11 +276,11 @@ export class Traffic {
     return null;
   }
   spawnBus(k) {
-    // clockwise loop: east on j=2 (i 0->3), south on i=3 (j 2->4), west on j=4 (i 3->0), north on i=0 (j 4->2)
+    // clockwise loop around the park: east on j=1 (i 1->3), south on i=3 (j 1->3), west on j=3 (i 3->1), north on i=1 (j 3->1)
     const route = [
-      (L) => (L.d === 0 ? (L.ti === 3 && L.tj === 2 ? 1 : 0) : L.d === 1 ? (L.ti === 3 && L.tj === 4 ? 2 : 1) : L.d === 2 ? (L.ti === 0 && L.tj === 4 ? 3 : 2) : (L.ti === 0 && L.tj === 2 ? 0 : 3)),
+      (L) => (L.d === 0 ? (L.ti === 3 && L.tj === 1 ? 1 : 0) : L.d === 1 ? (L.ti === 3 && L.tj === 3 ? 2 : 1) : L.d === 2 ? (L.ti === 1 && L.tj === 3 ? 3 : 2) : (L.ti === 1 && L.tj === 1 ? 0 : 3)),
     ];
-    const L = k === 0 ? this.links.get('0,2,0') : this.links.get('3,3,1');
+    const L = k === 0 ? this.links.get('1,1,0') : this.links.get('3,3,2');
     if (!L) return;
     const car = this.makeCar('bus', L, 2, { route, color: 0 });
     car.v = 2;
@@ -341,12 +342,14 @@ export class Traffic {
     const st = this.signalState(C.i, C.j);
     const axisEW = C.d === 0 || C.d === 2;
     const light = axisEW ? st.ew : st.ns;
+    // lineWait: time spent stopped at this stop line (kept while creeping up to it, unlike wait)
+    const lw = car.lineWait || 0;
     if (car.special === 'fire' && car.siren) {
       // emergency vehicles proceed carefully through reds
-      if (light !== 'g' && car.wait < 1.5) return false;
+      if (light !== 'g' && lw < 1.5) return false;
     } else if (light === 'fr') {
       // flashing red: full stop, then go when the box is clear and no cross traffic is coming
-      if (car.wait < 1.0) return false;
+      if (lw < 1.0) return false;
       if (this.boxBusy(C, car)) return false;
       const a = this.inLinks.get(`${C.i},${C.j},1`), b = this.inLinks.get(`${C.i},${C.j},3`);
       for (const L of [a, b]) if (L) for (const o of L.cars) if (o.state !== 'parked' && L.len - o.s < 9 && o.v > 1) return false;
@@ -364,14 +367,30 @@ export class Traffic {
     if (lk && lk !== car) return false;
     // space on exit link
     for (const o of C.to.cars) if (o.s < car.len + 1.5 && o.state !== 'parked') return false;
-    // left turn: yield to oncoming
+    // left turn: yield to oncoming traffic. A car waiting at the far stop line only counts if it is
+    // about to go straight or right: opposing left-turners pass in front of each other, and a car
+    // that has sat through its green is held up by something else (otherwise both wait forever).
     if (C.turn === 'l') {
       const opp = this.inLinks.get(`${C.i},${C.j},${(C.d + 2) % 4}`);
-      if (opp) for (const o of opp.cars) if (o.state !== 'parked' && opp.len - o.s < 9 && (o.v > 0.5 || opp.len - o.s < 3)) return false;
-      for (const c2 of this.connectors.values()) if (c2.i === C.i && c2.j === C.j && c2.d === (C.d + 2) % 4 && c2.cars.length) return false;
+      if (opp) for (const o of opp.cars) {
+        if (o.state === 'parked') continue;
+        const rest = opp.len - o.s;
+        if (rest > 9) continue;
+        if (o.v > 0.5) return false;
+        if (rest < 3 && !(o.next && o.next.turn === 'l') && (o.greenWait || 0) < 2.5) return false;
+      }
+      for (const c2 of this.connectors.values()) if (c2.i === C.i && c2.j === C.j && c2.d === (C.d + 2) % 4 && c2.turn !== 'l' && c2.cars.length) return false;
     }
-    // pedestrians on the exit-side crosswalk when turning
-    if (C.turn !== 's' && this.city.people && this.city.people.crosswalkBusy(C.i, C.j, C.nd)) return false;
+    // pedestrians on the exit-side crosswalk when turning. After a few seconds the driver gets a
+    // turn: people about to step off the kerb hold back until the car is through.
+    // Only people near where the exit lane crosses the crosswalk are in the way.
+    if (C.turn !== 's' && this.city.people) {
+      const [dx, dy] = DIRS[C.nd], p0 = C.to.pts[0];
+      if (this.city.people.crossersNear(C.i, C.j, C.nd, p0[0] - dx, p0[1] - dy, 1.7)) {
+        if (car.wait > 3) this.pedHold.set(`${C.i},${C.j},${C.nd}`, this.clock + 1.0);
+        return false;
+      }
+    }
     return true;
   }
   update(dt) {
@@ -406,8 +425,9 @@ export class Traffic {
     sp.iceTimer -= dt;
     if (env.season === 1 && h > 12 && h < 20 && sp.iceTimer <= 0 && !this.cars.some((c) => c.special === 'icecream')) {
       sp.iceTimer = this.rng.range(80, 160);
-      const L = this.links.get('1,2,0') || this.rng.pick([...this.links.values()]);
-      this.spawnSpecial('icecream', { special: 'icecream', link: L, life: 150, stopAt: { link: '1,2,0', s: 9 } });
+      // parks by the south side of the park
+      const L = this.links.get('3,3,2') || this.rng.pick([...this.links.values()]);
+      this.spawnSpecial('icecream', { special: 'icecream', link: L, life: 150, stopAt: { link: '3,3,2', s: 8 } });
     }
     sp.garbageTimer -= dt;
     if (h > 5 && h < 8.5 && sp.garbageTimer <= 0 && !this.cars.some((c) => c.special === 'garbage')) {
@@ -444,6 +464,13 @@ export class Traffic {
     }
     if (car.special === 'icecream' || car.special === 'garbage') vMax *= 0.8;
     let [gap, lv] = this.leaderGap(car);
+    if (P.kind === 'link' && car.v < 0.1 && P.len - car.s < 3) car.lineWait = (car.lineWait || 0) + dt;
+    // time spent stopped at the line while the light says go (see the left-turn rule)
+    if (P.kind === 'link' && car.next && car.v < 0.1 && P.len - car.s < 3) {
+      const st = this.signalState(car.next.i, car.next.j);
+      const light = car.next.d === 0 || car.next.d === 2 ? st.ew : st.ns;
+      car.greenWait = light === 'g' || light === 'fy' ? (car.greenWait || 0) + dt : 0;
+    } else car.greenWait = 0;
     // red light / stop line
     if (P.kind === 'link' && car.next) {
       const rest = P.len - car.s;
@@ -451,23 +478,26 @@ export class Traffic {
         if (rest < gap) { gap = rest; lv = 0; }
       }
     }
-    // bus stops / special stops
+    // bus stops / special stops. The car-following model comes to rest about S0 short of an
+    // obstacle, so a stop at `rem` is presented as an obstacle at rem + S0 to halt right on it.
+    const S0 = 0.9;
     if (car.type === 'bus' && P.kind === 'link') {
       for (const b of car.busStops || []) {
+        if (b === car.lastStop) continue; // just served it
         const along = P.d === 0 || P.d === 2 ? b.x : b.y;
         const cross = P.d === 0 || P.d === 2 ? b.y : b.x;
         const lanePos = P.d === 0 || P.d === 2 ? P.pts[0][1] : P.pts[0][0];
         if (Math.abs(cross - lanePos) > 3) continue;
         const sStop = P.d === 0 ? along - P.pts[0][0] : P.d === 2 ? P.pts[0][0] - along : P.d === 1 ? along - P.pts[0][1] : P.pts[0][1] - along;
         const rem = sStop - car.s;
-        if (car.dwell == null && rem > -0.5 && rem < gap) { gap = rem; lv = 0; if (rem < 0.4 && car.v < 0.3) { car.dwell = 6; this.city.audio?.event('bus', car); } }
+        if (car.dwell == null && rem > -0.5 && rem + S0 < gap) { gap = rem + S0; lv = 0; if (rem < 0.4 && car.v < 0.3) { car.dwell = 6; car.atStop = b; this.city.audio?.event('bus', car); } }
       }
-      if (car.dwell != null) { car.dwell -= dt; gap = 0; lv = 0; if (car.dwell <= 0) { car.dwell = null; car.leftStop = 3; } }
+      if (car.dwell != null) { car.dwell -= dt; gap = 0; lv = 0; if (car.dwell <= 0) { car.dwell = null; car.lastStop = car.atStop; car.leftStop = 3; } }
       if (car.leftStop) { car.leftStop -= dt; if (car.leftStop <= 0) car.leftStop = 0; }
     }
     if (car.stopAt && P.kind === 'link' && P.id === car.stopAt.link && car.stopDone == null) {
       const rem = car.stopAt.s - car.s;
-      if (rem > -0.3 && rem < gap) { gap = rem; lv = 0; if (rem < 0.4 && car.v < 0.2) { car.stopDone = 0; car.dwell = 35; this.city.onIceCreamStop?.(car); } }
+      if (rem > -0.3 && rem + S0 < gap) { gap = rem + S0; lv = 0; if (rem < 0.4 && car.v < 0.2) { car.stopDone = 0; car.dwell = 35; this.city.onIceCreamStop?.(car); } }
     }
     if (car.stopDone === 0 && car.dwell != null) {
       car.dwell -= dt; gap = 0; lv = 0;
@@ -522,6 +552,7 @@ export class Traffic {
       nxt.cars.push(car);
       car.piece = nxt;
       car.s = over;
+      car.lineWait = 0;
       if (nxt.kind === 'link') this.chooseNext(car);
     }
     this.place(car);
@@ -534,12 +565,15 @@ export class Traffic {
     // final check at the stop line (ignores yellow-distance rule)
     const st = this.signalState(C.i, C.j);
     const light = C.d === 0 || C.d === 2 ? st.ew : st.ns;
-    if (light === 'r' && !(car.special === 'fire' && car.wait > 1.5)) return false;
-    if (light === 'fr' && (car.wait < 1.0 || this.boxBusy(C, car))) return false;
+    const lw = car.lineWait || 0;
+    if (light === 'r' && !(car.special === 'fire' && car.siren && lw > 1.5)) return false;
+    if (light === 'fr' && (lw < 1.0 || this.boxBusy(C, car))) return false;
     const lk = this.exitLock.get(C.to.id);
     if (lk && lk !== car) return false;
     return true;
   }
+  // a car has waited long enough to turn across this crosswalk: hold pedestrians at the kerb
+  holdingPeds(key) { return (this.pedHold.get(key) ?? -1) > this.clock; }
   carAt(x, y, r = 1.2) {
     for (const c of this.cars) if (dist2(c.x, c.y, x, y) < r * r) return c;
     return null;

@@ -107,7 +107,7 @@ export class Statics {
     // winter: christmas tree at park centre, sellers
     if (env.season === 3 && world.parkCenter) {
       const c = world.parkCenter;
-      L.push(c.x, c.y, CURB + 1.0, this.frames.xmas, this.xmasRow, SF.TALL);
+      L.push(c.x, c.y, c.z ?? CURB + 1.0, this.frames.xmas, this.xmasRow, SF.TALL);
       for (const s of this.treeSellers) {
         for (let k = 0; k < 5; k++) {
           const ox = s.n[1] * (k - 2) * 0.35, oy = -s.n[0] * (k - 2) * 0.35;

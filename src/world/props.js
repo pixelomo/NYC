@@ -256,7 +256,7 @@ export function parkLamp(C, x, y) {
 }
 
 // Traffic + pedestrian signal pole on a corner. cx,cy = intersection centre
-export function signalPole(C, x, y, sx, sy, i, j) {
+export function signalPole(C, x, y, sx, sy, i, j, o = {}) {
   // sx, sy: which quadrant (+1/-1) relative to the intersection centre
   const P = propTex(C);
   const z = CURB, h = 3.3;
@@ -267,20 +267,30 @@ export function signalPole(C, x, y, sx, sy, i, j) {
   // vehicle heads facing outward along x and y (near-side signals)
   const hz = z + h - 1.05;
   // head facing x (for traffic approaching along x toward the intersection from side sx)
+  // o.closedX / o.closedY: the leg on this pole's x / y side is closed (the park), so no traffic
+  // comes from there and nobody crosses it: drop the heads that would face it.
   const hx = x + sx * 0.05, hy = y - sy * 0.18;
-  solidBox(C, hx - 0.12, hy - 0.12, hz, hx + 0.12, hy + 0.12, hz + 0.75, P.sigHead, P.yellow);
-  C.world.signals.push({ i, j, axis: 'x', x: hx + sx * 0.13, y: hy, z: hz, face: [sx, 0], type: 'car' });
+  if (!o.closedX) {
+    solidBox(C, hx - 0.12, hy - 0.12, hz, hx + 0.12, hy + 0.12, hz + 0.75, P.sigHead, P.yellow);
+    C.world.signals.push({ i, j, axis: 'x', x: hx + sx * 0.13, y: hy, z: hz, face: [sx, 0], type: 'car' });
+  }
   const gx = x - sx * 0.18, gy = y + sy * 0.05;
-  solidBox(C, gx - 0.12, gy - 0.12, hz - 0.1, gx + 0.12, gy + 0.12, hz + 0.65, P.sigHead, P.yellow);
-  C.world.signals.push({ i, j, axis: 'y', x: gx, y: gy + sy * 0.13, z: hz - 0.1, face: [0, sy], type: 'car' });
+  if (!o.closedY) {
+    solidBox(C, gx - 0.12, gy - 0.12, hz - 0.1, gx + 0.12, gy + 0.12, hz + 0.65, P.sigHead, P.yellow);
+    C.world.signals.push({ i, j, axis: 'y', x: gx, y: gy + sy * 0.13, z: hz - 0.1, face: [0, sy], type: 'car' });
+  }
   // pedestrian heads facing across the crosswalks
   const pz = z + 1.6;
   const px = x - sx * 0.12, py = y;
-  solidBox(C, px - 0.1, py - 0.1, pz, px + 0.1, py + 0.1, pz + 0.38, P.pedHead, P.yellow);
-  C.world.signals.push({ i, j, axis: 'x', x: px - sx * 0.11, y: py, z: pz + 0.08, face: [-sx, 0], type: 'ped' });
+  if (!o.closedY) {
+    solidBox(C, px - 0.1, py - 0.1, pz, px + 0.1, py + 0.1, pz + 0.38, P.pedHead, P.yellow);
+    C.world.signals.push({ i, j, axis: 'x', x: px - sx * 0.11, y: py, z: pz + 0.08, face: [-sx, 0], type: 'ped' });
+  }
   const qx = x, qy = y - sy * 0.12;
-  solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow);
-  C.world.signals.push({ i, j, axis: 'y', x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: 'ped' });
+  if (!o.closedX) {
+    solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow);
+    C.world.signals.push({ i, j, axis: 'y', x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: 'ped' });
+  }
   C.world.perches.push({ x, y, z: z + h + 0.17 });
 }
 
@@ -366,7 +376,7 @@ export function busShelter(C, x, y, axis, roadSide) {
   else solidBox(C, x0, y1 - 0.06, z, x1, y1, z + H, P.adPanel, P.silver);
   // posts
   for (const [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) solidBox(C, px - 0.04, py - 0.04, z, px + 0.04, py + 0.04, z + H, P.silver);
-  bench(C, x, y, axis, { facing: axis === 'x' ? -roadSide : -roadSide });
+  bench(C, x, y, axis, { facing: roadSide }); // riders face the street to watch for the bus
   C.world.busStops.push({ x, y, axis, roadSide });
   C.world.lamps.push({ x, y, z: z + H, r: 1.8, color: [0.85, 0.9, 1.0], k: 0.4, kind: 'shelter' });
 }

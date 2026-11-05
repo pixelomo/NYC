@@ -1,6 +1,6 @@
 // Pedestrian navigation graph: sidewalks, crosswalks (signal-controlled), park paths and POIs.
 
-import { NB, roadCenter, CURB } from '../world/layout.js';
+import { NB, roadCenter, CURB, isParkIntersection } from '../world/layout.js';
 import { dist } from '../core/math.js';
 
 const Q = 3.5; // sidewalk centreline offset from road centre
@@ -91,30 +91,45 @@ export function buildNav(world) {
   const G = new NavGraph();
   const corner = {};
   const key = (i, j, qx, qy) => `${i},${j},${qx},${qy}`;
+  const park = (i, j) => isParkIntersection(i, j);
   for (let i = 0; i <= NB; i++)
-    for (let j = 0; j <= NB; j++)
+    for (let j = 0; j <= NB; j++) {
+      if (park(i, j)) continue;
       for (const qx of [-1, 1])
         for (const qy of [-1, 1]) {
           const n = G.add(roadCenter(i) + qx * Q, roadCenter(j) + qy * Q, CURB, 'corner');
           n.i = i; n.j = j;
           corner[key(i, j, qx, qy)] = n;
         }
-  // crosswalks
+    }
+  // crosswalks; a leg swallowed by the park is plain sidewalk now (a segment POIs can attach to)
+  const walk = (a, b) => G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
   for (let i = 0; i <= NB; i++)
     for (let j = 0; j <= NB; j++) {
-      for (const qy of [-1, 1]) G.link(corner[key(i, j, -1, qy)], corner[key(i, j, 1, qy)], { i, j, axis: 'x', side: qy < 0 ? 3 : 1 });
-      for (const qx of [-1, 1]) G.link(corner[key(i, j, qx, -1)], corner[key(i, j, qx, 1)], { i, j, axis: 'y', side: qx < 0 ? 2 : 0 });
+      if (park(i, j)) continue;
+      for (const qy of [-1, 1]) {
+        const a = corner[key(i, j, -1, qy)], b = corner[key(i, j, 1, qy)];
+        if (park(i, j + qy)) walk(a, b);
+        else G.link(a, b, { i, j, axis: 'x', side: qy < 0 ? 3 : 1 });
+      }
+      for (const qx of [-1, 1]) {
+        const a = corner[key(i, j, qx, -1)], b = corner[key(i, j, qx, 1)];
+        if (park(i + qx, j)) walk(a, b);
+        else G.link(a, b, { i, j, axis: 'y', side: qx < 0 ? 2 : 0 });
+      }
     }
   // sidewalk segments
   for (let j = 0; j <= NB; j++)
     for (let i = 0; i < NB; i++)
       for (const qy of [-1, 1]) {
+        if (park(i, j) || park(i + 1, j)) continue;
         const a = corner[key(i, j, 1, qy)], b = corner[key(i + 1, j, -1, qy)];
         G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
       }
   for (let i = 0; i <= NB; i++)
     for (let j = 0; j < NB; j++)
       for (const qx of [-1, 1]) {
+        if (park(i, j) || park(i, j + 1)) continue;
         const a = corner[key(i, j, qx, 1)], b = corner[key(i, j + 1, qx, -1)];
         G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
       }
@@ -181,48 +196,31 @@ export function buildNav(world) {
     }
     if (best) poi.stoops.push({ seat: s, door: best });
   }
-  // Park network -----------------------------------------------------------
-  if (world.park) {
-    const P = world.park, cx = P.cx, cy = P.cy;
-    const o = 1.3;
-    const c00 = G.add(P.x0 + o, P.y0 + o), c10 = G.add(P.x1 - o, P.y0 + o), c11 = G.add(P.x1 - o, P.y1 - o), c01 = G.add(P.x0 + o, P.y1 - o);
-    const mN = G.add(cx, P.y0 + o), mS = G.add(cx, P.y1 - o), mW = G.add(P.x0 + o, cy), mE = G.add(P.x1 - o, cy);
-    G.link(c00, mN); G.link(mN, c10); G.link(c10, mE); G.link(mE, c11); G.link(c11, mS); G.link(mS, c01); G.link(c01, mW); G.link(mW, c00);
-    const r = 3.0;
-    const rN = G.add(cx, cy - r), rS = G.add(cx, cy + r), rW = G.add(cx - r, cy), rE = G.add(cx + r, cy);
-    const d = r * 0.72;
-    const dNW = G.add(cx - d, cy - d), dNE = G.add(cx + d, cy - d), dSE = G.add(cx + d, cy + d), dSW = G.add(cx - d, cy + d);
-    const ring = [rN, dNE, rE, dSE, rS, dSW, rW, dNW];
-    for (let k = 0; k < 8; k++) G.link(ring[k], ring[(k + 1) % 8]);
-    G.link(mN, rN); G.link(mS, rS); G.link(mW, rW); G.link(mE, rE);
-    G.link(c00, dNW); G.link(c10, dNE); G.link(c11, dSE); G.link(c01, dSW);
-    // entrances to sidewalk
-    const entr = [[mN, cx, P.y0 - 1], [mS, cx, P.y1 + 1], [mW, P.x0 - 1, cy], [mE, P.x1 + 1, cy]];
-    for (const [n, x, y] of entr) { const sw = G.attach(x, y); if (sw) G.link(n, sw); }
-    // corners connect to intersection corner nodes
-    const near = (x, y) => G.nodes.filter((n) => n.kind === 'corner').reduce((b, n) => (dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b));
-    G.link(c00, near(P.x0 - 1, P.y0 - 1)); G.link(c10, near(P.x1 + 1, P.y0 - 1)); G.link(c11, near(P.x1 + 1, P.y1 + 1)); G.link(c01, near(P.x0 - 1, P.y1 + 1));
-    poi.park.paths = [c00, c10, c11, c01, mN, mS, mW, mE, ...ring];
-    poi.park.ring = ring;
-    poi.park.perimeter = [c00, mN, c10, mE, c11, mS, c01, mW];
-    // benches inside the park
-    const all = G.nodes.slice();
+  // Park network (paths described by the park builder) ---------------------------
+  if (world.parkNet) {
+    const N = world.parkNet;
+    const pn = N.nodes.map((n) => G.add(n.x, n.y, CURB, 'park'));
+    for (const [a, b] of N.edges) G.link(pn[a], pn[b]);
+    // gates: link to the sidewalk outside (or straight to an intersection corner)
+    for (const g of N.gates) {
+      let sw = null;
+      if (g.corner) sw = G.nodes.filter((n) => n.kind === 'corner').reduce((b, n) => (dist(n.x, n.y, g.sx, g.sy) < dist(b.x, b.y, g.sx, g.sy) ? n : b));
+      else sw = G.attach(g.sx, g.sy, 2.5);
+      if (sw) G.link(pn[g.node], sw);
+    }
+    const pick = (ids) => ids.map((k) => pn[k]);
+    poi.park.paths = pick(N.paths);
+    poi.park.ring = pick(N.ring);
+    poi.park.perimeter = pick(N.perimeter);
+    poi.park.lawnNodes = pick(N.lawnNodes);
+    if (N.pond != null) poi.park.pond = pn[N.pond];
+    if (N.dogGate != null) poi.park.dogGate = pn[N.dogGate];
+    const P = world.park;
     const nearestPark = (x, y) => poi.park.paths.reduce((b, n) => (dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b));
+    // benches inside the park sit on its paths
     for (const b of world.benches) {
-      if (b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1) {
-        const n = nearestPark(b.x, b.y);
-        poi.benches.push({ bench: b, node: n, park: true });
-      }
+      if (b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1) poi.benches.push({ bench: b, node: nearestPark(b.x, b.y), park: true });
     }
-    // pond & dog run & lawns
-    if (world.pond) poi.park.pond = nearestPark(world.pond.x, world.pond.y);
-    if (world.dogRun) {
-      const g = G.add(world.dogRun.gate.x, world.dogRun.gate.y);
-      G.link(g, nearestPark(g.x, g.y));
-      poi.park.dogGate = g;
-    }
-    poi.park.lawnNodes = (world.lawns || []).map((l) => nearestPark((l.x0 + l.x1) / 2, (l.y0 + l.y1) / 2));
-    void all;
   }
   // other benches (plazas, bus shelters): attach to sidewalk
   for (const b of world.benches) {

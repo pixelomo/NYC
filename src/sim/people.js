@@ -44,8 +44,19 @@ export class People {
   // ---- helpers -----------------------------------------------------------------
   crossKey(c) { return `${c.i},${c.j},${c.side}`; }
   crosswalkBusy(i, j, side) { return (this.cross.get(`${i},${j},${side}`) || 0) > 0; }
+  // anyone on this crosswalk within r of (x, y)?
+  crossersNear(i, j, side, x, y, r) {
+    if (!this.crosswalkBusy(i, j, side)) return false;
+    for (const p of this.list) {
+      const c = p.crossing;
+      if (c && c.i === i && c.j === j && c.side === side && dist2(p.x, p.y, x, y) < r * r) return true;
+    }
+    return false;
+  }
   walkState(c) {
-    const st = this.city.traffic.signalState(c.i, c.j);
+    const tr = this.city.traffic;
+    if (tr.holdingPeds(this.crossKey(c))) return 'dont'; // let the waiting car turn first
+    const st = tr.signalState(c.i, c.j);
     return c.axis === 'x' ? st.walkEW : st.walkNS;
   }
   env() { return this.city.env; }
@@ -291,7 +302,7 @@ export class People {
     p.alpha = 0;
     if (anywhere) {
       // start partway along the route
-      const n = r.pick(this.nav.nodes.filter((nn) => nn.kind === 'walk' || nn.kind === 'corner'));
+      const n = r.pick(this.nav.nodes.filter((nn) => nn.kind === 'walk' || nn.kind === 'corner' || nn.kind === 'park'));
       p.node = n; p.x = n.x; p.y = n.y; p.z = n.z; p.alpha = 1; p.state = 'idle'; p.timer = r.range(0, 0.5);
     }
     if (p.dog) { p.dog.x = p.x; p.dog.y = p.y; }
@@ -564,8 +575,15 @@ export class People {
       if (ahead > 0.15 && ahead < 0.5 && o.state === 'walk') speed *= 0.7;
     }
     const step = speed * dt;
-    if (d <= step + 0.03) {
-      p.x = tx; p.y = ty; p.z = wp.z;
+    // progress watchdog: people converging on one spot (a bus stop, a kerb corner) push each other
+    // apart and could hover round it forever; after a while without getting closer, call it reached
+    if (p.wpIdx !== p.pi || p.wpPath !== p.path) { p.wpIdx = p.pi; p.wpPath = p.path; p.wpBest = d; p.wpT = 0; }
+    else if (d < p.wpBest - 0.05) { p.wpBest = d; p.wpT = 0; }
+    else p.wpT += dt;
+    const stalled = p.wpT > 1.5 && d < 1.2;
+    if (d <= step + 0.03 || stalled) {
+      if (!stalled) { p.x = tx; p.y = ty; }
+      p.z = wp.z;
       p.node = wp.node;
       if (p.crossing && wp.cross === p.crossing) this.endCross(p);
       p.pi++;

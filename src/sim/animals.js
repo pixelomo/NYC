@@ -74,7 +74,7 @@ export class Animals {
     const W = this.city.world, r = this.rng;
     const spots = [];
     // flock home spots: park plaza, sidewalks near benches, carts, plazas
-    if (W.parkCenter) spots.push({ x: W.parkCenter.x + 2.4, y: W.parkCenter.y + 1.0, r: 1.6 });
+    if (W.parkCenter) { const [fx, fy] = W.parkCenter.flock || [W.parkCenter.x + 2.4, W.parkCenter.y + 1.0]; spots.push({ x: fx, y: fy, r: 0.9 }); }
     for (const c of W.carts) spots.push({ x: c.x + 0.8, y: c.y + 0.6, r: 1.0 });
     for (const b of W.benches.filter((_, i) => i % 3 === 0).slice(0, 6)) spots.push({ x: b.x + 0.6, y: b.y + 0.6, r: 1.0 });
     for (const s of W.subways) spots.push({ x: s.x + 0.6, y: s.y, r: 0.9 });

@@ -22,12 +22,29 @@ export const lotStart = (b) => b * PERIOD + STREET;
 export const lotEnd = (b) => b * PERIOD + STREET + BLOCK;
 
 // BLOCK_TYPES[by][bx]. Camera starts in the south-east, so tall stuff lives in the north-west.
+// The middle 2x2 blocks (and the streets between them) are one big park.
 export const BLOCK_TYPES = [
   ['deco', 'glass', 'office', 'lofts'],
-  ['modern', 'commercial', 'walkups', 'brownstones'],
-  ['tenements', 'court', 'park', 'firehouse'],
-  ['brownstones', 'brownstones', 'brownstones', 'bodega'],
+  ['modern', 'park', 'park', 'commercial'],
+  ['tenements', 'park', 'park', 'court'],
+  ['firehouse', 'walkups', 'brownstones', 'bodega'],
 ];
+
+// The big park: blocks bx0..bx1 x by0..by1 merged, swallowing the streets between them.
+export const PARK = { bx0: 1, by0: 1, bx1: 2, by1: 2 };
+// lot area inside the park wall
+export const parkRect = () => ({ x0: lotStart(PARK.bx0), y0: lotStart(PARK.by0), x1: lotEnd(PARK.bx1), y1: lotEnd(PARK.by1) });
+// raised area incl. the sidewalk ring around it
+export const parkPlinth = () => ({ x0: roadEnd(PARK.bx0), y0: roadEnd(PARK.by0), x1: roadStart(PARK.bx1 + 1), y1: roadStart(PARK.by1 + 1) });
+export const blockInPark = (bx, by) => bx >= PARK.bx0 && bx <= PARK.bx1 && by >= PARK.by0 && by <= PARK.by1;
+// intersections swallowed by the park (strictly inside it)
+export const isParkIntersection = (i, j) => i > PARK.bx0 && i <= PARK.bx1 && j > PARK.by0 && j <= PARK.by1;
+// is the leg of intersection (i, j) heading in direction (dx, dy) a road?
+export const roadLegOpen = (i, j, dx, dy) => {
+  const ni = i + dx, nj = j + dy;
+  if (ni < 0 || nj < 0 || ni > NB || nj > NB) return false;
+  return !isParkIntersection(i, j) && !isParkIntersection(ni, nj);
+};
 
 export const AVENUE_NAMES = ['1 AV', '2 AV', '3 AV', 'LEXINGTON', 'PARK AV'];
 export const STREET_NAMES = ['W 56 ST', 'W 55 ST', 'W 54 ST', 'W 53 ST', 'W 52 ST'];

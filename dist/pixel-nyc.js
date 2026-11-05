@@ -276,7 +276,8 @@ void main() {
         if (n1 < uSnow * 0.38 - 0.05) albedo = snowC * 0.94;
       } else if (g == 2) {
         cover = uSnow * 1.15;
-      } else if (g == 6 || g == 7) {
+      } else if (g == 6 || g == 7 || g == 11 || g == 16) {
+        // sidewalks, park paths and plazas get shovelled
         cover = uSnow * (0.35 + 0.6 * n3);
       } else if (g == 15) {
         cover = uIce > 0.5 ? uSnow * 0.3 : 0.0;
@@ -610,10 +611,13 @@ void main() {
   // src/world/layout.js
   var roadStart = (k) => k * 27 + 2, roadEnd = (k) => k * 27 + 2 + 5, roadCenter = (k) => k * 27 + 2 + 2.5, lotStart = (b) => b * 27 + 9, lotEnd = (b) => b * 27 + 9 + 18, BLOCK_TYPES = [
     ["deco", "glass", "office", "lofts"],
-    ["modern", "commercial", "walkups", "brownstones"],
-    ["tenements", "court", "park", "firehouse"],
-    ["brownstones", "brownstones", "brownstones", "bodega"]
-  ];
+    ["modern", "park", "park", "commercial"],
+    ["tenements", "park", "park", "court"],
+    ["firehouse", "walkups", "brownstones", "bodega"]
+  ], PARK = { bx0: 1, by0: 1, bx1: 2, by1: 2 }, parkRect = () => ({ x0: lotStart(PARK.bx0), y0: lotStart(PARK.by0), x1: lotEnd(PARK.bx1), y1: lotEnd(PARK.by1) }), parkPlinth = () => ({ x0: roadEnd(PARK.bx0), y0: roadEnd(PARK.by0), x1: roadStart(PARK.bx1 + 1), y1: roadStart(PARK.by1 + 1) }), blockInPark = (bx, by) => bx >= PARK.bx0 && bx <= PARK.bx1 && by >= PARK.by0 && by <= PARK.by1, isParkIntersection = (i, j) => i > PARK.bx0 && i <= PARK.bx1 && j > PARK.by0 && j <= PARK.by1, roadLegOpen = (i, j, dx, dy) => {
+    let ni = i + dx, nj = j + dy;
+    return ni < 0 || nj < 0 || ni > 4 || nj > 4 ? !1 : !isParkIntersection(i, j) && !isParkIntersection(ni, nj);
+  };
   function blockRect(bx, by) {
     return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };
   }
@@ -1564,6 +1568,16 @@ void main() {
     }
     return x < 117 && out.push([x, 117]), out;
   }
+  function plinthRects() {
+    let iv = raisedIntervals(), P = parkPlinth(), inPark = (a, b) => a >= P.x0 && b <= P.x1, out = [];
+    for (let [ax, bx] of iv)
+      for (let [ay, by] of iv) inPark(ax, bx) && ay >= P.y0 && by <= P.y1 || out.push([ax, ay, bx, by]);
+    return out.push([P.x0, P.y0, P.x1, P.y1]), out;
+  }
+  var inParkPlinth = (x, y, m = 0) => {
+    let P = parkPlinth();
+    return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
+  };
   function paintGround(region3, rng) {
     let p = region3.p, N = 117 * 32, d = region3.page.data, cells = Math.ceil(N / 64), big = new Float32Array(cells * cells);
     for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cells, i / cells | 0, 12) - 0.5;
@@ -1624,27 +1638,27 @@ void main() {
         let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32;
         j > 0 && paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W), j < 4 && paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W), i > 0 && paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W), i < 4 && paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W);
       }
-    let iv = raisedIntervals();
-    for (let [ax, bx] of iv)
-      for (let [ay, by] of iv) paintSidewalkRect(p, ax * 32, ay * 32, (bx - ax) * 32, (by - ay) * 32, rng);
+    for (let [ax, ay, bx, by] of plinthRects()) paintSidewalkRect(p, ax * 32, ay * 32, (bx - ax) * 32, (by - ay) * 32, rng);
     let manholes = [];
     for (let k = 0; k <= 4; k++)
       for (let s = 0; s < 4; s++) {
-        let along = s * 27 + 9 + rng.range(3, 15), off = roadCenter(k) + rng.pick([-0.7, 0.7, 0]);
+        let along2 = s * 27 + 9 + rng.range(3, 15), off = roadCenter(k) + rng.pick([-0.7, 0.7, 0]);
         for (let axis of ["x", "y"]) {
-          let wx = axis === "x" ? along : off, wy = axis === "x" ? off : along;
-          manhole(p, wx * 32, wy * 32, rng), manholes.push({ x: wx, y: wy, axis });
+          let wx = axis === "x" ? along2 : off, wy = axis === "x" ? off : along2;
+          inParkPlinth(wx, wy, 0.5) || (manhole(p, wx * 32, wy * 32, rng), manholes.push({ x: wx, y: wy, axis }));
         }
       }
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j <= 4; j++) {
         let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32, h = 5 / 2 * 32;
-        for (let [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, !0], [rcx + h - 14, rcy + h + 58, !0], [rcx - h - 70, rcy + h - 14, !1], [rcx + h + 58, rcy - h + 2, !1]]) {
-          let w = vert ? 12 : 22, hh = vert ? 22 : 12;
-          p.rect(gx, gy, w, hh, 2500395, GC.METAL);
-          for (let t = 2; t < (vert ? hh : w) - 1; t += 3)
-            vert ? p.rect(gx + 2, gy + t, w - 4, 1, 5000530, GC.METAL) : p.rect(gx + t, gy + 2, 1, hh - 4, 5000530, GC.METAL);
-        }
+        if (!isParkIntersection(i, j))
+          for (let [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, !0], [rcx + h - 14, rcy + h + 58, !0], [rcx - h - 70, rcy + h - 14, !1], [rcx + h + 58, rcy - h + 2, !1]]) {
+            if (inParkPlinth((gx + 6) / 32, (gy + 6) / 32, 0.2)) continue;
+            let w = vert ? 12 : 22, hh = vert ? 22 : 12;
+            p.rect(gx, gy, w, hh, 2500395, GC.METAL);
+            for (let t = 2; t < (vert ? hh : w) - 1; t += 3)
+              vert ? p.rect(gx + 2, gy + t, w - 4, 1, 5000530, GC.METAL) : p.rect(gx + t, gy + 2, 1, hh - 4, 5000530, GC.METAL);
+          }
       }
     return { manholes };
   }
@@ -1695,16 +1709,14 @@ void main() {
   function buildGroundGeometry(mb, ground, tex) {
     let g = { t: ground, world: !0, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
     mb.box(0, 0, -7, 117, 117, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
-    let iv = raisedIntervals();
-    for (let [ax, bx] of iv)
-      for (let [ay, by] of iv)
-        mb.box(ax, ay, 0, bx, by, 0.125, {
-          pz: { t: ground, u0: ax * 32, v0: ay * 32, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
-          px: tex.curb,
-          nx: tex.curb,
-          py: tex.curb,
-          ny: tex.curb
-        });
+    for (let [ax, ay, bx, by] of plinthRects())
+      mb.box(ax, ay, 0, bx, by, 0.125, {
+        pz: { t: ground, u0: ax * 32, v0: ay * 32, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
+        px: tex.curb,
+        nx: tex.curb,
+        py: tex.curb,
+        ny: tex.curb
+      });
   }
   var TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: 114, station: [14, 34] };
   function buildSlabSides(mb, atlas, tex) {
@@ -3211,17 +3223,17 @@ void main() {
     let P = propTex(C), z = 0.125;
     solidBox(C, x - 0.06, y - 0.06, z, x + 0.06, y + 0.06, z + 2.2, P.black), solidBox(C, x - 0.1, y - 0.1, z, x + 0.1, y + 0.1, z + 0.35, P.black), solidBox(C, x - 0.17, y - 0.17, z + 2.2, x + 0.17, y + 0.17, z + 2.65, P.lantern, P.black), C.mb.pyramid(x - 0.2, y - 0.2, x + 0.2, y + 0.2, z + 2.65, z + 2.85, P.black), C.world.lamps.push({ x, y, z: z + 2.4, r: 3, color: [1, 0.82, 0.55], k: 0.85, kind: "park" }), C.world.lampHeads.push({ x, y, z: z + 2.42, kind: "park" }), C.world.perches.push({ x, y, z: z + 2.85 });
   }
-  function signalPole(C, x, y, sx, sy, i, j) {
+  function signalPole(C, x, y, sx, sy, i, j, o = {}) {
     let P = propTex(C), z = 0.125, h = 3.3;
     solidBox(C, x - 0.06, y - 0.06, z, x + 0.06, y + 0.06, z + h, P.poleDark), solidBox(C, x - 0.5, y - 0.02, z + h - 0.15, x + 0.5, y + 0.02, z + h, P.streetSign), solidBox(C, x - 0.02, y - 0.5, z + h + 0.02, x + 0.02, y + 0.5, z + h + 0.17, P.streetSign);
     let hz = z + h - 1.05, hx = x + sx * 0.05, hy = y - sy * 0.18;
-    solidBox(C, hx - 0.12, hy - 0.12, hz, hx + 0.12, hy + 0.12, hz + 0.75, P.sigHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: hx + sx * 0.13, y: hy, z: hz, face: [sx, 0], type: "car" });
+    o.closedX || (solidBox(C, hx - 0.12, hy - 0.12, hz, hx + 0.12, hy + 0.12, hz + 0.75, P.sigHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: hx + sx * 0.13, y: hy, z: hz, face: [sx, 0], type: "car" }));
     let gx = x - sx * 0.18, gy = y + sy * 0.05;
-    solidBox(C, gx - 0.12, gy - 0.12, hz - 0.1, gx + 0.12, gy + 0.12, hz + 0.65, P.sigHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: gx, y: gy + sy * 0.13, z: hz - 0.1, face: [0, sy], type: "car" });
+    o.closedY || (solidBox(C, gx - 0.12, gy - 0.12, hz - 0.1, gx + 0.12, gy + 0.12, hz + 0.65, P.sigHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: gx, y: gy + sy * 0.13, z: hz - 0.1, face: [0, sy], type: "car" }));
     let pz = z + 1.6, px = x - sx * 0.12, py = y;
-    solidBox(C, px - 0.1, py - 0.1, pz, px + 0.1, py + 0.1, pz + 0.38, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: px - sx * 0.11, y: py, z: pz + 0.08, face: [-sx, 0], type: "ped" });
+    o.closedY || (solidBox(C, px - 0.1, py - 0.1, pz, px + 0.1, py + 0.1, pz + 0.38, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: px - sx * 0.11, y: py, z: pz + 0.08, face: [-sx, 0], type: "ped" }));
     let qx = x, qy = y - sy * 0.12;
-    solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: "ped" }), C.world.perches.push({ x, y, z: z + h + 0.17 });
+    o.closedX || (solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: "ped" })), C.world.perches.push({ x, y, z: z + h + 0.17 });
   }
   function hydrant(C, x, y) {
     let P = propTex(C), z = 0.125;
@@ -3272,7 +3284,7 @@ void main() {
     let back = axis === "x" ? roadSide > 0 ? y0 : y1 : roadSide > 0 ? x0 : x1;
     axis === "x" ? C.mb.vquad(x0, back, x1, back, z, z + H, P.glass, { mat: MAT.FLAT }) : C.mb.vquad(back, y0, back, y1, z, z + H, P.glass, { mat: MAT.FLAT }), axis === "x" ? solidBox(C, x1 - 0.06, y0, z, x1, y1, z + H, P.adPanel, P.silver) : solidBox(C, x0, y1 - 0.06, z, x1, y1, z + H, P.adPanel, P.silver);
     for (let [px, py] of [[x0, y0], [x1, y0], [x0, y1], [x1, y1]]) solidBox(C, px - 0.04, py - 0.04, z, px + 0.04, py + 0.04, z + H, P.silver);
-    bench(C, x, y, axis, { facing: -roadSide }), C.world.busStops.push({ x, y, axis, roadSide }), C.world.lamps.push({ x, y, z: z + H, r: 1.8, color: [0.85, 0.9, 1], k: 0.4, kind: "shelter" });
+    bench(C, x, y, axis, { facing: roadSide }), C.world.busStops.push({ x, y, axis, roadSide }), C.world.lamps.push({ x, y, z: z + H, r: 1.8, color: [0.85, 0.9, 1], k: 0.4, kind: "shelter" });
   }
   function subwayEntrance(C, x, y, axis) {
     let P = propTex(C), z = 0.125, L = 2.5, W = 1.1, [x0, x1, y0, y1] = axis === "x" ? [x - L / 2, x + L / 2, y - W / 2, y + W / 2] : [x - W / 2, x + W / 2, y - L / 2, y + L / 2];
@@ -3352,6 +3364,431 @@ void main() {
     C.world.lamps.push({ x: p[0], y: p[1], z: z + h, r: 1.6, color: [1, 0.95, 0.85], k: 0.5, kind: "shed" });
   }
 
+  // src/world/park.js
+  var PI = Math.PI, dist3 = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+  function segDist(px, py, ax, ay, bx, by) {
+    let dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy || 1e-9, t = ((px - ax) * dx + (py - ay) * dy) / L2;
+    return t = t < 0 ? 0 : t > 1 ? 1 : t, Math.hypot(px - ax - dx * t, py - ay - dy * t);
+  }
+  function spline(cp, per = 8) {
+    if (cp.length < 3) return cp.map((p) => [p[0], p[1]]);
+    let out = [], P = (i) => cp[Math.max(0, Math.min(cp.length - 1, i))];
+    for (let i = 0; i < cp.length - 1; i++) {
+      let p0 = P(i - 1), p1 = P(i), p2 = P(i + 1), p3 = P(i + 2);
+      for (let k = 0; k < per; k++) {
+        let t = k / per, t2 = t * t, t3 = t2 * t, f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+        out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+      }
+    }
+    return out.push([cp[cp.length - 1][0], cp[cp.length - 1][1]]), out;
+  }
+  function polyLen(pts) {
+    let L = 0;
+    for (let i = 1; i < pts.length; i++) L += dist3(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+    return L;
+  }
+  function along(pts, s) {
+    for (let i = 1; i < pts.length; i++) {
+      let L = dist3(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
+      if (s <= L || i === pts.length - 1) {
+        let t = L > 0 ? Math.min(1, s / L) : 0, dx = (pts[i][0] - pts[i - 1][0]) / (L || 1), dy = (pts[i][1] - pts[i - 1][1]) / (L || 1);
+        return { x: pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, y: pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t, dx, dy };
+      }
+      s -= L;
+    }
+    let p = pts[pts.length - 1];
+    return { x: p[0], y: p[1], dx: 1, dy: 0 };
+  }
+  function resample(pts, step) {
+    let L = polyLen(pts), n = Math.max(1, Math.round(L / step)), out = [];
+    for (let k = 0; k <= n; k++) {
+      let a = along(pts, L * k / n);
+      out.push([a.x, a.y]);
+    }
+    return out[0] = [pts[0][0], pts[0][1]], out[n] = [pts[pts.length - 1][0], pts[pts.length - 1][1]], out;
+  }
+  function roundedRect(x0, y0, x1, y1, r, step = 0.4) {
+    let pts = [], line = (ax, ay, bx, by) => {
+      let n = Math.max(1, Math.ceil(dist3(ax, ay, bx, by) / step));
+      for (let i = 0; i < n; i++) pts.push([ax + (bx - ax) * i / n, ay + (by - ay) * i / n]);
+    }, arc = (ccx, ccy, a0, a1) => {
+      let n = Math.max(4, Math.ceil(Math.abs(a1 - a0) * r / step));
+      for (let i = 0; i < n; i++) {
+        let a = a0 + (a1 - a0) * i / n;
+        pts.push([ccx + Math.cos(a) * r, ccy + Math.sin(a) * r]);
+      }
+    };
+    return line(x0 + r, y0, x1 - r, y0), arc(x1 - r, y0 + r, -PI / 2, 0), line(x1, y0 + r, x1, y1 - r), arc(x1 - r, y1 - r, 0, PI / 2), line(x1 - r, y1, x0 + r, y1), arc(x0 + r, y1 - r, PI / 2, PI), line(x0, y1 - r, x0, y0 + r), arc(x0 + r, y0 + r, PI, 1.5 * PI), pts;
+  }
+  function ellipsePts(ecx, ecy, rx, ry, step = 0.4) {
+    let n = Math.max(16, Math.ceil(2 * PI * Math.max(rx, ry) / step)), pts = [];
+    for (let i = 0; i < n; i++) {
+      let a = i / n * 2 * PI;
+      pts.push([ecx + Math.cos(a) * rx, ecy + Math.sin(a) * ry]);
+    }
+    return pts;
+  }
+  function splitClosed(pts, js) {
+    let n = pts.length, idx = js.map(([x, y]) => {
+      let b = 0, bd = 1e9;
+      for (let i = 0; i < n; i++) {
+        let d = dist3(pts[i][0], pts[i][1], x, y);
+        d < bd && (bd = d, b = i);
+      }
+      return b;
+    }), sorted = [...new Set(idx)].sort((a, b) => a - b), pieces = [];
+    for (let k = 0; k < sorted.length; k++) {
+      let a = sorted[k], b = sorted[(k + 1) % sorted.length], seg = [];
+      for (let i = a; seg.push(pts[i]), i !== b; i = (i + 1) % n)
+        ;
+      pieces.push(seg);
+    }
+    return { pieces, at: idx.map((i) => pts[i]) };
+  }
+  var Net = class {
+    constructor() {
+      this.nodes = [], this.edges = [], this.strokes = [];
+    }
+    node(x, y) {
+      for (let i = 0; i < this.nodes.length; i++) {
+        let n = this.nodes[i];
+        if (Math.abs(n.x - x) < 0.35 && Math.abs(n.y - y) < 0.35) return i;
+      }
+      return this.nodes.push({ x, y }), this.nodes.length - 1;
+    }
+    edge(a, b) {
+      a !== b && (this.edges.some(([u, v]) => u === a && v === b || u === b && v === a) || this.edges.push([a, b]));
+    }
+    // paint + walk a path; returns its node ids in order
+    path(pts, w, o = {}) {
+      w > 0 && this.strokes.push({ pts, w, edge: o.edge ?? 2 });
+      let ids = resample(pts, o.step ?? 2.6).map(([x, y]) => this.node(x, y));
+      for (let k = 1; k < ids.length; k++) this.edge(ids[k - 1], ids[k]);
+      return ids;
+    }
+  };
+  function bigPark(C) {
+    let R2 = parkRect(), W = C.world, mb = C.mb, g = W.ground.p, rng = new RNG(4207), S2 = sharedTex(C), P = propTex(C), cx = (R2.x0 + R2.x1) / 2, cy = (R2.y0 + R2.y1) / 2, inPark = (x, y, m = 0) => x > R2.x0 + m && x < R2.x1 - m && y > R2.y0 + m && y < R2.y1 - m, net = new Net(), gateHalf = 1.5, cornerCut = 2.8, loopIn = 2.4, loopR = 4.5, loopW = 1.6, plazaR = 6, basinR = 3.4, ringR = 4.7, axisW = 2, mallW = 2.6, lx0 = R2.x0 + loopIn, ly0 = R2.y0 + loopIn, lx1 = R2.x1 - loopIn, ly1 = R2.y1 - loopIn, q = 10.5, GL = { x: cx - q, y: cy - q, rx: 5.8, ry: 5 }, glRx = GL.rx + 0.95, glRy = GL.ry + 0.95, lobes = [
+      { x: cx + 11, y: cy - 11.5, rx: 6.3, ry: 4.4 },
+      { x: cx + 14.7, y: cy - 7.5, rx: 3.2, ry: 3.3 },
+      { x: cx + 6.1, y: cy - 7.9, rx: 3, ry: 2.7 }
+    ], island = { x: cx + 5.9, y: cy - 8, r: 0.85 }, lakeF = (x, y) => {
+      let f = -1e9;
+      for (let l of lobes) {
+        let dx = (x - l.x) / l.rx, dy = (y - l.y) / l.ry;
+        f = Math.max(f, 1 - dx * dx - dy * dy);
+      }
+      return f + (valueNoise(x * 0.9, y * 0.9, 61) - 0.5) * 0.16;
+    }, SG = { x: cx - q, y: cy + q, r: 2.8 }, DR = { x0: cx + 9.1, y0: cy + 10.1, x1: cx + 18.1, y1: cy + 18.1 }, meadow = { x0: R2.x0 + 4.4, y0: cy + 2.2, x1: SG.x - 2, y1: SG.y - 2.4 }, arcMid = (sx, sy) => [sx < 0 ? lx0 + loopR * (1 - Math.SQRT1_2) : lx1 - loopR * (1 - Math.SQRT1_2), sy < 0 ? ly0 + loopR * (1 - Math.SQRT1_2) : ly1 - loopR * (1 - Math.SQRT1_2)], loopJ = [
+      [cx, ly0],
+      [lx1, cy],
+      [cx, ly1],
+      [lx0, cy],
+      // axis crossings
+      arcMid(-1, -1),
+      arcMid(1, -1),
+      arcMid(1, 1),
+      arcMid(-1, 1),
+      // corner gates
+      [lx0, SG.y],
+      [SG.x, ly1]
+      // statue garden spokes
+    ], loop = splitClosed(roundedRect(lx0, ly0, lx1, ly1, loopR), loopJ), perimeter = [];
+    for (let piece of loop.pieces) for (let id of net.path(piece, loopW, { step: 2.8 })) perimeter[perimeter.length - 1] !== id && perimeter[0] !== id && perimeter.push(id);
+    let [LN, LE, LS, LW, CNW, CNE, CSE, CSW, LSGW, LSGS] = loop.at, ring = [];
+    for (let k = 0; k < 8; k++) {
+      let a = k / 8 * 2 * PI - PI / 2;
+      ring.push(net.node(cx + Math.cos(a) * ringR, cy + Math.sin(a) * ringR));
+    }
+    for (let k = 0; k < 8; k++) net.edge(ring[k], ring[(k + 1) % 8]);
+    let rN = [cx, cy - ringR], rE = [cx + ringR, cy], rS = [cx, cy + ringR], rW = [cx - ringR, cy], gates = [], gate = (x, y, sx, sy, corner = !1) => {
+      gates.push({ node: net.node(x, y), sx, sy, corner });
+    };
+    gate(cx, R2.y0, cx, R2.y0 - 1), gate(cx, R2.y1, cx, R2.y1 + 1), gate(R2.x0, cy, R2.x0 - 1, cy), gate(R2.x1, cy, R2.x1 + 1, cy);
+    for (let [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      let gx = sx < 0 ? R2.x0 + 0.3 : R2.x1 - 0.3, gy = sy < 0 ? R2.y0 + 0.3 : R2.y1 - 0.3;
+      gate(gx, gy, sx < 0 ? R2.x0 - 1 : R2.x1 + 1, sy < 0 ? R2.y0 - 1 : R2.y1 + 1, !0), net.path([[gx, gy], arcMid(sx, sy)], loopW);
+    }
+    let NJ = [cx, GL.y];
+    net.path([[cx, R2.y0], LN], axisW), net.path([LN, NJ], axisW), net.path([NJ, rN], axisW);
+    let WJ = [GL.x, cy];
+    net.path([[R2.x0, cy], LW], axisW), net.path([LW, WJ], axisW), net.path([WJ, rW], axisW);
+    let EJ1 = [cx + 17, cy], EJ2 = [cx + 10, cy];
+    net.path([[R2.x1, cy], LE], axisW), net.path([LE, EJ1], axisW), net.path([EJ1, EJ2], axisW), net.path([EJ2, rE], axisW);
+    let MJ = [cx, SG.y];
+    net.path([[cx, R2.y1], LS], mallW), net.path([LS, MJ], mallW), net.path([MJ, rS], mallW);
+    let gl = splitClosed(ellipsePts(GL.x, GL.y, glRx, glRy), [[GL.x + glRx, GL.y], [GL.x, GL.y + glRy], [GL.x - glRx * Math.SQRT1_2, GL.y - glRy * Math.SQRT1_2]]), glRing = [];
+    for (let piece of gl.pieces) glRing.push(...net.path(piece, 1.2, { step: 2.4 }));
+    net.path([gl.at[0], NJ], 1.4), net.path([gl.at[1], WJ], 1.4), net.path(spline([gl.at[2], [gl.at[2][0] - 1.6, gl.at[2][1] - 1], CNW]), 1.3);
+    let sgN = [SG.x, SG.y - 2.2], sgE = [SG.x + 2.2, SG.y], sgS = [SG.x, SG.y + 2.2], sgW = [SG.x - 2.2, SG.y], sgRing = [sgN, sgE, sgS, sgW].map(([x, y]) => net.node(x, y));
+    for (let k = 0; k < 4; k++) net.edge(sgRing[k], sgRing[(k + 1) % 4]);
+    net.path(spline([WJ, [SG.x - 0.9, cy + 3.2], [SG.x + 0.8, cy + 6], sgN]), 1.4), net.path(spline([MJ, [cx - 3.5, SG.y + 0.5], [cx - 6.5, SG.y - 0.4], sgE]), 1.6), net.path(spline([sgW, [SG.x - 4.2, SG.y + 0.6], LSGW]), 1.3), net.path(spline([sgS, [SG.x + 0.7, SG.y + 4.6], LSGS]), 1.3);
+    let RJ = [cx + 11.5, cy + 6.1];
+    net.path(spline([MJ, [cx + 2.8, SG.y - 0.3], [cx + 5.2, cy + 8.2], [cx + 8.3, cy + 6.6], RJ]), 1.3, { step: 2.4 }), net.path(spline([RJ, [cx + 14.2, cy + 5.4], [cx + 16.2, cy + 3], EJ1]), 1.3, { step: 2.4 });
+    let dogGateXY = [(DR.x0 + DR.x1) / 2 - 1.5, DR.y0 - 0.5], dogPath = net.path([RJ, [RJ[0], RJ[1] + 1.4], [dogGateXY[0], dogGateXY[1] - 0.4]], 1.2), dogGate = dogPath[dogPath.length - 1], dockX = EJ2[0], dockRoot = [dockX, cy - 5.6], dockIds = net.path([EJ2, dockRoot], 1.2), dockEnd = net.node(dockX, cy - 7.4);
+    net.edge(dockIds[dockIds.length - 1], dockEnd);
+    let P0 = { x0: R2.x0, y0: R2.y0, x1: R2.x1, y1: R2.y1 };
+    C.paintGround(P0.x0, P0.y0, P0.x1, P0.y1, "grass"), C.paintWhere(cx + 1.5, cy + 1.5, R2.x1, R2.y1, (x, y) => valueNoise(x * 0.18, y * 0.18, 62) > 0.32, "woods"), C.paintWhere(cx + 1.5, R2.y0, R2.x1, cy - 1.5, (x, y) => valueNoise(x * 0.2, y * 0.2, 63) > 0.62 && lakeF(x, y) < -0.6, "woods"), C.paintWhere(GL.x - GL.rx, GL.y - GL.ry, GL.x + GL.rx, GL.y + GL.ry, (x, y) => ((x - GL.x) / GL.rx) ** 2 + ((y - GL.y) / GL.ry) ** 2 <= 1, "lawn"), C.paintGround(meadow.x0, meadow.y0, meadow.x1, meadow.y1, "lawn");
+    let lb = { x0: Math.min(...lobes.map((l) => l.x - l.rx)) - 1, y0: Math.min(...lobes.map((l) => l.y - l.ry)) - 1, x1: Math.max(...lobes.map((l) => l.x + l.rx)) + 1, y1: Math.max(...lobes.map((l) => l.y + l.ry)) + 1 };
+    C.paintWhere(lb.x0, lb.y0, lb.x1, lb.y1, (x, y) => lakeF(x, y) > -0.2, "shore"), C.paintWhere(lb.x0, lb.y0, lb.x1, lb.y1, (x, y) => lakeF(x, y) > 0, "water"), C.paintWhere(island.x - 1.3, island.y - 1.3, island.x + 1.3, island.y + 1.3, (x, y) => dist3(x, y, island.x, island.y) < island.r + 0.3, "shore"), C.paintWhere(island.x - 1.3, island.y - 1.3, island.x + 1.3, island.y + 1.3, (x, y) => dist3(x, y, island.x, island.y) < island.r, "woods"), C.paintGround(DR.x0, DR.y0, DR.x1, DR.y1, "dirt"), C.paintWhere(DR.x0, DR.y0, DR.x1, DR.y1, (x, y) => valueNoise(x * 0.6, y * 0.6, 64) > 0.6, "gravel");
+    let FG = { x0: R2.x0 + 4, y0: SG.y + 2.6, x1: SG.x - 2.3, y1: R2.y1 - 4 };
+    C.paintGround(FG.x0, FG.y0, FG.x1, FG.y1, "gravel");
+    {
+      let bw = (FG.x1 - FG.x0 - 2.4) / 3, bh = (FG.y1 - FG.y0 - 0.6 * 3) / 2;
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
+        let x0 = FG.x0 + 0.6 + i * (bw + 0.6), y0 = FG.y0 + 0.6 + j * (bh + 0.6);
+        C.paintGround(x0, y0, x0 + bw, y0 + bh, "flowerbed");
+      }
+    }
+    for (let pass of [0, 1]) for (let s of net.strokes) {
+      let hw = s.w / 2 + (pass === 0 ? s.edge / 32 : 0), kind = pass === 0 ? "pathEdge" : "path", pts = s.pts.length > 2 ? resample(s.pts, 0.5) : s.pts;
+      for (let k = 1; k < pts.length; k++) {
+        let [ax, ay] = pts[k - 1], [bx, by] = pts[k];
+        C.paintWhere(
+          Math.min(ax, bx) - hw,
+          Math.min(ay, by) - hw,
+          Math.max(ax, bx) + hw,
+          Math.max(ay, by) + hw,
+          (x, y) => inPark(x, y) && segDist(x, y, ax, ay, bx, by) <= hw,
+          kind
+        );
+      }
+    }
+    radialPlaza(C, cx, cy, plazaR, 0.6), radialPlaza(C, SG.x, SG.y, SG.r, 0);
+    for (let [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      let ex = sx < 0 ? R2.x0 : R2.x1, ey = sy < 0 ? R2.y0 : R2.y1;
+      C.paintWhere(ex - 3, ey - 3, ex + 3, ey + 3, (x, y) => inPark(x, y) && dist3(x, y, ex, ey) < 2.9, "pathEdge"), C.paintWhere(ex - 3, ey - 3, ex + 3, ey + 3, (x, y) => inPark(x, y) && dist3(x, y, ex, ey) < 2.8, "plaza");
+    }
+    C.paintWhere(SG.x - 1.7, SG.y - 1.7, SG.x + 1.7, SG.y + 1.7, (x, y) => {
+      let d = dist3(x, y, SG.x, SG.y);
+      return d < 1.65 && d > 0.75;
+    }, "flowerbed");
+    let wt = 0.25, pillar = (x, y) => {
+      mb.box(x - 0.26, y - 0.26, 0.125, x + 0.26, y + 0.26, 0.125 + 1.15, { px: S2.limestone, nx: S2.limestone, py: S2.limestone, ny: S2.limestone, pz: { t: S2.limeTop } }), mb.box(x - 0.33, y - 0.33, 0.125 + 1.15, x + 0.33, y + 0.33, 0.125 + 1.27, { px: S2.limestone, nx: S2.limestone, py: S2.limestone, ny: S2.limestone, pz: { t: S2.limeTop } }), mb.pyramid(x - 0.2, y - 0.2, x + 0.2, y + 0.2, 0.125 + 1.27, 0.125 + 1.45, S2.limestone);
+    }, sideRun = (a0, a1, mid) => [[a0 + cornerCut, mid - gateHalf], [mid + gateHalf, a1 - cornerCut]];
+    for (let [a, b] of sideRun(R2.x0, R2.x1, cx)) {
+      parkWall(C, a, R2.y0, b, R2.y0 + wt), parkWall(C, a, R2.y1 - wt, b, R2.y1);
+      for (let x of [a, b])
+        pillar(x, R2.y0 + wt / 2), pillar(x, R2.y1 - wt / 2);
+    }
+    for (let [a, b] of sideRun(R2.y0, R2.y1, cy)) {
+      parkWall(C, R2.x0, a, R2.x0 + wt, b), parkWall(C, R2.x1 - wt, a, R2.x1, b);
+      for (let y of [a, b])
+        pillar(R2.x0 + wt / 2, y), pillar(R2.x1 - wt / 2, y);
+    }
+    {
+      let wz = 0.125 + 0.42;
+      ringWall(C, cx, cy, basinR, 0.32, 0.55, 28), waterDisc(C, cx, cy, basinR - 0.16, wz, 28), mb.cylinder(cx, cy, 0.125, 0.125 + 1, 0.5, 12, S2.limestone, null), mb.cylinder(cx, cy, 0.125 + 1, 0.125 + 1.2, 1.35, 16, S2.limestone, S2.limeTop), waterDisc(C, cx, cy, 1.18, 0.125 + 1.21, 16);
+      let up = { group: GRP.NOT_WINTER };
+      mb.cylinder(cx, cy, 0.125 + 1.2, 0.125 + 1.9, 0.24, 10, S2.limestone, null, up), mb.cylinder(cx, cy, 0.125 + 1.9, 0.125 + 2.02, 0.66, 12, S2.limestone, S2.limeTop, up), waterDisc(C, cx, cy, 0.54, 0.125 + 2.03, 12, GRP.NOT_WINTER), mb.cylinder(cx, cy, 0.125 + 2.02, 0.125 + 2.3, 0.1, 8, S2.limestone, S2.limeTop, up), W.fountains.push({ x: cx, y: cy, z: 0.125 + 2.3, kind: "tiered", r: basinR, floor: wz, bowls: [{ r: 0.66, z: 0.125 + 2.02 }, { r: 1.35, z: 0.125 + 1.2 }] }), W.lamps.push({ x: cx, y: cy, z: 0.125 + 0.8, r: 4.2, color: [0.75, 0.88, 1], k: 0.55, kind: "park" }), W.parkCenter = { x: cx, y: cy, z: 0.125 + 1.2, flock: [cx + ringR + 0.2, cy + 1.6] };
+    }
+    for (let k = 0; k < 4; k++) {
+      let a = PI / 4 + k * PI / 2;
+      C.addPlanter(cx + Math.cos(a) * 5.15, cy + Math.sin(a) * 5.15);
+    }
+    mb.box(SG.x - 0.62, SG.y - 0.62, 0.125, SG.x + 0.62, SG.y + 0.62, 0.125 + 0.25, { px: S2.greystone, nx: S2.greystone, py: S2.greystone, ny: S2.greystone, pz: { t: S2.limeTop } }), mb.box(SG.x - 0.5, SG.y - 0.5, 0.125 + 0.25, SG.x + 0.5, SG.y + 0.5, 0.125 + 1.4, { px: S2.greystone, nx: S2.greystone, py: S2.greystone, ny: S2.greystone, pz: { t: S2.limeTop } }), C.addSprite("statue", SG.x, SG.y, 0.125 + 1.4);
+    {
+      let gx = dogGateXY[0];
+      chainFence(C, DR.x0, DR.y0, gx - 0.6, DR.y0, 1.1, !0), chainFence(C, gx + 0.6, DR.y0, DR.x1, DR.y0, 1.1, !0), chainFence(C, DR.x0, DR.y0, DR.x0, DR.y1, 1.1, !0), chainFence(C, DR.x1, DR.y0, DR.x1, DR.y1, 1.1, !0), chainFence(C, DR.x0, DR.y1, DR.x1, DR.y1, 1.1, !0), W.dogRun = { x0: DR.x0 + 0.4, y0: DR.y0 + 0.4, x1: DR.x1 - 0.4, y1: DR.y1 - 0.4, gate: { x: gx, y: DR.y0 - 0.25 } }, mb.cylinder(DR.x1 - 2.2, DR.y1 - 1.6, 0.125, 0.125 + 0.25, 0.22, 6, S2.wood, S2.wood), mb.box(DR.x0 + 1.4, DR.y1 - 2.4, 0.125, DR.x0 + 3, DR.y1 - 2, 0.125 + 0.3, { px: S2.wood, nx: S2.wood, py: S2.wood, ny: S2.wood, pz: S2.wood });
+    }
+    W.pond = { x: lobes[0].x + 0.5, y: lobes[0].y + 0.2, rx: 5, ry: 3.4 };
+    {
+      let deck = C.atlas.shared("dock_deck", 32, 32, (p) => {
+        for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+          let plank = y >> 3, c = shade(plank % 2 ? 9069636 : 10121808, 0.92 + hash2i(x >> 3, plank, 4) * 0.12);
+          y % 8 === 7 && (c = 4863012), (x === 4 || x === 20) && y % 8 === 3 && (c = 3815994), p.set(x, y, c);
+        }
+      }), y0 = cy - 8, y1 = cy - 5.2, x0 = dockX - 0.6, x1 = dockX + 0.6;
+      mb.box(x0, y0, 0.125 - 0.1, x1, y1, 0.125 + 0.05, { px: S2.wood, nx: S2.wood, py: S2.wood, ny: S2.wood, pz: { t: deck, world: !0 } });
+      for (let [px, py] of [[x0, y0], [x1, y0], [x0, (y0 + y1) / 2], [x1, (y0 + y1) / 2]]) mb.cylinder(px, py, 0.125 - 0.1, 0.125 + 0.4, 0.07, 6, S2.wood, S2.wood);
+      boat(C, x0 - 0.45, y0 + 1, PI / 2 + 0.12, 13119532), boat(C, x1 + 0.45, y0 + 0.8, PI / 2 - 0.1, 2779808), boat(C, x1 + 1.45, y0 + 1.45, PI / 2 + 0.2, 3111494);
+    }
+    let rockTex = C.atlas.shared("schist", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        let band2 = Math.sin(x * 0.35 + y * 0.9 + valueNoise(x * 0.2, y * 0.2, 5) * 3), c = band2 > 0.6 ? 9078656 : band2 < -0.5 ? 6184024 : 7631210;
+        hash2i(x >> 1, y >> 1, 9) > 0.93 && (c = 10527898), hash2i(x >> 2, y >> 2, 10) > 0.9 && (c = mixc(c, 9083482, 0.5)), p.set(x, y, shade(c, 0.92 + hash2i(x, y, 11) * 0.14));
+      }
+    }), rock = (x, y, r, h) => {
+      let a = rng.range(0, PI);
+      mb.cylinder(x, y, 0.125 - 0.05, 0.125 + h * 0.55, r, 6, rockTex, null, { angle: a }), mb.cone(x, y, 0.125 + h * 0.55, 0.125 + h, r, 6, rockTex, { angle: a, mat: MAT.SNOW });
+    };
+    for (let [x, y, r, h] of [[cx + 6.6, cy + 4.6, 0.9, 0.9], [cx + 7.7, cy + 3.7, 0.6, 0.6], [cx + 5.6, cy + 5.4, 0.5, 0.45], [cx + 8.4, cy + 5, 0.45, 0.4]]) rock(x, y, r, h);
+    for (let k = 0; k < 40 && W.trees.length >= 0; k++) {
+      let l = rng.pick(lobes), a = rng.range(0, 2 * PI), x = l.x + Math.cos(a) * (l.rx + 0.15), y = l.y + Math.sin(a) * (l.ry + 0.15), f = lakeF(x, y);
+      f > -0.22 && f < 0.02 && rng.chance(0.4) && dist3(x, y, dockX, cy - 6.5) > 2 && rock(x, y, rng.range(0.25, 0.45), rng.range(0.2, 0.4));
+    }
+    rock(island.x + 0.55, island.y + 0.35, 0.35, 0.3);
+    let trees = [], lamps = [], benches = [], groundAt = (x, y) => g.getA(Math.floor(x * 32), Math.floor(y * 32)), soft = (x, y) => groundAt(x, y) === GC.GRASS, inLawn = (x, y, m = 0.6) => ((x - GL.x) / (GL.rx + m)) ** 2 + ((y - GL.y) / (GL.ry + m)) ** 2 <= 1 || x > meadow.x0 - m && x < meadow.x1 + m && y > meadow.y0 - m && y < meadow.y1 + m, clearOf = (x, y, r) => [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]].every(([dx, dy]) => soft(x + dx, y + dy)), tree = (x, y, sp, scale) => {
+      trees.push({ x, y }), C.addTree(x, y, sp, !1, { scale: scale ?? rng.range(1, 1.3) });
+    }, roomFor = (x, y, d) => trees.every((t) => dist3(t.x, t.y, x, y) >= d);
+    for (let y = cy + plazaR + 1.4; y < ly1 - 1; y += 2.45)
+      if (!(Math.abs(y - SG.y) < 1.4))
+        for (let sx of [-1, 1]) tree(cx + sx * (mallW / 2 + 1.25), y, "elm", rng.range(1, 1.15));
+    for (let side of [0, 1, 2, 3]) {
+      let len = R2.x1 - R2.x0;
+      for (let t = cornerCut + 1.4; t < len - cornerCut - 1.2; t += rng.range(2.7, 3.3)) {
+        if (Math.abs(t - len / 2) < gateHalf + 1.4) continue;
+        let off = 1 + rng.range(-0.1, 0.15), [x, y] = side === 0 ? [R2.x0 + t, R2.y0 + off] : side === 1 ? [R2.x1 - off, R2.y0 + t] : side === 2 ? [R2.x1 - t, R2.y1 - off] : [R2.x0 + off, R2.y1 - t];
+        !soft(x, y) || !roomFor(x, y, 2.3) || tree(x, y, rng.pick(["plane", "plane", "oak", "elm", "locust"]));
+      }
+    }
+    tree(island.x - 0.15, island.y - 0.1, "elm", 0.9);
+    let nearPath = (x, y, m) => net.strokes.some((s) => {
+      for (let k = 1; k < s.pts.length; k++) if (segDist(x, y, s.pts[k - 1][0], s.pts[k - 1][1], s.pts[k][0], s.pts[k][1]) < s.w / 2 + m) return !0;
+      return !1;
+    }), lampOk = (x, y) => soft(x, y) && !inLawn(x, y, 0.2) && lamps.every((l) => dist3(l.x, l.y, x, y) > 6) && trees.every((t) => dist3(t.x, t.y, x, y) > 0.9) && !nearPath(x, y, 0.25);
+    for (let k = 0; k < 4; k++) {
+      let a = PI / 4 + k * PI / 2, x = cx + Math.cos(a) * (plazaR + 0.5), y = cy + Math.sin(a) * (plazaR + 0.5);
+      parkLamp(C, x, y), lamps.push({ x, y });
+    }
+    for (let s of net.strokes) {
+      let L = polyLen(s.pts);
+      if (L < 3) continue;
+      let k = 0;
+      for (let d = Math.min(3, L / 2); d < L - 1; d += 6.5, k++)
+        for (let side of k % 2 ? [1, -1] : [-1, 1]) {
+          let a = along(s.pts, d), off = s.w / 2 + 0.38, x = a.x - a.dy * off * side, y = a.y + a.dx * off * side;
+          if (inPark(x, y, 0.6) && lampOk(x, y)) {
+            parkLamp(C, x, y), lamps.push({ x, y });
+            break;
+          }
+        }
+    }
+    let benchAt = (x, y, axis, facing) => {
+      let fx = axis === "x" ? [x - 0.8, x + 0.8] : [x - 0.25, x + 0.25], fy = axis === "x" ? [y - 0.25, y + 0.25] : [y - 0.8, y + 0.8];
+      for (let bx of fx) for (let by of fy) if (!inPark(bx, by, 0.3)) return !1;
+      return benches.some((b) => dist3(b.x, b.y, x, y) < 2.2) || lamps.some((l) => dist3(l.x, l.y, x, y) < 1.1) || trees.some((t) => dist3(t.x, t.y, x, y) < 0.7) ? !1 : (C.addBench(x, y, axis, facing), benches.push({ x, y }), !0);
+    };
+    for (let k = 0; k < 8; k++) {
+      let a = PI / 4 + (k % 2 ? 0.36 : -0.36) + Math.floor(k / 2) * (PI / 2), x = cx + Math.cos(a) * 5, y = cy + Math.sin(a) * 5;
+      Math.abs(Math.cos(a)) > Math.abs(Math.sin(a)) ? benchAt(x, y, "y", -Math.sign(Math.cos(a))) : benchAt(x, y, "x", -Math.sign(Math.sin(a)));
+    }
+    for (let y = cy + plazaR + 2.6; y < ly1 - 1.5; y += 2.45)
+      Math.abs(y - SG.y) < 1.6 || (benchAt(cx - mallW / 2 - 0.5, y, "y", 1), benchAt(cx + mallW / 2 + 0.5, y, "y", -1));
+    for (let y of [cy - 15, cy - 9.5]) benchAt(cx + axisW / 2 + 0.5, y, "y", 1);
+    for (let x of [cx + 13.5]) benchAt(x, cy - axisW / 2 - 0.5, "x", -1);
+    for (let y of [cy - 14, cy - 6.5]) benchAt(cx - axisW / 2 - 0.5, y, "y", -1);
+    for (let x of [cx - 15.5, cx - 6]) benchAt(x, cy - axisW / 2 - 0.5, "x", -1);
+    benchAt(SG.x - 2, SG.y - 3.4, "x", 1), benchAt(SG.x + 3.4, SG.y + 2, "y", -1);
+    for (let [x, y, ax, f] of [[lx0 + 1.3, cy - 8, "y", -1], [lx1 - 1.3, cy + 6, "y", 1], [cx - 8, ly1 - 1.3, "x", 1], [cx + 8, ly0 + 1.3, "x", -1], [lx0 + 1.3, cy + 16, "y", -1]]) benchAt(x, y, ax, f);
+    for (let [x, y] of [[cx + 1.4, ly0 + 1.4], [cx - 1.6, ly1 - 1.6], [lx0 + 1.4, cy + 1.4], [lx1 - 1.4, cy - 1.4], [cx + 6.3, cy + 1.2], [cx - 6.3, cy - 1.2], [SG.x + 2.6, SG.y - 2.6], [cx + 1.6, cy + 10.5 + 1.6]]) soft(x, y) && trashBasket(C, x, y);
+    let zone = (x, y) => x > DR.x0 - 0.8 && x < DR.x1 + 0.8 && y > DR.y0 - 0.8 && y < DR.y1 + 0.8 ? null : x > cx + 1 && y > cy + 1 ? { d: 0.97, sp: ["oak", "elm", "pine", "oak", "locust", "pine"] } : x > cx + 1 && y < cy - 1 ? { d: 0.7, sp: ["elm", "locust", "plane", "cherry"] } : x < cx - 1 && y < cy - 1 ? { d: 0.75, sp: ["plane", "oak", "elm", "locust"] } : x > SG.x + 1.5 && y < SG.y - 1 ? { d: 0.97, sp: ["cherry", "cherry", "cherry", "locust"] } : { d: 0.7, sp: ["oak", "plane", "cherry", "elm"] }, gs = 2;
+    for (let y = R2.y0 + 1.2; y < R2.y1 - 1; y += gs)
+      for (let x = R2.x0 + 1.2; x < R2.x1 - 1; x += gs) {
+        let tx = x + (hash2i(Math.round(x * 10), Math.round(y * 10), 71) - 0.5) * 1.3, ty = y + (hash2i(Math.round(x * 10), Math.round(y * 10), 72) - 0.5) * 1.3, z = zone(tx, ty);
+        if (!z || hash2i(Math.round(tx * 7), Math.round(ty * 7), 73) > z.d || inLawn(tx, ty) || !clearOf(tx, ty, 0.55) || nearPath(tx, ty, 0.35) || lakeF(tx, ty) > -0.45 || dist3(tx, ty, cx, cy) < plazaR + 1.2 || !roomFor(tx, ty, 2.05) || lamps.some((l) => dist3(l.x, l.y, tx, ty) < 1) || benches.some((b) => dist3(b.x, b.y, tx, ty) < 1.1)) continue;
+        let sp = z.sp[Math.floor(hash2i(Math.round(tx * 3), Math.round(ty * 3), 74) * z.sp.length)];
+        tree(tx, ty, sp);
+      }
+    let inset = (r, m) => ({ x0: r.x0 + m, y0: r.y0 + m, x1: r.x1 - m, y1: r.y1 - m });
+    W.lawns = [
+      { x0: GL.x - GL.rx * 0.68, y0: GL.y - GL.ry * 0.68, x1: GL.x + GL.rx * 0.68, y1: GL.y + GL.ry * 0.68 },
+      inset(meadow, 0.4)
+    ], W.park = { ...R2, cx, cy };
+    let nearestNode = (x, y) => {
+      let b = 0, bd = 1e9;
+      return net.nodes.forEach((n, i) => {
+        let d = dist3(n.x, n.y, x, y);
+        d < bd && (bd = d, b = i);
+      }), b;
+    };
+    W.parkNet = {
+      nodes: net.nodes,
+      edges: net.edges,
+      gates,
+      paths: net.nodes.map((_, i) => i),
+      ring,
+      perimeter,
+      lawnNodes: [gl.at[0], gl.at[1], [meadow.x1, (meadow.y0 + meadow.y1) / 2]].map(([x, y]) => nearestNode(x, y)),
+      pond: dockEnd,
+      dogGate
+    };
+  }
+  function ringWall(C, x, y, r, w, h, n = 16) {
+    let S2 = sharedTex(C);
+    for (let k = 0; k < n; k++) {
+      let a0 = k / n * 2 * PI, a1 = (k + 1) / n * 2 * PI, ri = r - w / 2, ro = r + w / 2, p = (rr, a) => [x + Math.cos(a) * rr, y + Math.sin(a) * rr], [o0, o1, i0, i1] = [p(ro, a0), p(ro, a1), p(ri, a0), p(ri, a1)];
+      C.mb.quad(
+        [o1[0], o1[1], 0.125 + h],
+        [o0[0], o0[1], 0.125 + h],
+        [o0[0], o0[1], 0.125],
+        [o1[0], o1[1], 0.125],
+        [[0, 0], [dist3(o0[0], o0[1], o1[0], o1[1]) * 32, 0], [dist3(o0[0], o0[1], o1[0], o1[1]) * 32, h * 32], [0, h * 32]],
+        S2.limestone,
+        [Math.cos((a0 + a1) / 2), Math.sin((a0 + a1) / 2), 0]
+      ), C.mb.quad(
+        [i0[0], i0[1], 0.125 + h],
+        [i1[0], i1[1], 0.125 + h],
+        [i1[0], i1[1], 0.125],
+        [i0[0], i0[1], 0.125],
+        [[0, 0], [dist3(i0[0], i0[1], i1[0], i1[1]) * 32, 0], [dist3(i0[0], i0[1], i1[0], i1[1]) * 32, h * 32], [0, h * 32]],
+        S2.limestone,
+        [-Math.cos((a0 + a1) / 2), -Math.sin((a0 + a1) / 2), 0]
+      ), C.mb.quad(
+        [o0[0], o0[1], 0.125 + h],
+        [o1[0], o1[1], 0.125 + h],
+        [i1[0], i1[1], 0.125 + h],
+        [i0[0], i0[1], 0.125 + h],
+        [o0, o1, i1, i0].map((q) => [q[0] * 32, q[1] * 32]),
+        S2.limeTop,
+        [0, 0, 1],
+        MAT.SNOW | MAT.WET
+      );
+    }
+  }
+  function waterDisc(C, x, y, r, z, n, group = GRP.ALWAYS) {
+    let gt = C.world.ground, ox = x * 32, oy = y * 32;
+    C.paintWhere(x - r - 0.1, y - r - 0.1, x + r + 0.1, y + r + 0.1, (wx, wy) => dist3(wx, wy, x, y) <= r + 0.06, "water");
+    for (let k = 0; k < n; k++) {
+      let a0 = k / n * 2 * PI, a1 = (k + 1) / n * 2 * PI, p0 = [x + Math.cos(a0) * r, y + Math.sin(a0) * r], p1 = [x + Math.cos(a1) * r, y + Math.sin(a1) * r];
+      C.mb.tri([x, y, z], [p0[0], p0[1], z], [p1[0], p1[1], z], [[ox, oy], [p0[0] * 32, p0[1] * 32], [p1[0] * 32, p1[1] * 32]], gt, [0, 0, 1], MAT.GROUND | MAT.WET, group);
+    }
+  }
+  function radialPlaza(C, x, y, r, inner) {
+    let g = C.world.ground.p;
+    for (let ty = Math.floor((y - r) * 32); ty < Math.ceil((y + r) * 32); ty++)
+      for (let tx = Math.floor((x - r) * 32); tx < Math.ceil((x + r) * 32); tx++) {
+        let dx = (tx + 0.5) / 32 - x, dy = (ty + 0.5) / 32 - y, d = Math.hypot(dx, dy);
+        if (d > r || d < inner) continue;
+        let rr = d * 32, course = Math.floor(rr / 18), arc = (Math.atan2(dy, dx) + PI) * rr + course * 11, h = hash2i(tx, ty, 41), c;
+        if (rr > r * 32 - 2) c = 9341568;
+        else if (rr % 18 < 1.2 || arc % 22 < 1.2) c = 10130826;
+        else {
+          let t = hash2i(course, Math.floor(arc / 22), 42);
+          c = course % 5 === 3 ? mixc(11042922, 9859164, t) : mixc(14209474, 12893356, t), c = shade(c, 0.97 + h * 0.06);
+        }
+        g.set(tx, ty, c, GC.PLAZA);
+      }
+  }
+  function boat(C, x, y, ang, color) {
+    let A = C.atlas, side = A.shared(`boat_side_${color}`, 48, 9, (p) => {
+      p.rect(0, 0, 48, 9, 15921126), p.rect(0, 0, 48, 2, color), p.hline(0, 2, 48, shade(color, 0.6)), p.rect(0, 7, 48, 2, 9079428);
+    }), top = A.shared("boat_top", 48, 20, (p) => {
+      p.rect(0, 0, 48, 20, 9069636);
+      for (let yy = 0; yy < 20; yy += 4) p.hline(0, yy, 48, 6965808);
+      for (let sx of [12, 26, 38]) p.rect(sx, 0, 4, 20, 11569754);
+      p.frame(0, 0, 48, 20, 15921126);
+    }), ca = Math.cos(ang), sa = Math.sin(ang), shape = [[-0.72, -0.27], [0.42, -0.27], [0.74, 0], [0.42, 0.27], [-0.72, 0.27]], pts = shape.map(([u, v]) => [x + u * ca - v * sa, y + u * sa + v * ca]), z0 = 0.125 - 0.02, z1 = 0.125 + 0.24, opt = { group: GRP.NO_ICE, mat: 0 };
+    for (let k = 0; k < pts.length; k++) {
+      let a = pts[k], b = pts[(k + 1) % pts.length];
+      C.mb.vquad(a[0], a[1], b[0], b[1], z0, z1, side, opt);
+    }
+    let uv = (u, v) => [(u + 0.72) / 1.46 * 47, (v + 0.27) / 0.54 * 19];
+    for (let k = 1; k < shape.length - 1; k++) {
+      let [a, b, c] = [0, k, k + 1];
+      C.mb.tri(
+        [pts[a][0], pts[a][1], z1 - 0.06],
+        [pts[b][0], pts[b][1], z1 - 0.06],
+        [pts[c][0], pts[c][1], z1 - 0.06],
+        [uv(...shape[a]), uv(...shape[b]), uv(...shape[c])],
+        top,
+        [0, 0, 1],
+        MAT.SNOW | MAT.WET,
+        GRP.NO_ICE
+      );
+    }
+  }
+
   // src/world/blocks.js
   function makeContext(world, mb, atlas, rng) {
     let gp = world.ground.p, C = {
@@ -3365,6 +3802,16 @@ void main() {
         let X0 = Math.round(Math.min(x0, x1) * 32), X1 = Math.round(Math.max(x0, x1) * 32), Y0 = Math.round(Math.min(y0, y1) * 32), Y1 = Math.round(Math.max(y0, y1) * 32);
         for (let y = Y0; y < Y1; y++)
           for (let x = X0; x < X1; x++) {
+            let r = groundFill(kind, x, y, X0, Y0, X1, Y1);
+            r && gp.set(x, y, r[0], r[1]);
+          }
+      },
+      // paint texels whose centre satisfies inside(wx, wy) within a bounding box
+      paintWhere(x0, y0, x1, y1, inside, kind) {
+        let X0 = Math.floor(Math.min(x0, x1) * 32), X1 = Math.ceil(Math.max(x0, x1) * 32), Y0 = Math.floor(Math.min(y0, y1) * 32), Y1 = Math.ceil(Math.max(y0, y1) * 32);
+        for (let y = Y0; y < Y1; y++)
+          for (let x = X0; x < X1; x++) {
+            if (!inside((x + 0.5) / 32, (y + 0.5) / 32)) continue;
             let r = groundFill(kind, x, y, X0, Y0, X1, Y1);
             r && gp.set(x, y, r[0], r[1]);
           }
@@ -3476,6 +3923,22 @@ void main() {
       }
       case "dirt":
         return [shade(9071178, 0.88 + h * 0.24), GC.GRAVEL];
+      case "lawn": {
+        let n = valueNoise(x * 0.03, y * 0.03, 15), stripe = Math.floor(x / 48) % 2 === 0, c = mixc(COL.grass, 7127120, stripe ? 0.35 : 0);
+        c = shade(c, (stripe ? 1 : 0.93) + h * 0.07 + (n - 0.5) * 0.08);
+        let b = hash2i(x, y >> 1, 78);
+        return b > 0.94 ? c = shade(c, 1.1) : b < 0.05 && (c = shade(c, 0.88)), [c, GC.GRASS];
+      }
+      case "woods": {
+        let n = valueNoise(x * 0.09, y * 0.09, 16), n2 = valueNoise(x * 0.3, y * 0.3, 17), c = mixc(COL.grassDark, 3107368, 0.35);
+        return n > 0.66 && (c = mixc(c, n2 > 0.5 ? 6187572 : 6970936, Math.min(0.75, (n - 0.66) * 3.5))), c = shade(c, 0.9 + h * 0.16), h > 0.985 && (c = n2 > 0.5 ? 9071162 : 4880946), [c, GC.GRASS];
+      }
+      case "pathEdge":
+        return [shade(10262413, 0.92 + h * 0.12), GC.PATH];
+      case "shore": {
+        let st = hash2i(x >> 2, y >> 2, 23), st2 = hash2i(x >> 1, y >> 1, 24), c = st > 0.7 ? 10130568 : st > 0.35 ? 8288364 : 6972504;
+        return st2 > 0.85 && (c = 11578012), !(x & 3) && !(y & 3) && (c = shade(c, 0.8)), [shade(c, 0.9 + h * 0.2), GC.GRAVEL];
+      }
     }
     return null;
   }
@@ -3490,10 +3953,11 @@ void main() {
   function buildBlocks(C) {
     for (let by = 0; by < 4; by++)
       for (let bx = 0; bx < 4; bx++) {
+        if (blockInPark(bx, by)) continue;
         let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), fn = BLOCKS[type];
         fn && fn(C, L, bx, by);
       }
-    streetFurniture(C);
+    bigPark(C), streetFurniture(C);
   }
   var BLOCKS = {
     brownstones: (C, L) => brownstoneBlock(C, L),
@@ -3691,7 +4155,7 @@ void main() {
         let x = ax + (bx - ax) * t, y = ay + (by - ay) * t;
         C.paintGround(x - 0.55, y - 0.55, x + 0.55, y + 0.55, "path");
       }
-    circleGround(C, cx, cy, 3.2, "plaza"), circleGround(C, cx, cy, 2.1, "water"), ringWall(C, cx, cy, 2.1, 0.25, 0.5);
+    circleGround(C, cx, cy, 3.2, "plaza"), circleGround(C, cx, cy, 2.1, "water"), ringWall2(C, cx, cy, 2.1, 0.25, 0.5);
     let S2 = sharedTex(C);
     C.mb.cylinder(cx, cy, 0.125, 0.125 + 0.9, 0.35, 8, S2.limestone, S2.limeTop), C.mb.cylinder(cx, cy, 0.125 + 0.9, 0.125 + 1, 0.7, 8, S2.limestone, S2.limeTop), C.world.fountains.push({ x: cx, y: cy, z: 0.125 + 1, kind: "center", r: 2.1 }), C.world.parkCenter = { x: cx, y: cy };
     for (let k = 0; k < 8; k++) {
@@ -3766,7 +4230,7 @@ void main() {
         }
       }
   }
-  function ringWall(C, cx, cy, r, w, h) {
+  function ringWall2(C, cx, cy, r, w, h) {
     let S2 = sharedTex(C), n = 16;
     for (let k = 0; k < n; k++) {
       let a0 = k / n * Math.PI * 2, a1 = (k + 1) / n * Math.PI * 2, am = (a0 + a1) / 2, x = cx + Math.cos(am) * r, y = cy + Math.sin(am) * r, half = Math.PI * r / n + 0.02, tx = -Math.sin(am), ty = Math.cos(am), ex = Math.abs(tx) * half + Math.abs(Math.cos(am)) * w / 2, ey = Math.abs(ty) * half + Math.abs(Math.sin(am)) * w / 2;
@@ -3777,12 +4241,14 @@ void main() {
     let { rng } = C, W = C.world;
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j <= 4; j++) {
+        if (isParkIntersection(i, j)) continue;
         let rx = roadCenter(i), ry = roadCenter(j);
         for (let sx of [-1, 1])
-          for (let sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j);
+          for (let sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: isParkIntersection(i + sx, j), closedY: isParkIntersection(i, j + sy) });
       }
     for (let by = 0; by < 4; by++)
       for (let bx = 0; bx < 4; bx++) {
+        if (blockInPark(bx, by)) continue;
         let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), residential = ["brownstones", "walkups", "tenements", "bodega", "firehouse", "commercial", "lofts"].includes(type), sides = [
           { ax: "x", y: L.y0 - 2 + 0.35, x0: L.x0, x1: L.x1, ny: -1, nx: 0, name: "N" },
           { ax: "x", y: L.y1 + 2 - 0.35, x0: L.x0, x1: L.x1, ny: 1, nx: 0, name: "S" },
@@ -3822,18 +4288,58 @@ void main() {
           }
         }
       }
-    busShelter(C, lotStart(1) + 9, lotEnd(1) + 2 - 0.8, "x", 1), busShelter(C, lotEnd(2) + 2 - 0.8, lotStart(3) + 9, "y", 1), W.busRoute = !0, steamStack(C, lotStart(1) + 5.5, roadCenter(2) - 1.85), steamStack(C, roadCenter(3) + 1.85, lotStart(1) + 6), steamStack(C, lotStart(2) + 12, roadCenter(4) + 1.85), W.stacksBlock = [
-      { x: lotStart(1) + 5.5, y: roadCenter(2) - 1.85 },
+    let PR = parkRect(), pcx = (PR.x0 + PR.x1) / 2, pcy = (PR.y0 + PR.y1) / 2;
+    busShelter(C, PR.x0 + 9, PR.y0 - 2 + 0.8, "x", -1), busShelter(C, PR.x1 + 2 - 0.8, PR.y0 + 9, "y", 1), W.busRoute = !0, subwayEntrance(C, PR.x0 - 1, pcy - 7.5, "y"), W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4, kind: "pretzel", axis: "y" }), W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: "hotdog", axis: "x" }), parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4], [pcx - 4.2, PR.y1 + 1]]);
+    let stacks = [
+      { x: roadCenter(1) - 1.85, y: PR.y0 + 13 },
       { x: roadCenter(3) + 1.85, y: lotStart(1) + 6 },
       { x: lotStart(2) + 12, y: roadCenter(4) + 1.85 }
-    ], subwayEntrance(C, lotStart(2) - 1, lotStart(2) + 4.5, "y"), subwayEntrance(C, lotStart(0) + 14, lotEnd(3) + 1, "x"), W.carts.push({ x: lotStart(1) + 14, y: lotEnd(0) + 1.3, kind: "halal", axis: "x" }), W.carts.push({ x: lotEnd(1) + 0.9, y: lotStart(2) + 14.5, kind: "pretzel", axis: "y" });
+    ];
+    for (let st of stacks) steamStack(C, st.x, st.y);
+    W.stacksBlock = stacks, subwayEntrance(C, lotStart(0) + 14, lotEnd(3) + 1, "x"), W.carts.push({ x: lotStart(1) + 14, y: lotEnd(0) + 1.3, kind: "halal", axis: "x" });
     for (let c of W.carts) buildCart(C, c);
     for (let m of W.groundInfo.manholes) rng.chance(0.35) && W.steam.push({ x: m.x, y: m.y, z: 0.02, kind: "manhole", rate: 0.4 });
+  }
+  function parkSidewalks(C, PR, avoid) {
+    let { rng } = C, len = PR.x1 - PR.x0, sides = [
+      { ax: "x", y: PR.y0 - 2 + 0.35, x0: PR.x0, ny: -1, nx: 0, wall: PR.y0 },
+      { ax: "x", y: PR.y1 + 2 - 0.35, x0: PR.x0, ny: 1, nx: 0, wall: PR.y1 },
+      { ax: "y", x: PR.x0 - 2 + 0.35, y0: PR.y0, nx: -1, ny: 0, wall: PR.x0 },
+      { ax: "y", x: PR.x1 + 2 - 0.35, y0: PR.y0, nx: 1, ny: 0, wall: PR.x1 }
+    ];
+    for (let s of sides) {
+      let at = (t, off = 0) => s.ax === "x" ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t], free = (t, r) => {
+        let [x, y] = at(t);
+        return avoid.every(([ax, ay]) => Math.hypot(ax - x, ay - y) > r);
+      };
+      for (let t of [4.5, 13.5, 22.5 + 4.2, 31.5, 40.5]) if (free(t, 2)) {
+        let [x, y] = at(t);
+        streetLamp(C, x, y, s.nx, s.ny);
+      }
+      for (let t of [1.8, 9, 18, 22.5, 27 + 4.2, 36, 43.2]) {
+        if (!free(t, 2) || !rng.chance(0.92)) continue;
+        let [x, y] = at(t, 0.35);
+        C.addTree(x, y, rng.pick(["plane", "plane", "locust", "oak"]), !0);
+      }
+      {
+        let [x, y] = at(rng.pick([11.2, 33.8]));
+        hydrant(C, x, y);
+      }
+      for (let t of [0.8, 44.2]) {
+        let [x, y] = at(t, -0.05);
+        rng.chance(0.8) && trashBasket(C, x, y);
+      }
+      for (let t of [6.6, 15.6, 29.4, 38.4]) {
+        if (!free(t, 2.4)) continue;
+        let d = 0.42;
+        s.ax === "x" ? C.addBench(s.x0 + t, s.wall + (s.ny < 0 ? -d : d), "x", s.ny) : C.addBench(s.wall + (s.nx < 0 ? -d : d), s.y0 + t, "y", s.nx);
+      }
+    }
   }
   function buildCart(C, c) {
     let P = propTex(C), A = C.atlas, n = cartNormal(c);
     c.nx = n[0], c.ny = n[1];
-    let along = c.axis === "x" ? [1, 0] : [0, 1], L = 1.3, D = 0.7, H = 0.95, cx = c.x, cy = c.y, x0 = cx - (along[0] * L + Math.abs(n[0]) * D) / 2, x1 = cx + (along[0] * L + Math.abs(n[0]) * D) / 2, y0 = cy - (along[1] * L + Math.abs(n[1]) * D) / 2, y1 = cy + (along[1] * L + Math.abs(n[1]) * D) / 2, sideFor = (len) => A.shared(`cart_side_${c.kind}_${len}`, len, 24, (p) => {
+    let along2 = c.axis === "x" ? [1, 0] : [0, 1], L = 1.3, D = 0.7, H = 0.95, cx = c.x, cy = c.y, x0 = cx - (along2[0] * L + Math.abs(n[0]) * D) / 2, x1 = cx + (along2[0] * L + Math.abs(n[0]) * D) / 2, y0 = cy - (along2[1] * L + Math.abs(n[1]) * D) / 2, y1 = cy + (along2[1] * L + Math.abs(n[1]) * D) / 2, sideFor = (len) => A.shared(`cart_side_${c.kind}_${len}`, len, 24, (p) => {
       for (let y = 0; y < 24; y++) for (let x = 0; x < len; x++) p.set(x, y, (x + y) % 7 === 0 ? 14541028 : x % 16 === 0 ? 11054258 : 13159634);
       let [bg, fg, word] = c.kind === "halal" ? [13119532, 15909424, "HALAL"] : c.kind === "pretzel" ? [2052e3, 15909424, "PRETZEL"] : [15909424, 13119532, "HOT DOG"];
       p.rect(0, 3, len, 11, bg), p.hline(0, 3, len, shade(bg, 1.2)), p.hline(0, 13, len, shade(bg, 0.7));
@@ -6016,7 +6522,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (env.season === 3 && world.parkCenter) {
         let c = world.parkCenter;
-        L.push(c.x, c.y, 0.125 + 1, this.frames.xmas, this.xmasRow, SF.TALL);
+        L.push(c.x, c.y, c.z ?? 0.125 + 1, this.frames.xmas, this.xmasRow, SF.TALL);
         for (let s of this.treeSellers)
           for (let k = 0; k < 5; k++) {
             let ox = s.n[1] * (k - 2) * 0.35, oy = -s.n[0] * (k - 2) * 0.35;
@@ -6116,7 +6622,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         this.offsets.push([]);
         for (let j = 0; j <= 4; j++) this.offsets[i].push((i * 7 + j * 3) % 5 * 4.3 + (i + j) * 2.1);
       }
-      this.exitLock = /* @__PURE__ */ new Map(), this.buildNetwork(), this.buildParking(), this.nextId = 1, this.special = { fireTimer: 90, iceTimer: 20, garbageTimer: 5, plowTimer: 10 }, this.honks = [];
+      this.exitLock = /* @__PURE__ */ new Map(), this.pedHold = /* @__PURE__ */ new Map(), this.buildNetwork(), this.buildParking(), this.nextId = 1, this.special = { fireTimer: 90, iceTimer: 20, garbageTimer: 5, plowTimer: 10 }, this.honks = [];
     }
     center(i, j) {
       return [roadCenter(i), roadCenter(j)];
@@ -6126,7 +6632,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         for (let j = 0; j <= 4; j++)
           for (let d = 0; d < 4; d++) {
             let [dx, dy] = DIRS[d], ni = i + dx, nj = j + dy;
-            if (ni < 0 || nj < 0 || ni > 4 || nj > 4) continue;
+            if (!roadLegOpen(i, j, dx, dy)) continue;
             let [cx, cy] = this.center(i, j), [ex, ey] = this.center(ni, nj), rx = -dy * 0.7, ry = dx * 0.7, p0 = [cx + dx * EXIT + rx, cy + dy * EXIT + ry], p1 = [ex - dx * STOP + rx, ey - dy * STOP + ry], L = new Piece([p0, p1], "link");
             Object.assign(L, { i, j, d, ti: ni, tj: nj, id: `${i},${j},${d}`, park: [] }), this.links.set(L.id, L), this.inLinks.set(`${ni},${nj},${d}`, L);
           }
@@ -6281,8 +6787,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     spawnBus(k) {
       let route = [
-        (L2) => L2.d === 0 ? L2.ti === 3 && L2.tj === 2 ? 1 : 0 : L2.d === 1 ? L2.ti === 3 && L2.tj === 4 ? 2 : 1 : L2.d === 2 ? L2.ti === 0 && L2.tj === 4 ? 3 : 2 : L2.ti === 0 && L2.tj === 2 ? 0 : 3
-      ], L = k === 0 ? this.links.get("0,2,0") : this.links.get("3,3,1");
+        (L2) => L2.d === 0 ? L2.ti === 3 && L2.tj === 1 ? 1 : 0 : L2.d === 1 ? L2.ti === 3 && L2.tj === 3 ? 2 : 1 : L2.d === 2 ? L2.ti === 1 && L2.tj === 3 ? 3 : 2 : L2.ti === 1 && L2.tj === 1 ? 0 : 3
+      ], L = k === 0 ? this.links.get("1,1,0") : this.links.get("3,3,2");
       if (!L) return;
       let car = this.makeCar("bus", L, 2, { route, color: 0 });
       car.v = 2, car.life = 1e9, car.busStops = this.city.world.busStops, this.addCar(car);
@@ -6326,11 +6832,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return [best, bestV];
     }
     canEnter(car, C) {
-      let st = this.signalState(C.i, C.j), light = C.d === 0 || C.d === 2 ? st.ew : st.ns;
+      let st = this.signalState(C.i, C.j), light = C.d === 0 || C.d === 2 ? st.ew : st.ns, lw = car.lineWait || 0;
       if (car.special === "fire" && car.siren) {
-        if (light !== "g" && car.wait < 1.5) return !1;
+        if (light !== "g" && lw < 1.5) return !1;
       } else if (light === "fr") {
-        if (car.wait < 1 || this.boxBusy(C, car)) return !1;
+        if (lw < 1 || this.boxBusy(C, car)) return !1;
         let a = this.inLinks.get(`${C.i},${C.j},1`), b = this.inLinks.get(`${C.i},${C.j},3`);
         for (let L of [a, b]) if (L) {
           for (let o of L.cars) if (o.state !== "parked" && L.len - o.s < 9 && o.v > 1) return !1;
@@ -6344,12 +6850,20 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let o of C.to.cars) if (o.s < car.len + 1.5 && o.state !== "parked") return !1;
       if (C.turn === "l") {
         let opp = this.inLinks.get(`${C.i},${C.j},${(C.d + 2) % 4}`);
-        if (opp) {
-          for (let o of opp.cars) if (o.state !== "parked" && opp.len - o.s < 9 && (o.v > 0.5 || opp.len - o.s < 3)) return !1;
+        if (opp) for (let o of opp.cars) {
+          if (o.state === "parked") continue;
+          let rest = opp.len - o.s;
+          if (!(rest > 9) && (o.v > 0.5 || rest < 3 && !(o.next && o.next.turn === "l") && (o.greenWait || 0) < 2.5))
+            return !1;
         }
-        for (let c2 of this.connectors.values()) if (c2.i === C.i && c2.j === C.j && c2.d === (C.d + 2) % 4 && c2.cars.length) return !1;
+        for (let c2 of this.connectors.values()) if (c2.i === C.i && c2.j === C.j && c2.d === (C.d + 2) % 4 && c2.turn !== "l" && c2.cars.length) return !1;
       }
-      return !(C.turn !== "s" && this.city.people && this.city.people.crosswalkBusy(C.i, C.j, C.nd));
+      if (C.turn !== "s" && this.city.people) {
+        let [dx, dy] = DIRS[C.nd], p0 = C.to.pts[0];
+        if (this.city.people.crossersNear(C.i, C.j, C.nd, p0[0] - dx, p0[1] - dy, 1.7))
+          return car.wait > 3 && this.pedHold.set(`${C.i},${C.j},${C.nd}`, this.clock + 1), !1;
+      }
+      return !0;
     }
     update(dt) {
       this.clock += dt;
@@ -6368,8 +6882,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (sp.iceTimer -= dt, env.season === 1 && h > 12 && h < 20 && sp.iceTimer <= 0 && !this.cars.some((c) => c.special === "icecream")) {
         sp.iceTimer = this.rng.range(80, 160);
-        let L = this.links.get("1,2,0") || this.rng.pick([...this.links.values()]);
-        this.spawnSpecial("icecream", { special: "icecream", link: L, life: 150, stopAt: { link: "1,2,0", s: 9 } });
+        let L = this.links.get("3,3,2") || this.rng.pick([...this.links.values()]);
+        this.spawnSpecial("icecream", { special: "icecream", link: L, life: 150, stopAt: { link: "3,3,2", s: 8 } });
       }
       sp.garbageTimer -= dt, h > 5 && h < 8.5 && sp.garbageTimer <= 0 && !this.cars.some((c) => c.special === "garbage") && (sp.garbageTimer = this.rng.range(60, 120), this.spawnSpecial("garbage", { special: "garbage", life: 120 })), sp.plowTimer -= dt, env.season === 3 && (env.snowing || env.snowCover > 0.5) && sp.plowTimer <= 0 && !this.cars.some((c) => c.special === "plow") && (sp.plowTimer = this.rng.range(70, 140), this.spawnSpecial("plow", { special: "plow", life: 100 }));
     }
@@ -6391,22 +6905,28 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       (car.special === "icecream" || car.special === "garbage") && (vMax *= 0.8);
       let [gap, lv] = this.leaderGap(car);
+      if (P.kind === "link" && car.v < 0.1 && P.len - car.s < 3 && (car.lineWait = (car.lineWait || 0) + dt), P.kind === "link" && car.next && car.v < 0.1 && P.len - car.s < 3) {
+        let st = this.signalState(car.next.i, car.next.j), light = car.next.d === 0 || car.next.d === 2 ? st.ew : st.ns;
+        car.greenWait = light === "g" || light === "fy" ? (car.greenWait || 0) + dt : 0;
+      } else car.greenWait = 0;
       if (P.kind === "link" && car.next) {
         let rest = P.len - car.s;
         rest < 12 && !this.canEnter(car, car.next) && rest < gap && (gap = rest, lv = 0);
       }
+      let S0 = 0.9;
       if (car.type === "bus" && P.kind === "link") {
         for (let b2 of car.busStops || []) {
-          let along = P.d === 0 || P.d === 2 ? b2.x : b2.y, cross = P.d === 0 || P.d === 2 ? b2.y : b2.x, lanePos = P.d === 0 || P.d === 2 ? P.pts[0][1] : P.pts[0][0];
+          if (b2 === car.lastStop) continue;
+          let along2 = P.d === 0 || P.d === 2 ? b2.x : b2.y, cross = P.d === 0 || P.d === 2 ? b2.y : b2.x, lanePos = P.d === 0 || P.d === 2 ? P.pts[0][1] : P.pts[0][0];
           if (Math.abs(cross - lanePos) > 3) continue;
-          let rem = (P.d === 0 ? along - P.pts[0][0] : P.d === 2 ? P.pts[0][0] - along : P.d === 1 ? along - P.pts[0][1] : P.pts[0][1] - along) - car.s;
-          car.dwell == null && rem > -0.5 && rem < gap && (gap = rem, lv = 0, rem < 0.4 && car.v < 0.3 && (car.dwell = 6, this.city.audio?.event("bus", car)));
+          let rem = (P.d === 0 ? along2 - P.pts[0][0] : P.d === 2 ? P.pts[0][0] - along2 : P.d === 1 ? along2 - P.pts[0][1] : P.pts[0][1] - along2) - car.s;
+          car.dwell == null && rem > -0.5 && rem + S0 < gap && (gap = rem + S0, lv = 0, rem < 0.4 && car.v < 0.3 && (car.dwell = 6, car.atStop = b2, this.city.audio?.event("bus", car)));
         }
-        car.dwell != null && (car.dwell -= dt, gap = 0, lv = 0, car.dwell <= 0 && (car.dwell = null, car.leftStop = 3)), car.leftStop && (car.leftStop -= dt, car.leftStop <= 0 && (car.leftStop = 0));
+        car.dwell != null && (car.dwell -= dt, gap = 0, lv = 0, car.dwell <= 0 && (car.dwell = null, car.lastStop = car.atStop, car.leftStop = 3)), car.leftStop && (car.leftStop -= dt, car.leftStop <= 0 && (car.leftStop = 0));
       }
       if (car.stopAt && P.kind === "link" && P.id === car.stopAt.link && car.stopDone == null) {
         let rem = car.stopAt.s - car.s;
-        rem > -0.3 && rem < gap && (gap = rem, lv = 0, rem < 0.4 && car.v < 0.2 && (car.stopDone = 0, car.dwell = 35, this.city.onIceCreamStop?.(car)));
+        rem > -0.3 && rem + S0 < gap && (gap = rem + S0, lv = 0, rem < 0.4 && car.v < 0.2 && (car.stopDone = 0, car.dwell = 35, this.city.onIceCreamStop?.(car)));
       }
       car.stopDone === 0 && car.dwell != null && (car.dwell -= dt, gap = 0, lv = 0, car.dwell <= 0 && (car.dwell = null, car.stopDone = 1, this.city.onIceCreamLeave?.(car))), car.leftStop && car.type === "bus" && (gap = Math.max(gap, 0));
       let a = 2.6, b = 4, s0 = 0.9, T2 = 0.9, v = car.v, sStar = s0 + v * T2 + v * (v - lv) / (2 * Math.sqrt(a * b)), acc = a * (1 - Math.pow(v / vMax, 4) - Math.pow(Math.max(0, sStar) / Math.max(0.05, gap), 2));
@@ -6429,7 +6949,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           nxt = car.next, this.exitLock.set(nxt.to.id, car);
         } else
           nxt = cur.to, this.exitLock.get(nxt.id) === car && this.exitLock.delete(nxt.id), car.route && car.routeIdx++;
-        cur.cars.splice(cur.cars.indexOf(car), 1), nxt.cars.push(car), car.piece = nxt, car.s = over, nxt.kind === "link" && this.chooseNext(car);
+        cur.cars.splice(cur.cars.indexOf(car), 1), nxt.cars.push(car), car.piece = nxt, car.s = over, car.lineWait = 0, nxt.kind === "link" && this.chooseNext(car);
       }
       this.place(car);
     }
@@ -6438,10 +6958,14 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return !1;
     }
     canEnterNow(car, C) {
-      let st = this.signalState(C.i, C.j), light = C.d === 0 || C.d === 2 ? st.ew : st.ns;
-      if (light === "r" && !(car.special === "fire" && car.wait > 1.5) || light === "fr" && (car.wait < 1 || this.boxBusy(C, car))) return !1;
+      let st = this.signalState(C.i, C.j), light = C.d === 0 || C.d === 2 ? st.ew : st.ns, lw = car.lineWait || 0;
+      if (light === "r" && !(car.special === "fire" && car.siren && lw > 1.5) || light === "fr" && (lw < 1 || this.boxBusy(C, car))) return !1;
       let lk = this.exitLock.get(C.to.id);
       return !(lk && lk !== car);
+    }
+    // a car has waited long enough to turn across this crosswalk: hold pedestrians at the kerb
+    holdingPeds(key) {
+      return (this.pedHold.get(key) ?? -1) > this.clock;
     }
     carAt(x, y, r = 1.2) {
       for (let c of this.cars) if (dist2(c.x, c.y, x, y) < r * r) return c;
@@ -6515,28 +7039,39 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
   };
   function buildNav(world) {
-    let G3 = new NavGraph(), corner = {}, key = (i, j, qx, qy) => `${i},${j},${qx},${qy}`;
+    let G3 = new NavGraph(), corner = {}, key = (i, j, qx, qy) => `${i},${j},${qx},${qy}`, park = (i, j) => isParkIntersection(i, j);
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j <= 4; j++)
-        for (let qx of [-1, 1])
-          for (let qy of [-1, 1]) {
-            let n = G3.add(roadCenter(i) + qx * Q, roadCenter(j) + qy * Q, 0.125, "corner");
-            n.i = i, n.j = j, corner[key(i, j, qx, qy)] = n;
-          }
+        if (!park(i, j))
+          for (let qx of [-1, 1])
+            for (let qy of [-1, 1]) {
+              let n = G3.add(roadCenter(i) + qx * Q, roadCenter(j) + qy * Q, 0.125, "corner");
+              n.i = i, n.j = j, corner[key(i, j, qx, qy)] = n;
+            }
+    let walk = (a, b) => G3.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
     for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++) {
-        for (let qy of [-1, 1]) G3.link(corner[key(i, j, -1, qy)], corner[key(i, j, 1, qy)], { i, j, axis: "x", side: qy < 0 ? 3 : 1 });
-        for (let qx of [-1, 1]) G3.link(corner[key(i, j, qx, -1)], corner[key(i, j, qx, 1)], { i, j, axis: "y", side: qx < 0 ? 2 : 0 });
-      }
+      for (let j = 0; j <= 4; j++)
+        if (!park(i, j)) {
+          for (let qy of [-1, 1]) {
+            let a = corner[key(i, j, -1, qy)], b = corner[key(i, j, 1, qy)];
+            park(i, j + qy) ? walk(a, b) : G3.link(a, b, { i, j, axis: "x", side: qy < 0 ? 3 : 1 });
+          }
+          for (let qx of [-1, 1]) {
+            let a = corner[key(i, j, qx, -1)], b = corner[key(i, j, qx, 1)];
+            park(i + qx, j) ? walk(a, b) : G3.link(a, b, { i, j, axis: "y", side: qx < 0 ? 2 : 0 });
+          }
+        }
     for (let j = 0; j <= 4; j++)
       for (let i = 0; i < 4; i++)
         for (let qy of [-1, 1]) {
+          if (park(i, j) || park(i + 1, j)) continue;
           let a = corner[key(i, j, 1, qy)], b = corner[key(i + 1, j, -1, qy)];
           G3.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
         }
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j < 4; j++)
         for (let qx of [-1, 1]) {
+          if (park(i, j) || park(i, j + 1)) continue;
           let a = corner[key(i, j, qx, 1)], b = corner[key(i, j + 1, qx, -1)];
           G3.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
         }
@@ -6590,30 +7125,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       best && poi.stoops.push({ seat: s, door: best });
     }
-    if (world.park) {
-      let P = world.park, cx = P.cx, cy = P.cy, o = 1.3, c00 = G3.add(P.x0 + o, P.y0 + o), c10 = G3.add(P.x1 - o, P.y0 + o), c11 = G3.add(P.x1 - o, P.y1 - o), c01 = G3.add(P.x0 + o, P.y1 - o), mN = G3.add(cx, P.y0 + o), mS = G3.add(cx, P.y1 - o), mW = G3.add(P.x0 + o, cy), mE = G3.add(P.x1 - o, cy);
-      G3.link(c00, mN), G3.link(mN, c10), G3.link(c10, mE), G3.link(mE, c11), G3.link(c11, mS), G3.link(mS, c01), G3.link(c01, mW), G3.link(mW, c00);
-      let r = 3, rN = G3.add(cx, cy - r), rS = G3.add(cx, cy + r), rW = G3.add(cx - r, cy), rE = G3.add(cx + r, cy), d = r * 0.72, dNW = G3.add(cx - d, cy - d), dNE = G3.add(cx + d, cy - d), dSE = G3.add(cx + d, cy + d), dSW = G3.add(cx - d, cy + d), ring = [rN, dNE, rE, dSE, rS, dSW, rW, dNW];
-      for (let k = 0; k < 8; k++) G3.link(ring[k], ring[(k + 1) % 8]);
-      G3.link(mN, rN), G3.link(mS, rS), G3.link(mW, rW), G3.link(mE, rE), G3.link(c00, dNW), G3.link(c10, dNE), G3.link(c11, dSE), G3.link(c01, dSW);
-      let entr = [[mN, cx, P.y0 - 1], [mS, cx, P.y1 + 1], [mW, P.x0 - 1, cy], [mE, P.x1 + 1, cy]];
-      for (let [n, x, y] of entr) {
-        let sw = G3.attach(x, y);
-        sw && G3.link(n, sw);
+    if (world.parkNet) {
+      let N = world.parkNet, pn = N.nodes.map((n) => G3.add(n.x, n.y, 0.125, "park"));
+      for (let [a, b] of N.edges) G3.link(pn[a], pn[b]);
+      for (let g of N.gates) {
+        let sw = null;
+        g.corner ? sw = G3.nodes.filter((n) => n.kind === "corner").reduce((b, n) => dist(n.x, n.y, g.sx, g.sy) < dist(b.x, b.y, g.sx, g.sy) ? n : b) : sw = G3.attach(g.sx, g.sy, 2.5), sw && G3.link(pn[g.node], sw);
       }
-      let near = (x, y) => G3.nodes.filter((n) => n.kind === "corner").reduce((b, n) => dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b);
-      G3.link(c00, near(P.x0 - 1, P.y0 - 1)), G3.link(c10, near(P.x1 + 1, P.y0 - 1)), G3.link(c11, near(P.x1 + 1, P.y1 + 1)), G3.link(c01, near(P.x0 - 1, P.y1 + 1)), poi.park.paths = [c00, c10, c11, c01, mN, mS, mW, mE, ...ring], poi.park.ring = ring, poi.park.perimeter = [c00, mN, c10, mE, c11, mS, c01, mW];
-      let all = G3.nodes.slice(), nearestPark = (x, y) => poi.park.paths.reduce((b, n) => dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b);
+      let pick = (ids) => ids.map((k) => pn[k]);
+      poi.park.paths = pick(N.paths), poi.park.ring = pick(N.ring), poi.park.perimeter = pick(N.perimeter), poi.park.lawnNodes = pick(N.lawnNodes), N.pond != null && (poi.park.pond = pn[N.pond]), N.dogGate != null && (poi.park.dogGate = pn[N.dogGate]);
+      let P = world.park, nearestPark = (x, y) => poi.park.paths.reduce((b, n) => dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b);
       for (let b of world.benches)
-        if (b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1) {
-          let n = nearestPark(b.x, b.y);
-          poi.benches.push({ bench: b, node: n, park: !0 });
-        }
-      if (world.pond && (poi.park.pond = nearestPark(world.pond.x, world.pond.y)), world.dogRun) {
-        let g = G3.add(world.dogRun.gate.x, world.dogRun.gate.y);
-        G3.link(g, nearestPark(g.x, g.y)), poi.park.dogGate = g;
-      }
-      poi.park.lawnNodes = (world.lawns || []).map((l) => nearestPark((l.x0 + l.x1) / 2, (l.y0 + l.y1) / 2));
+        b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1 && poi.benches.push({ bench: b, node: nearestPark(b.x, b.y), park: !0 });
     }
     for (let b of world.benches) {
       if (poi.benches.some((p) => p.bench === b)) continue;
@@ -6707,8 +7230,19 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     crosswalkBusy(i, j, side) {
       return (this.cross.get(`${i},${j},${side}`) || 0) > 0;
     }
+    // anyone on this crosswalk within r of (x, y)?
+    crossersNear(i, j, side, x, y, r) {
+      if (!this.crosswalkBusy(i, j, side)) return !1;
+      for (let p of this.list) {
+        let c = p.crossing;
+        if (c && c.i === i && c.j === j && c.side === side && dist2(p.x, p.y, x, y) < r * r) return !0;
+      }
+      return !1;
+    }
     walkState(c) {
-      let st = this.city.traffic.signalState(c.i, c.j);
+      let tr = this.city.traffic;
+      if (tr.holdingPeds(this.crossKey(c))) return "dont";
+      let st = tr.signalState(c.i, c.j);
       return c.axis === "x" ? st.walkEW : st.walkNS;
     }
     env() {
@@ -6903,7 +7437,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     spawn(anywhere = !1) {
       let role = this.chooseRole(), kind = this.chooseKind(role), p = this.create(role), P = this.poi(), r = this.rng, h = this.env().hour, src;
       if (role === "worker" && (kind === "lunch" || kind === "commute") ? src = r.pick(P.offices) : role === "worker" || role === "tourist" || kind === "goHome" || kind === "night" && r.chance(0.5) ? src = r.pick(P.subways) : src = this.pickHome(), kind === "goHome" ? p.home = this.pickHome() : src.kind === "door" && src.data?.kind === "home" && (p.home = src), role === "dogwalker" && (p.dogName = r.pick(DOG_NAMES), this.city.animals?.spawnDog(p)), p.plan = this.plan(p, kind), p.node = src, p.x = src.x, p.y = src.y, p.z = src.z, p.state = "appear", p.alpha = 0, anywhere) {
-        let n = r.pick(this.nav.nodes.filter((nn) => nn.kind === "walk" || nn.kind === "corner"));
+        let n = r.pick(this.nav.nodes.filter((nn) => nn.kind === "walk" || nn.kind === "corner" || nn.kind === "park"));
         p.node = n, p.x = n.x, p.y = n.y, p.z = n.z, p.alpha = 1, p.state = "idle", p.timer = r.range(0, 0.5);
       }
       return p.dog && (p.dog.x = p.x, p.dog.y = p.y), this.list.push(p), p;
@@ -7099,8 +7633,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         ahead > 0.15 && ahead < 0.5 && o.state === "walk" && (speed *= 0.7);
       }
       let step = speed * dt;
-      if (d <= step + 0.03)
-        p.x = tx, p.y = ty, p.z = wp.z, p.node = wp.node, p.crossing && wp.cross === p.crossing && this.endCross(p), p.pi++, p.pi >= p.path.length && (p.state = "arrived", p.anim = "idle");
+      p.wpIdx !== p.pi || p.wpPath !== p.path ? (p.wpIdx = p.pi, p.wpPath = p.path, p.wpBest = d, p.wpT = 0) : d < p.wpBest - 0.05 ? (p.wpBest = d, p.wpT = 0) : p.wpT += dt;
+      let stalled = p.wpT > 1.5 && d < 1.2;
+      if (d <= step + 0.03 || stalled)
+        stalled || (p.x = tx, p.y = ty), p.z = wp.z, p.node = wp.node, p.crossing && wp.cross === p.crossing && this.endCross(p), p.pi++, p.pi >= p.path.length && (p.state = "arrived", p.anim = "idle");
       else {
         let k = step / d;
         p.x += (tx - p.x) * k + px * dt * 0.8, p.y += (ty - p.y) * k + py * dt * 0.8, p.z += (wp.z - p.z) * Math.min(1, k * 1), this.setFacing(p, tx - p.x, ty - p.y), p.dist += step;
@@ -7169,7 +7705,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
       }
       if (day && poi.court.playground && !env.raining) for (let k = 0; k < 3; k++) mk("kid", "playground", poi.court.playground, poi.court.playground.x, poi.court.playground.y, r.range(30, 70));
-      if (s === 1 && day && !env.raining) for (let k = 0; k < 4; k++) mk("resident", "lawn", poi.park.lawnNodes?.[k % 3], 72, 72, r.range(40, 90));
+      let lawnN = poi.park.lawnNodes || [];
+      if (s === 1 && day && !env.raining && lawnN.length) for (let k = 0; k < 6; k++) {
+        let n = lawnN[k % lawnN.length];
+        mk("resident", "lawn", n, n.x, n.y, r.range(40, 90));
+      }
       if (day && poi.park.dogGate) for (let k = 0; k < 2; k++) {
         let p = mk("dogwalker", null, poi.park.dogGate, poi.park.dogGate.x, poi.park.dogGate.y, 0);
         p.dogName = r.pick(["Biscuit", "Lola", "Rocco", "Pretzel"]), this.city.animals?.spawnDog(p), this.join(p, "dogrun", r.range(30, 60));
@@ -7516,7 +8056,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     // ---- pigeons ---------------------------------------------------------------
     initPigeons() {
       let W = this.city.world, r = this.rng, spots = [];
-      W.parkCenter && spots.push({ x: W.parkCenter.x + 2.4, y: W.parkCenter.y + 1, r: 1.6 });
+      if (W.parkCenter) {
+        let [fx, fy] = W.parkCenter.flock || [W.parkCenter.x + 2.4, W.parkCenter.y + 1];
+        spots.push({ x: fx, y: fy, r: 0.9 });
+      }
       for (let c of W.carts) spots.push({ x: c.x + 0.8, y: c.y + 0.6, r: 1 });
       for (let b of W.benches.filter((_, i) => i % 3 === 0).slice(0, 6)) spots.push({ x: b.x + 0.6, y: b.y + 0.6, r: 1 });
       for (let s of W.subways) spots.push({ x: s.x + 0.6, y: s.y, r: 0.9 });
@@ -7906,9 +8449,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
       if (env.season !== 3 && env.hour >= 7 && env.hour < 23) for (let f of W.fountains) {
         if (!view.visible(f.x, f.y, f.z, 3)) continue;
-        let n = f.kind === "center" ? 26 : 10;
+        let n = f.kind === "center" ? 26 : f.kind === "tiered" ? 46 : 10;
         for (let k = 0; k < n * dt * 3; k++)
-          if (f.kind === "center") {
+          if (f.kind === "tiered") {
+            let u = r.next(), a = r.range(0, 6.28), ca = Math.cos(a), sa = Math.sin(a);
+            if (u < 0.4) {
+              let s = r.range(0.1, 0.32);
+              this.add({ x: f.x, y: f.y, z: f.z + 0.05, vx: ca * s, vy: sa * s, vz: r.range(1.8, 2.5), g: 5, life: 1, max: 1, kind: "water", f: this.fr.dot, row: this.row, slot: S.C8, floor: f.bowls[0].z });
+            } else {
+              let top = u < 0.65, b = top ? f.bowls[0] : f.bowls[1], s = r.range(0.12, 0.35);
+              this.add({ x: f.x + ca * b.r, y: f.y + sa * b.r, z: b.z + 0.02, vx: ca * s, vy: sa * s, vz: r.range(0, 0.25), g: 5, life: 0.8, max: 0.8, kind: "water", f: this.fr.dot, row: this.row, slot: S.C8, floor: top ? f.bowls[1].z : f.floor });
+            }
+          } else if (f.kind === "center") {
             let a = r.range(0, 6.28), s = r.range(0.2, 0.55);
             this.add({ x: f.x, y: f.y, z: f.z + 0.1, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(2.2, 3), g: 5, life: 1.2, max: 1.2, kind: "water", f: this.fr.dot, row: this.row, slot: S.C8, floor: f.z - 0.5 });
           } else {
@@ -8559,10 +9111,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           break;
       }
     }
-    thunder(dist3) {
-      if (!this.on || !Number.isFinite(dist3)) return;
-      let t = this.now() + 0.4 + dist3 * 2.2, o = this.out(1.1 - dist3 * 0.5, this.rng.range(-0.5, 0.5));
-      this.noise(t, 3.5 + dist3 * 2, o, [["lowpass", 380, 0.6, 70]], 1, 0.08, this.brown), this.noise(t, 0.25, o, [["lowpass", 2e3, 0.5, 400]], 0.5 * (1 - dist3), 5e-3);
+    thunder(dist4) {
+      if (!this.on || !Number.isFinite(dist4)) return;
+      let t = this.now() + 0.4 + dist4 * 2.2, o = this.out(1.1 - dist4 * 0.5, this.rng.range(-0.5, 0.5));
+      this.noise(t, 3.5 + dist4 * 2, o, [["lowpass", 380, 0.6, 70]], 1, 0.08, this.brown), this.noise(t, 0.25, o, [["lowpass", 2e3, 0.5, 400]], 0.5 * (1 - dist4), 5e-3);
     }
     birds(k) {
       let t = this.now(), r = this.rng, o = this.out(0.13 * k, r.range(-0.8, 0.8)), n = r.int(3, 7), base = r.range(2600, 4200);
@@ -8663,7 +9215,12 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (this.chirpT -= dt, this.chirpT <= 0) {
         this.chirpT = 0.5;
-        let cx = app.camera.x, cy = app.camera.y, i = clamp(Math.round((cx - 4.5) / 27), 0, 4), j = clamp(Math.round((cy - 4.5) / 27), 0, 4), st = city.traffic.signalState(i, j), key = `${i},${j},${st.walkEW},${st.walkNS}`;
+        let cx = app.camera.x, cy = app.camera.y, i = clamp(Math.round((cx - 4.5) / 27), 0, 4), j = clamp(Math.round((cy - 4.5) / 27), 0, 4);
+        if (isParkIntersection(i, j)) {
+          this.lastWalk = null;
+          return;
+        }
+        let st = city.traffic.signalState(i, j), key = `${i},${j},${st.walkEW},${st.walkNS}`;
         this.lastWalk && key !== this.lastWalk && (st.walkEW === "walk" || st.walkNS === "walk") && css >= 2 && this.walkChirp({ x: i * 27 + 4.5, y: j * 27 + 4.5, z: 0 }), this.lastWalk = key;
       }
     }
@@ -8691,7 +9248,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     let renderer = new Renderer(gl);
     renderer.setStatic(world.mesh, world.atlas, world.groundPage);
     let q = new URLSearchParams(location.search), env = new Environment(), camera = new Camera(), dpr = window.devicePixelRatio || 1;
-    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 60, camera.y = 70, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
+    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 62, camera.y = 64, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
     let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
     app.audio = audio, city.audio = audio, env.onEvent((ev, d) => {
       ev === "lightning" && audio.thunder(d.dist), ev === "season" && city.activities?.seed();

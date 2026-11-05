@@ -1,6 +1,6 @@
 // Ground texture (world-space, T texels / unit) + the raised sidewalk plinths and diorama base.
 
-import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter } from './layout.js';
+import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, parkPlinth, isParkIntersection } from './layout.js';
 import { MAT } from './mesh.js';
 import { RNG, hash2i, shade, mixc } from '../core/math.js';
 
@@ -37,6 +37,22 @@ export function raisedIntervals() {
   if (x < MAP) out.push([x, MAP]);
   return out;
 }
+
+// Raised plinths [x0, y0, x1, y1]: one per block (with its sidewalks), the park's blocks merged into one.
+export function plinthRects() {
+  const iv = raisedIntervals();
+  const P = parkPlinth();
+  const inPark = (a, b) => a >= P.x0 && b <= P.x1;
+  const out = [];
+  for (const [ax, bx] of iv)
+    for (const [ay, by] of iv) if (!(inPark(ax, bx) && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
+  out.push([P.x0, P.y0, P.x1, P.y1]);
+  return out;
+}
+const inParkPlinth = (x, y, m = 0) => {
+  const P = parkPlinth();
+  return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
+};
 
 export function paintGround(region, rng) {
   const p = region.p;
@@ -142,10 +158,8 @@ export function paintGround(region, rng) {
     }
   }
 
-  // 3. sidewalks (raised areas)
-  const iv = raisedIntervals();
-  for (const [ax, bx] of iv)
-    for (const [ay, by] of iv) paintSidewalkRect(p, ax * T, ay * T, (bx - ax) * T, (by - ay) * T, rng);
+  // 3. sidewalks (raised areas; the park plinth paves over the streets it swallowed)
+  for (const [ax, ay, bx, by] of plinthRects()) paintSidewalkRect(p, ax * T, ay * T, (bx - ax) * T, (by - ay) * T, rng);
 
   // 4. manholes + storm drains on roads
   const manholes = [];
@@ -156,6 +170,7 @@ export function paintGround(region, rng) {
       for (const axis of ['x', 'y']) {
         const wx = axis === 'x' ? along : off;
         const wy = axis === 'x' ? off : along;
+        if (inParkPlinth(wx, wy, 0.5)) continue;
         manhole(p, wx * T, wy * T, rng);
         manholes.push({ x: wx, y: wy, axis });
       }
@@ -166,7 +181,9 @@ export function paintGround(region, rng) {
     for (let j = 0; j <= NB; j++) {
       const rcx = roadCenter(i) * T, rcy = roadCenter(j) * T;
       const h = (ROAD / 2) * T;
+      if (isParkIntersection(i, j)) continue;
       for (const [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, true], [rcx + h - 14, rcy + h + 58, true], [rcx - h - 70, rcy + h - 14, false], [rcx + h + 58, rcy - h + 2, false]]) {
+        if (inParkPlinth((gx + 6) / T, (gy + 6) / T, 0.2)) continue;
         const w = vert ? 12 : 22, hh = vert ? 22 : 12;
         p.rect(gx, gy, w, hh, 0x26272b, GC.METAL);
         for (let t = 2; t < (vert ? hh : w) - 1; t += 3) {
@@ -268,14 +285,12 @@ export function buildGroundGeometry(mb, ground, tex) {
   // road surface over entire map + diorama base sides
   const g = { t: ground, world: true, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
   mb.box(0, 0, -BASE_DEPTH, MAP, MAP, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
-  const iv = raisedIntervals();
-  for (const [ax, bx] of iv)
-    for (const [ay, by] of iv) {
-      mb.box(ax, ay, 0, bx, by, CURB, {
-        pz: { t: ground, u0: ax * T, v0: ay * T, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
-        px: tex.curb, nx: tex.curb, py: tex.curb, ny: tex.curb,
-      });
-    }
+  for (const [ax, ay, bx, by] of plinthRects()) {
+    mb.box(ax, ay, 0, bx, by, CURB, {
+      pz: { t: ground, u0: ax * T, v0: ay * T, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
+      px: tex.curb, nx: tex.curb, py: tex.curb, ny: tex.curb,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------

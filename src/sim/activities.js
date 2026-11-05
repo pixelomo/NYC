@@ -61,7 +61,8 @@ export class Activities {
       }
     }
     if (day && poi.court.playground && !env.raining) for (let k = 0; k < 3; k++) mk('kid', 'playground', poi.court.playground, poi.court.playground.x, poi.court.playground.y, r.range(30, 70));
-    if (s === 1 && day && !env.raining) for (let k = 0; k < 4; k++) mk('resident', 'lawn', poi.park.lawnNodes?.[k % 3], 72, 72, r.range(40, 90));
+    const lawnN = poi.park.lawnNodes || [];
+    if (s === 1 && day && !env.raining && lawnN.length) for (let k = 0; k < 6; k++) { const n = lawnN[k % lawnN.length]; mk('resident', 'lawn', n, n.x, n.y, r.range(40, 90)); }
     if (day && poi.park.dogGate) for (let k = 0; k < 2; k++) {
       const p = mk('dogwalker', null, poi.park.dogGate, poi.park.dogGate.x, poi.park.dogGate.y, 0);
       p.dogName = r.pick(['Biscuit', 'Lola', 'Rocco', 'Pretzel']);

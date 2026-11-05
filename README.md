@@ -22,7 +22,8 @@ npm run build
 
 ## What's in the city
 
-- **4×4 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab. The slab's
+- **4×4 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab, with a big
+  **central park** filling the middle four blocks and twelve city blocks around it. The slab's
   cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver
   trains loop around the city and stop at a tiled station with passengers waiting on the platform.
   - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
@@ -36,8 +37,12 @@ npm run build
     chimneys, satellite dishes, roof decks and gardens
 - A **basketball court** with chain-link fence, hoops and floodlights, a playground with swings,
   slide and sprinkler, and a handball wall with a mural.
-- A **park** across the road: fountain, duck pond (ice rink in winter), dog run, statue,
-  flowerbeds, benches and lanterns.
+- The **park** (across the road from the court) takes over the streets between its four blocks:
+  a stone wall with gate pillars, a loop drive for joggers, an elm-lined promenade leading to a
+  tiered fountain on a paved terrace, a mown oval Great Lawn, a lake with an island, rocky
+  shores, a boat dock and rowboats (an ice rink in winter), a statue garden with formal flower
+  beds, a cherry grove, a wooded ramble with pines and boulders, a dog run, and over a hundred
+  trees, lanterns and benches. Benches line its outer wall, and the bus loops round it.
 - Streets with crosswalks, working **traffic and pedestrian signals**, street lamps, hydrants,
   mailboxes, newspaper boxes, bus shelters, subway entrances with green globes, food carts, and
   orange-and-white **steam stacks** and manholes that billow steam.
@@ -49,7 +54,7 @@ npm run build
   on summer evenings, trick-or-treaters in autumn. They path-find along sidewalks, wait for the
   WALK signal, climb stoops, enter shops and come out with bags, and open umbrellas in the rain.
 - **Traffic**: yellow cabs, cars, vans, trucks and buses obey signals, turn, yield to pedestrians
-  and oncoming traffic, park and pull out. A bus loops between stops; a fire truck sometimes races
+  and oncoming traffic, park and pull out. A bus loops round the park between stops; a fire truck sometimes races
   out with sirens; garbage trucks run in the morning; an ice-cream truck plays its jingle in summer;
   snow plows clear winter streets. Late at night signals switch to flashing yellow/red.
 - **Animals**: pigeon flocks peck, scatter when people pass, perch on lamps and water towers and
