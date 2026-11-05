@@ -61,6 +61,11 @@ async function boot() {
     if (ev === 'lightning') audio.thunder(d.dist);
     if (ev === 'season') city.activities?.seed();
   });
+  document.addEventListener('visibilitychange', () => {
+    if (!audio.ctx || !audio.enabled) return;
+    if (document.hidden) audio.ctx.suspend();
+    else audio.ctx.resume();
+  });
   const ui = new UI(app);
   app.ui = ui;
   window.__city = app;
