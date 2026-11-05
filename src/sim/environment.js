@@ -246,7 +246,7 @@ export class Environment {
     u.crown = smoothstep(-2, -7, sun.el) > 0 ? smoothstep(-1, -6, sun.el) : 0;
     u.crownA = CROWN[s][0];
     u.crownB = CROWN[s][1];
-    u.bloom = 0.35 + 0.9 * night;
+    u.bloom = 0.25 + 0.6 * night;
     u.sat = 1.08 - cloudK * 0.15;
     u.grade = [1, 1, 1];
     if (sun.el > 0 && sun.el < 12) u.grade = [1.04, 0.99, 0.94];

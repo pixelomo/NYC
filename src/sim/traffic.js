@@ -220,7 +220,7 @@ export class Traffic {
     // parked cars
     for (const L of this.links.values()) {
       for (const p of L.park) {
-        if (this.rng.chance(0.55)) {
+        if (this.rng.chance(0.5)) {
           const car = this.makeCar(this.rng.weighted([['sedan', 40], ['suv', 25], ['van', 10], ['taxi', 6], ['police', 2]]), L, p.s);
           car.state = 'parked'; car.v = 0; car.spot = p; p.car = car;
           car.lat = PARK_OFF - LANE_OFF;
@@ -239,7 +239,7 @@ export class Traffic {
   }
   targetCount(env) {
     const h = env.hour;
-    let base = h < 5 ? 10 : h < 7 ? 22 : h < 10 ? 44 : h < 16 ? 34 : h < 19.5 ? 46 : h < 23 ? 30 : 16;
+    let base = h < 5 ? 14 : h < 7 ? 30 : h < 10 ? 60 : h < 16 ? 46 : h < 19.5 ? 62 : h < 23 ? 40 : 22;
     if (env.snowing) base *= 0.7;
     return Math.round(base);
   }

@@ -192,6 +192,7 @@ void main() {
   vec3 albedo = tex.rgb;
   float code = floor(tex.a * 255.0 + 0.5);
   vec3 emis = vec3(0.0);
+  float selfLit = 0.0;
   float refl = 0.0;
   float wetK = 0.0;
   float puddle = 0.0;
@@ -300,9 +301,13 @@ void main() {
         emis = mix(uCrownA, uCrownB, step(0.5, fract(vWorld.z * 0.5 + 0.25))) * albedo * 2.2 * uCrown;
       } else if (t < lit) {
         float h = hash12(vec2(t * 91.0, fl + float(vInfo.w)));
-        vec3 wc = selfC ? albedo * 1.15 + 0.04 : windowColor(h);
-        if (!selfC && h > 0.93) wc *= 0.75 + 0.25 * sin(uTime * (7.0 + h * 9.0) + t * 40.0) * sin(uTime * 2.3 + h * 20.0);
-        emis = wc * uEmis;
+        if (selfC) {
+          selfLit = uEmis;
+        } else {
+          vec3 wc = windowColor(h);
+          if (h > 0.93) wc *= 0.75 + 0.25 * sin(uTime * (7.0 + h * 9.0) + t * 40.0) * sin(uTime * 2.3 + h * 20.0);
+          emis = wc * uEmis * 0.82;
+        }
       }
       if (!selfC) refl = (mat & 2u) != 0u ? 0.55 : 0.22;
     }
@@ -334,8 +339,14 @@ void main() {
   }
 
   col += emis;
+  // self-coloured lights (neon, signs, curtains, billboards): show their own colour at full brightness
+  vec3 sglow = vec3(0.0);
+  if (selfLit > 0.0) {
+    col = mix(col, albedo * 1.08, clamp(selfLit, 0.0, 1.0) * 0.92);
+    sglow = albedo * selfLit * 0.1;
+  }
   oColor = vec4(col, 1.0);
-  oGlow = vec4(emis * 0.85 + lamp * puddle * 0.25, 1.0);
+  oGlow = vec4(emis * 0.38 + sglow + lamp * puddle * 0.25, 1.0);
 }`, SHADOW_VS = HEAD + `
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aUV;
@@ -475,7 +486,7 @@ void main() {
     float ny = gl_FragCoord.y / uCanvas.y;
     c = mix(c, uFog.rgb, uFog.w * (0.3 + 0.55 * back + 0.15 * ny));
   }
-  vec3 b = texture(uBloom, p / uBuf).rgb + texture(uBloom2, p / uBuf).rgb;
+  vec3 b = texture(uBloom, p / uBuf).rgb + texture(uBloom2, p / uBuf).rgb * 0.45;
   c += b * uBloomK;
   c *= uGrade;
   float l = dot(c, vec3(0.299, 0.587, 0.114));
@@ -3444,7 +3455,7 @@ void main() {
       let amb = keyLerp(AMB, sun.el).map((v) => v * (1 + cloudK * 0.18));
       u.amb = amb, u.face = [1, 0.88, 0.72], u.stars = smoothstep(-4, -12, sun.el) * (1 - cloudK), u.emis = 0.06 + 0.94 * this.darkness * this.darkness, u.snow = this.snowCover, u.wet = this.wetness, u.cloud = [this.cloudOff[0], this.cloudOff[1], clamp(0.25 + cloudK * 0.75, 0, 1), sun.el > 0 ? 0.45 + cloudK * 0.3 : 0], u.flash = this.flash * 0.9;
       let dk = this.darkness;
-      u.resLit = clamp(keyLerp(RES_LIT, h) + dk * 0.08 + cloudK * 0.06, 0, 1), u.offLit = clamp(keyLerp(OFF_LIT, h) + dk * 0.05, 0, 1), u.leaves = s === 2 ? 0.85 : 0, u.season = s, u.flowers = [1, 0.8, 0.35, 0][s], u.ice = s === 3 ? 1 : 0, u.crown = smoothstep(-2, -7, sun.el) > 0 ? smoothstep(-1, -6, sun.el) : 0, u.crownA = CROWN[s][0], u.crownB = CROWN[s][1], u.bloom = 0.35 + 0.9 * night, u.sat = 1.08 - cloudK * 0.15, u.grade = [1, 1, 1], sun.el > 0 && sun.el < 12 && (u.grade = [1.04, 0.99, 0.94]), u.outline = 0.22;
+      u.resLit = clamp(keyLerp(RES_LIT, h) + dk * 0.08 + cloudK * 0.06, 0, 1), u.offLit = clamp(keyLerp(OFF_LIT, h) + dk * 0.05, 0, 1), u.leaves = s === 2 ? 0.85 : 0, u.season = s, u.flowers = [1, 0.8, 0.35, 0][s], u.ice = s === 3 ? 1 : 0, u.crown = smoothstep(-2, -7, sun.el) > 0 ? smoothstep(-1, -6, sun.el) : 0, u.crownA = CROWN[s][0], u.crownB = CROWN[s][1], u.bloom = 0.25 + 0.6 * night, u.sat = 1.08 - cloudK * 0.15, u.grade = [1, 1, 1], sun.el > 0 && sun.el < 12 && (u.grade = [1.04, 0.99, 0.94]), u.outline = 0.22;
       {
         let f = clamp(this.fog * 0.9 + (this.snowing ? 0.18 * this.precip : 0) + (this.raining ? 0.1 * this.precip : 0), 0, 0.75), fc = u.skyBottom.map((v, i) => v * 0.55 + [0.62, 0.65, 0.7][i] * 0.45 * (1 - this.darkness * 0.75));
         u.fogv = [fc[0], fc[1], fc[2], f];
@@ -5079,7 +5090,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let env = this.city.env;
       for (let L of this.links.values())
         for (let p of L.park)
-          if (this.rng.chance(0.55)) {
+          if (this.rng.chance(0.5)) {
             let car = this.makeCar(this.rng.weighted([["sedan", 40], ["suv", 25], ["van", 10], ["taxi", 6], ["police", 2]]), L, p.s);
             car.state = "parked", car.v = 0, car.spot = p, p.car = car, car.lat = 1.85 - 0.7, L.cars.splice(L.cars.indexOf(car), 1), this.cars.push(car), this.city.carLayer && this.city.carLayer.assignPalette(car), this.place(car);
           }
@@ -5088,7 +5099,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let k = 0; k < 2; k++) this.spawnBus(k);
     }
     targetCount(env) {
-      let h = env.hour, base = h < 5 ? 10 : h < 7 ? 22 : h < 10 ? 44 : h < 16 ? 34 : h < 19.5 ? 46 : h < 23 ? 30 : 16;
+      let h = env.hour, base = h < 5 ? 14 : h < 7 ? 30 : h < 10 ? 60 : h < 16 ? 46 : h < 19.5 ? 62 : h < 23 ? 40 : 22;
       return env.snowing && (base *= 0.7), Math.round(base);
     }
     spawnMoving(anywhere = !1) {
@@ -6793,7 +6804,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let t = q.max ? q.life / q.max : 1;
         if (q.kind === "steam") {
           let age = 1 - t, si = Math.min(pf.length - 1, Math.floor(age * q.grow));
-          L.push(q.x, q.y, q.z, pf[si], q.row, SF.NOSHADOW | SF.BRIGHT, Math.min(1, t * 1.4) * 0.85, 1e-3);
+          L.push(q.x, q.y, q.z, pf[si], q.row, SF.NOSHADOW | SF.BRIGHT, Math.min(1, t * 2.6), 1e-3);
         } else q.kind === "spark" || q.kind === "rocket" ? L.push(q.x, q.y, q.z, q.f || this.fr.dot, q.row, SF.EMISSIVE | SF.NOSHADOW, Math.min(1, t * 1.6), 1e-3) : q.kind === "leaf" || q.kind === "water" ? L.push(q.x, q.y, q.z, q.f, this.slotRow(q.slot), SF.NOSHADOW, q.kind === "leaf" ? Math.min(1, q.life) : 1, 1e-3) : L.push(q.x, q.y, q.z, q.f, q.row, SF.NOSHADOW, t, 1e-3);
       }
       for (let d of this.rain)

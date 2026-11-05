@@ -450,7 +450,7 @@ export function awningTex(p, w, h, c, striped, text, rng) {
 
 // Billboard advert art
 export function billboardArt(p, w, h, kind, rng) {
-  const t = winCode(0.03, true);
+  const t = winCode(0.03, true); // self-lit at dusk
   const S = (x, y, ww, hh, c) => {
     for (let yy = 0; yy < hh; yy++) for (let xx = 0; xx < ww; xx++) p.set(x + xx, y + yy, c, t);
   };

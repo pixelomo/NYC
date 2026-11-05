@@ -247,7 +247,7 @@ export class Particles {
       if (q.kind === 'steam') {
         const age = 1 - t;
         const si = Math.min(pf.length - 1, Math.floor(age * q.grow));
-        L.push(q.x, q.y, q.z, pf[si], q.row, SF.NOSHADOW | SF.BRIGHT, Math.min(1, t * 1.4) * 0.85, 0.001);
+        L.push(q.x, q.y, q.z, pf[si], q.row, SF.NOSHADOW | SF.BRIGHT, Math.min(1, t * 2.6), 0.001);
       } else if (q.kind === 'spark' || q.kind === 'rocket') {
         L.push(q.x, q.y, q.z, q.f || this.fr.dot, q.row, SF.EMISSIVE | SF.NOSHADOW, Math.min(1, t * 1.6), 0.001);
       } else if (q.kind === 'leaf' || q.kind === 'water') {

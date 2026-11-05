@@ -129,6 +129,7 @@ void main() {
   vec3 albedo = tex.rgb;
   float code = floor(tex.a * 255.0 + 0.5);
   vec3 emis = vec3(0.0);
+  float selfLit = 0.0;
   float refl = 0.0;
   float wetK = 0.0;
   float puddle = 0.0;
@@ -237,9 +238,13 @@ void main() {
         emis = mix(uCrownA, uCrownB, step(0.5, fract(vWorld.z * 0.5 + 0.25))) * albedo * 2.2 * uCrown;
       } else if (t < lit) {
         float h = hash12(vec2(t * 91.0, fl + float(vInfo.w)));
-        vec3 wc = selfC ? albedo * 1.15 + 0.04 : windowColor(h);
-        if (!selfC && h > 0.93) wc *= 0.75 + 0.25 * sin(uTime * (7.0 + h * 9.0) + t * 40.0) * sin(uTime * 2.3 + h * 20.0);
-        emis = wc * uEmis;
+        if (selfC) {
+          selfLit = uEmis;
+        } else {
+          vec3 wc = windowColor(h);
+          if (h > 0.93) wc *= 0.75 + 0.25 * sin(uTime * (7.0 + h * 9.0) + t * 40.0) * sin(uTime * 2.3 + h * 20.0);
+          emis = wc * uEmis * 0.82;
+        }
       }
       if (!selfC) refl = (mat & 2u) != 0u ? 0.55 : 0.22;
     }
@@ -271,8 +276,14 @@ void main() {
   }
 
   col += emis;
+  // self-coloured lights (neon, signs, curtains, billboards): show their own colour at full brightness
+  vec3 sglow = vec3(0.0);
+  if (selfLit > 0.0) {
+    col = mix(col, albedo * 1.08, clamp(selfLit, 0.0, 1.0) * 0.92);
+    sglow = albedo * selfLit * 0.1;
+  }
   oColor = vec4(col, 1.0);
-  oGlow = vec4(emis * 0.85 + lamp * puddle * 0.25, 1.0);
+  oGlow = vec4(emis * 0.38 + sglow + lamp * puddle * 0.25, 1.0);
 }`;
 
 // Depth-only pass for the sun shadow map
@@ -429,7 +440,7 @@ void main() {
     float ny = gl_FragCoord.y / uCanvas.y;
     c = mix(c, uFog.rgb, uFog.w * (0.3 + 0.55 * back + 0.15 * ny));
   }
-  vec3 b = texture(uBloom, p / uBuf).rgb + texture(uBloom2, p / uBuf).rgb;
+  vec3 b = texture(uBloom, p / uBuf).rgb + texture(uBloom2, p / uBuf).rgb * 0.45;
   c += b * uBloomK;
   c *= uGrade;
   float l = dot(c, vec3(0.299, 0.587, 0.114));
