@@ -83,7 +83,7 @@ export class Statics {
       if (!vis(t.x, t.y, t.z + 2, 6)) continue;
       const fr = this.treeFrames[t.species][t.variant];
       const rows = this.treeRows[t.species];
-      L.push(t.x, t.y, t.z, fr, rows[i % 2], 0);
+      L.push(t.x, t.y, t.z, fr, rows[i % 2], SF.TALL);
     }
     // props
     for (const p of world.props) {
@@ -93,7 +93,7 @@ export class Statics {
       const fr = this.frames[p.kind];
       if (!fr) continue;
       const row = p.kind === 'laundry' ? this.laundryRow : p.kind === 'statue' ? this.statueRow : p.kind === 'cartUmbrella' ? this.umbRows[p.cart] || this.propRow : this.propRow;
-      L.push(p.x, p.y, p.z, fr, row, p.kind === 'statue' ? 0 : 0);
+      L.push(p.x, p.y, p.z, fr, row, p.kind === 'statue' ? SF.TALL : 0);
     }
     // flags wave
     for (const f of world.flags) {
@@ -107,7 +107,7 @@ export class Statics {
     // winter: christmas tree at park centre, sellers
     if (env.season === 3 && world.parkCenter) {
       const c = world.parkCenter;
-      L.push(c.x, c.y, CURB + 1.0, this.frames.xmas, this.xmasRow, 0);
+      L.push(c.x, c.y, CURB + 1.0, this.frames.xmas, this.xmasRow, SF.TALL);
       for (const s of this.treeSellers) {
         for (let k = 0; k < 5; k++) {
           const ox = s.n[1] * (k - 2) * 0.35, oy = -s.n[0] * (k - 2) * 0.35;

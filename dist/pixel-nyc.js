@@ -622,11 +622,17 @@ void main() {
     constructor(gl) {
       this.gl = gl, this.progStatic = createProgram(gl, STATIC_VS, STATIC_FS, "static"), this.progShadow = createProgram(gl, SHADOW_VS, SHADOW_FS, "shadow"), this.progSky = createProgram(gl, FS_VS, SKY_FS, "sky"), this.progBlur = createProgram(gl, FS_VS, BLUR_FS, "blur"), this.progComp = createProgram(gl, FS_VS, COMPOSITE_FS, "composite"), this.emptyVAO = gl.createVertexArray(), this.noiseTex = this._makeNoise();
       let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), qs = new URLSearchParams(location.search);
-      this.shadowSize = Math.min(qs.has("shadow") ? parseInt(qs.get("shadow"), 10) : 4096, maxTex), this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this.floatOK = !!gl.getExtension("EXT_color_buffer_float"), gl.getExtension("OES_texture_float_linear"), this.lightSize = 512, this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR } : { filter: gl.LINEAR }), this.lightFBO = makeFBO(gl, [this.lightTex], null), this.bw = 0, this.bh = 0, this.layers = [], this.stats = { tris: 0 };
+      this.shadowSize = Math.min(qs.has("shadow") ? parseInt(qs.get("shadow"), 10) : 4096, maxTex), this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this._makeStaticShadow(), this.floatOK = !!gl.getExtension("EXT_color_buffer_float"), gl.getExtension("OES_texture_float_linear"), this.lightSize = 512, this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR } : { filter: gl.LINEAR }), this.lightFBO = makeFBO(gl, [this.lightTex], null), this.bw = 0, this.bh = 0, this.layers = [], this.stats = { tris: 0 };
     }
     setShadowSize(n) {
       let gl = this.gl;
-      n !== this.shadowSize && (gl.deleteTexture(this.shadowTex), gl.deleteFramebuffer(this.shadowFBO), this.shadowSize = n, this.shadowTex = makeDepthTexture(gl, n, n, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex));
+      n !== this.shadowSize && (gl.deleteTexture(this.shadowTex), gl.deleteFramebuffer(this.shadowFBO), this.shadowSize = n, this.shadowTex = makeDepthTexture(gl, n, n, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this._makeStaticShadow());
+    }
+    // Shadow map of the static city only (no sprites or cars). Trees sample it, so their canopies
+    // are shaded by buildings but never by each other's flat billboard shadows.
+    _makeStaticShadow() {
+      let gl = this.gl, n = Math.min(2048, this.shadowSize);
+      this.shadowTexS && this.shadowSizeS === n || (this.shadowTexS && (gl.deleteTexture(this.shadowTexS), gl.deleteFramebuffer(this.shadowFBOS)), this.shadowSizeS = n, this.shadowTexS = makeDepthTexture(gl, n, n, !0), this.shadowFBOS = makeFBO(gl, [], this.shadowTexS));
     }
     _makeNoise() {
       let gl = this.gl, N = 256, d = new Uint8Array(N * N), P = 16, tileNoise = (x, y, period, seed) => {
@@ -684,7 +690,7 @@ void main() {
               mn[i] = Math.min(mn[i], a[i]), mx[i] = Math.max(mx[i], a[i]);
           }
       let c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], h = [(mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2 + 1], m = new Float32Array(16);
-      return m[0] = r[0] / h[0], m[4] = r[1] / h[0], m[8] = r[2] / h[0], m[12] = -c[0] / h[0], m[1] = u[0] / h[1], m[5] = u[1] / h[1], m[9] = u[2] / h[1], m[13] = -c[1] / h[1], m[2] = f[0] / h[2], m[6] = f[1] / h[2], m[10] = f[2] / h[2], m[14] = -c[2] / h[2], m[15] = 1, this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])], m;
+      return m[0] = r[0] / h[0], m[4] = r[1] / h[0], m[8] = r[2] / h[0], m[12] = -c[0] / h[0], m[1] = u[0] / h[1], m[5] = u[1] / h[1], m[9] = u[2] / h[1], m[13] = -c[1] / h[1], m[2] = f[0] / h[2], m[6] = f[1] / h[2], m[10] = f[2] / h[2], m[14] = -c[2] / h[2], m[15] = 1, this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])], this.shadowKS = [Math.max(h[0], h[1]) * 2 / this.shadowSizeS, 1 / (2 * h[2])], m;
     }
     // Common lit-surface uniforms
     setLit(p, ctx) {
@@ -694,13 +700,13 @@ void main() {
     render(camera, env, time, canvasW, canvasH) {
       let gl = this.gl, scale = camera.scale, linear = scale < 0.999, bw = Math.ceil(canvasW / scale) + 4, bh = Math.ceil(canvasH / scale) + 4;
       bw += bw & 1, bh += bh & 1, bw = Math.min(bw, 4096), bh = Math.min(bh, 4096), this._ensureTargets(bw, bh);
-      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ctx = { viewProj, shadowMat, shadowK: this.shadowK, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
+      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
         gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
         for (let l of this.layers) l.shadow && l.shadow(ctx);
-        gl.disable(gl.POLYGON_OFFSET_FILL);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS), gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS), gl.clear(gl.DEPTH_BUFFER_BIT), gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), gl.disable(gl.POLYGON_OFFSET_FILL);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.lightFBO), gl.viewport(0, 0, this.lightSize, this.lightSize), gl.disable(gl.DEPTH_TEST), gl.clearColor(0, 0, 0, 1), gl.clear(gl.COLOR_BUFFER_BIT), gl.enable(gl.BLEND), gl.blendFunc(gl.ONE, gl.ONE);
       for (let l of this.layers) l.light && l.light(ctx);
@@ -5058,9 +5064,11 @@ layout(location=3) in vec4 iA; // ax, ay, palRow, flags
 layout(location=4) in vec2 iB; // alpha, depth bias
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
+uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
 out vec2 vUV;
 flat out vec4 vInfo;
-out vec3 vWorld;
+out vec3 vWorld;   // on the vertical axis through the anchor
+out vec3 vWorldR;  // the pixel's own position on the billboard plane
 void main() {
   vec4 c = uViewProj * vec4(iPos, 1.0);
   vec2 px = floor((c.xy * 0.5 + 0.5) * uBuf + 0.5);
@@ -5074,12 +5082,16 @@ void main() {
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
   vInfo = vec4(iA.z, flags, iB.x, 0.0);
   vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
+  vWorldR = vWorld + vec3(uRight * (aCorner.x * w - ax), 0.0);
   gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y, 1.0);
 }`, FS = HEAD2 + `
 in vec2 vUV;
 flat in vec4 vInfo;
 in vec3 vWorld;
+in vec3 vWorldR;
 uniform sampler2D uSprites;
+uniform sampler2DShadow uShadowS; // static geometry only
+uniform vec2 uShadowKS;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
@@ -5127,16 +5139,24 @@ void main() {
   }
   float s = 1.0;
   if (uShadowOn > 0.5 && (flags & 16) == 0) {
-    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
-    vec3 sc = spos.xyz * 0.5 + 0.5;
-    if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0) {
-      s = texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y));
-      s = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), s);
+    float dith = bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y)));
+    if ((flags & 8) != 0) {
+      // tall sprites (trees): per-pixel lookup in the static-only map, so buildings shade the canopy
+      // where they really do and neighbouring trees never band each other
+      vec4 spos = uShadowMat * vec4(vWorldR + uSunDir * uShadowKS.x * 1.5, 1.0);
+      vec3 sc = spos.xyz * 0.5 + 0.5;
+      if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0)
+        s = step(dith, texture(uShadowS, vec3(sc.xy, sc.z - uShadowKS.x * 2.0 * uShadowKS.y)));
+    } else {
+      vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
+      vec3 sc = spos.xyz * 0.5 + 0.5;
+      if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0)
+        s = step(dith, texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y)));
     }
   }
-  float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
+  float cn = texture(uNoise, vWorldR.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorldR.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / 128.0).rgb;
   float hf = clamp(1.0 - (vWorld.z - 0.3) / 8.0, 0.0, 1.0);
   vec3 light = uAmb * 0.92 + uSunCol * 0.8 * s * cl * smoothstep(0.0, 0.15, uSunDir.z + 0.05) + lm * hf * hf * 1.1 + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.2, 0.19, 0.16);
@@ -5168,7 +5188,7 @@ out vec4 o;
 void main() {
   if (texelFetch(uSprites, ivec2(floor(vUV)), 0).a < 0.5) discard;
   o = vec4(1.0);
-}`, SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, NOSHADE: 16, BRIGHT: 32 }, STRIDE = 13, SpriteLayer = class {
+}`, SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32 }, STRIDE = 13, SpriteLayer = class {
     constructor(gl, atlas, pal) {
       this.gl = gl, this.atlas = atlas, this.pal = pal, this.prog = createProgram(gl, VS, FS, "sprites"), this.shadowProg = createProgram(gl, SHADOW_VS2, SHADOW_FS2, "spriteShadow"), this.cap = 8192, this.data = new Float32Array(this.cap * STRIDE), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
       let corner = gl.createBuffer();
@@ -5198,7 +5218,7 @@ void main() {
     draw(ctx) {
       if (!this.count) return;
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uShadowKS, ctx.shadowKS), gl.uniform2fv(u.uRight, ctx.right), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.activeTexture(gl.TEXTURE5), gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS), gl.uniform1i(u.uShadowS, 5), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     }
   };
 
@@ -5962,14 +5982,14 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let t = world.trees[i];
         if (!vis(t.x, t.y, t.z + 2, 6)) continue;
         let fr = this.treeFrames[t.species][t.variant], rows = this.treeRows[t.species];
-        L.push(t.x, t.y, t.z, fr, rows[i % 2], 0);
+        L.push(t.x, t.y, t.z, fr, rows[i % 2], SF.TALL);
       }
       for (let p of world.props) {
         if (!vis(p.x, p.y, p.z, 3) || p.group === "warm" && !(env.season === 1 || env.season === 0) || p.kind === "deckchair" && env.season === 3) continue;
         let fr = this.frames[p.kind];
         if (!fr) continue;
         let row = p.kind === "laundry" ? this.laundryRow : p.kind === "statue" ? this.statueRow : p.kind === "cartUmbrella" ? this.umbRows[p.cart] || this.propRow : this.propRow;
-        L.push(p.x, p.y, p.z, fr, row, (p.kind === "statue", 0));
+        L.push(p.x, p.y, p.z, fr, row, p.kind === "statue" ? SF.TALL : 0);
       }
       for (let f of world.flags) {
         let tip = f.tip || f;
@@ -5979,7 +5999,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (env.season === 3 && world.parkCenter) {
         let c = world.parkCenter;
-        L.push(c.x, c.y, 0.125 + 1, this.frames.xmas, this.xmasRow, 0);
+        L.push(c.x, c.y, 0.125 + 1, this.frames.xmas, this.xmasRow, SF.TALL);
         for (let s of this.treeSellers)
           for (let k = 0; k < 5; k++) {
             let ox = s.n[1] * (k - 2) * 0.35, oy = -s.n[0] * (k - 2) * 0.35;

@@ -20,6 +20,7 @@ export class Renderer {
     this.shadowSize = Math.min(qs.has('shadow') ? parseInt(qs.get('shadow'), 10) : 4096, maxTex);
     this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, true);
     this.shadowFBO = makeFBO(gl, [], this.shadowTex);
+    this._makeStaticShadow();
     this.floatOK = !!gl.getExtension('EXT_color_buffer_float');
     gl.getExtension('OES_texture_float_linear');
     this.lightSize = 512;
@@ -41,6 +42,19 @@ export class Renderer {
     this.shadowSize = n;
     this.shadowTex = makeDepthTexture(gl, n, n, true);
     this.shadowFBO = makeFBO(gl, [], this.shadowTex);
+    this._makeStaticShadow();
+  }
+
+  // Shadow map of the static city only (no sprites or cars). Trees sample it, so their canopies
+  // are shaded by buildings but never by each other's flat billboard shadows.
+  _makeStaticShadow() {
+    const gl = this.gl;
+    const n = Math.min(2048, this.shadowSize);
+    if (this.shadowTexS && this.shadowSizeS === n) return;
+    if (this.shadowTexS) { gl.deleteTexture(this.shadowTexS); gl.deleteFramebuffer(this.shadowFBOS); }
+    this.shadowSizeS = n;
+    this.shadowTexS = makeDepthTexture(gl, n, n, true);
+    this.shadowFBOS = makeFBO(gl, [], this.shadowTexS);
   }
 
   _makeNoise() {
@@ -169,6 +183,7 @@ export class Renderer {
     m[15] = 1;
     // world units per shadow texel, and shadow-map depth (0..1) per world unit, for texel-scaled biases
     this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])];
+    this.shadowKS = [Math.max(h[0], h[1]) * 2 / this.shadowSizeS, 1 / (2 * h[2])];
     return m;
   }
 
@@ -215,7 +230,10 @@ export class Renderer {
     const shadowMat = this.shadowMatrix(env.sunDir);
     // offset that turns buffer pixels into absolute art pixels (mod 4), so shadow dithering stays put while panning
     const ditherOff = [(((tsx - bw / 2) % 4) + 4) % 4, (((tsy + bh / 2) % 4) + 4) % 4];
-    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
+    // world xy per art pixel along the screen's horizontal axis (sprite billboards lie in this plane)
+    const ca = Math.cos(camera.angle), sa = Math.sin(camera.angle);
+    const right = [(ca - sa) / (2 * T), -(sa + ca) / (2 * T)];
+    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
     const vis = env.vis >>> 0;
 
     // 1. Shadow map
@@ -238,6 +256,18 @@ export class Renderer {
       gl.bindVertexArray(this.staticVAO);
       gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
       for (const l of this.layers) l.shadow && l.shadow(ctx);
+      // static-only map for tall sprites (same light matrix, static geometry only)
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS);
+      gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS);
+      gl.clear(gl.DEPTH_BUFFER_BIT);
+      gl.useProgram(p.program);
+      gl.uniformMatrix4fv(p.u.uShadowVP, false, shadowMat);
+      gl.uniform1ui(p.u.uVis, vis);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
+      gl.uniform1i(p.u.uAtlas, 0);
+      gl.bindVertexArray(this.staticVAO);
+      gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
       gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 

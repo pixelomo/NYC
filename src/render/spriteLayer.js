@@ -19,9 +19,11 @@ layout(location=3) in vec4 iA; // ax, ay, palRow, flags
 layout(location=4) in vec2 iB; // alpha, depth bias
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
+uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
 out vec2 vUV;
 flat out vec4 vInfo;
-out vec3 vWorld;
+out vec3 vWorld;   // on the vertical axis through the anchor
+out vec3 vWorldR;  // the pixel's own position on the billboard plane
 void main() {
   vec4 c = uViewProj * vec4(iPos, 1.0);
   vec2 px = floor((c.xy * 0.5 + 0.5) * uBuf + 0.5);
@@ -35,6 +37,7 @@ void main() {
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
   vInfo = vec4(iA.z, flags, iB.x, 0.0);
   vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
+  vWorldR = vWorld + vec3(uRight * (aCorner.x * w - ax), 0.0);
   gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y, 1.0);
 }`;
 
@@ -42,7 +45,10 @@ const FS = HEAD + `
 in vec2 vUV;
 flat in vec4 vInfo;
 in vec3 vWorld;
+in vec3 vWorldR;
 uniform sampler2D uSprites;
+uniform sampler2DShadow uShadowS; // static geometry only
+uniform vec2 uShadowKS;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
@@ -90,16 +96,24 @@ void main() {
   }
   float s = 1.0;
   if (uShadowOn > 0.5 && (flags & 16) == 0) {
-    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
-    vec3 sc = spos.xyz * 0.5 + 0.5;
-    if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0) {
-      s = texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y));
-      s = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), s);
+    float dith = bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y)));
+    if ((flags & 8) != 0) {
+      // tall sprites (trees): per-pixel lookup in the static-only map, so buildings shade the canopy
+      // where they really do and neighbouring trees never band each other
+      vec4 spos = uShadowMat * vec4(vWorldR + uSunDir * uShadowKS.x * 1.5, 1.0);
+      vec3 sc = spos.xyz * 0.5 + 0.5;
+      if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0)
+        s = step(dith, texture(uShadowS, vec3(sc.xy, sc.z - uShadowKS.x * 2.0 * uShadowKS.y)));
+    } else {
+      vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
+      vec3 sc = spos.xyz * 0.5 + 0.5;
+      if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0)
+        s = step(dith, texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y)));
     }
   }
-  float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
+  float cn = texture(uNoise, vWorldR.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorldR.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / 128.0).rgb;
   float hf = clamp(1.0 - (vWorld.z - 0.3) / 8.0, 0.0, 1.0);
   vec3 light = uAmb * 0.92 + uSunCol * 0.8 * s * cl * smoothstep(0.0, 0.15, uSunDir.z + 0.05) + lm * hf * hf * 1.1 + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.2, 0.19, 0.16);
@@ -137,7 +151,7 @@ void main() {
   o = vec4(1.0);
 }`;
 
-export const SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, NOSHADE: 16, BRIGHT: 32 };
+export const SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32 };
 const STRIDE = 13;
 
 export class SpriteLayer {
@@ -209,6 +223,8 @@ export class SpriteLayer {
     gl.uniform2f(u.uBuf, ctx.bw, ctx.bh);
     gl.uniformMatrix4fv(u.uShadowMat, false, ctx.shadowMat);
     gl.uniform2fv(u.uShadowK, ctx.shadowK);
+    gl.uniform2fv(u.uShadowKS, ctx.shadowKS);
+    gl.uniform2fv(u.uRight, ctx.right);
     gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);
@@ -232,6 +248,9 @@ export class SpriteLayer {
     gl.activeTexture(gl.TEXTURE4);
     gl.bindTexture(gl.TEXTURE_2D, r.noiseTex);
     gl.uniform1i(u.uNoise, 4);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS);
+    gl.uniform1i(u.uShadowS, 5);
     gl.bindVertexArray(this.vao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
   }
