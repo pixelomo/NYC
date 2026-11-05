@@ -48,6 +48,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
 uniform float uShadowOn;
 uniform vec3 uSunDir;
 uniform vec3 uSunCol;
@@ -88,11 +90,11 @@ void main() {
   }
   float s = 1.0;
   if (uShadowOn > 0.5 && (flags & 16) == 0) {
-    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * 0.12, 1.0);
+    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
     vec3 sc = spos.xyz * 0.5 + 0.5;
     if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0) {
-      s = texture(uShadow, vec3(sc.xy, sc.z - 0.0015));
-      s = step(bayer4(gl_FragCoord.xy), s);
+      s = texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y));
+      s = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), s);
     }
   }
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
@@ -206,6 +208,8 @@ export class SpriteLayer {
     gl.uniformMatrix4fv(u.uViewProj, false, ctx.viewProj);
     gl.uniform2f(u.uBuf, ctx.bw, ctx.bh);
     gl.uniformMatrix4fv(u.uShadowMat, false, ctx.shadowMat);
+    gl.uniform2fv(u.uShadowK, ctx.shadowK);
+    gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);
     gl.uniform3fv(u.uSunCol, e.sunCol);

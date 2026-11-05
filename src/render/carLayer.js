@@ -115,6 +115,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
 uniform float uShadowOn;
 uniform vec3 uSunDir, uSunCol, uAmb, uFace;
 uniform vec2 uRot;
@@ -160,9 +162,11 @@ void main() {
   float ndl = dot(n, uSunDir);
   float sh = 1.0;
   if (uShadowOn > 0.5 && ndl > 0.0) {
-    vec4 sp = uShadowMat * vec4(vWorld + n * 0.06 + uSunDir * 0.03, 1.0);
+    float tx = uShadowK.x, sinT = sqrt(max(1.0 - ndl * ndl, 0.0));
+    vec4 sp = uShadowMat * vec4(vWorld + n * tx * (1.0 + 1.6 * sinT) + uSunDir * tx * 0.5, 1.0);
     vec3 s = sp.xyz * 0.5 + 0.5;
-    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(gl_FragCoord.xy), texture(uShadow, vec3(s.xy, s.z - 0.0008)));
+    float bias = tx * (0.6 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
@@ -831,6 +835,8 @@ export class CarLayer {
     gl.uniformMatrix4fv(u.uViewProj, false, ctx.viewProj);
     gl.uniform2f(u.uBuf, ctx.bw, ctx.bh);
     gl.uniformMatrix4fv(u.uShadowMat, false, ctx.shadowMat);
+    gl.uniform2fv(u.uShadowK, ctx.shadowK);
+    gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);
     gl.uniform3fv(u.uSunCol, e.sunCol);

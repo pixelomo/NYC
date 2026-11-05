@@ -15,7 +15,12 @@ export const MAT = {
   FLAT: 128, // no directional face shading (sprites-like)
 };
 
-// Visibility groups (bit index). CPU sets a 32-bit mask each frame.
+// Shadow-casting modes stored in the high bits of the group byte. A texture region can set
+// tex.cast = 'none' (fine railings, mesh, glass: their sub-texel shadows would shimmer) or
+// 'solid' (grated platforms, wire baskets: cast one stable shape, ignoring the holes).
+export const CAST = { NONE: 128, SOLID: 64 };
+
+// Visibility groups (bit index, below 32). CPU sets a 32-bit mask each frame.
 export const GRP = {
   ALWAYS: 0, SPRING: 1, SUMMER: 2, AUTUMN: 3, WINTER: 4, NOT_WINTER: 5, NIGHT: 6, DAY: 7,
   SUMMER_DAY: 8, FOUNTAIN: 9, NOT_SUMMER: 10, XMAS: 11, NOT_XMAS: 12, ICE: 13, NO_ICE: 14,
@@ -69,7 +74,7 @@ export class MeshBuilder {
     this.nrm[k * 4 + 3] = 0;
     this.info[k * 4] = tex.layer;
     this.info[k * 4 + 1] = mat;
-    this.info[k * 4 + 2] = group;
+    this.info[k * 4 + 2] = group | (tex.cast === 'none' ? CAST.NONE : tex.cast === 'solid' ? CAST.SOLID : 0);
     this.info[k * 4 + 3] = seed & 255;
     return k;
   }

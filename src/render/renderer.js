@@ -167,6 +167,8 @@ export class Renderer {
     m[1] = u[0] / h[1]; m[5] = u[1] / h[1]; m[9] = u[2] / h[1]; m[13] = -c[1] / h[1];
     m[2] = f[0] / h[2]; m[6] = f[1] / h[2]; m[10] = f[2] / h[2]; m[14] = -c[2] / h[2];
     m[15] = 1;
+    // world units per shadow texel, and shadow-map depth (0..1) per world unit, for texel-scaled biases
+    this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])];
     return m;
   }
 
@@ -175,6 +177,8 @@ export class Renderer {
     const gl = this.gl, u = p.u, e = ctx.env;
     gl.uniformMatrix4fv(u.uViewProj, false, ctx.viewProj);
     if (u.uShadowMat) gl.uniformMatrix4fv(u.uShadowMat, false, ctx.shadowMat);
+    if (u.uShadowK) gl.uniform2fv(u.uShadowK, ctx.shadowK);
+    if (u.uDither) gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);
     gl.uniform3fv(u.uSunCol, e.sunCol);
@@ -206,10 +210,12 @@ export class Renderer {
     bw += bw & 1; bh += bh & 1;
     bw = Math.min(bw, 4096); bh = Math.min(bh, 4096);
     this._ensureTargets(bw, bh);
-    const { viewProj, frac } = camera.matrices(bw, bh);
+    const { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh);
     const shadowOn = env.sunDir[2] > 0.02;
     const shadowMat = this.shadowMatrix(env.sunDir);
-    const ctx = { viewProj, shadowMat, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
+    // offset that turns buffer pixels into absolute art pixels (mod 4), so shadow dithering stays put while panning
+    const ditherOff = [(((tsx - bw / 2) % 4) + 4) % 4, (((tsy + bh / 2) % 4) + 4) % 4];
+    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
     const vis = env.vis >>> 0;
 
     // 1. Shadow map

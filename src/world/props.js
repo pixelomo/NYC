@@ -217,6 +217,8 @@ export function propTex(C) {
     p.rect(0, 8, 32, 2, 0x8a8e94);
     for (let x = 0; x < 32; x += 16) p.vline(x, 2, 6, 0x9a9ea4);
   });
+  for (const k of ['chain', 'chainLow', 'net', 'glass', 'subwayRail']) P[k].cast = 'none';
+  P.basket.cast = 'solid';
   C._props = P;
   return P;
 }

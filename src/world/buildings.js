@@ -225,6 +225,9 @@ export function sharedTex(C) {
     p.hline(0, 9, 24, 0x3e5040);
   });
   S.trashTop = A.shared('trash_t', 12, 12, (p) => { p.rect(0, 0, 12, 12, 0x4a604c); p.ellipse(6, 6, 2.5, 2.5, 0x2a3a2c); p.frame(0, 0, 12, 12, 0x6a8a6e); p.hline(3, 2, 6, 0x7a947e); });
+  // fine see-through meshes cast no sun shadow (sub-texel bars shimmer); grated platforms cast a solid one
+  for (const k of ['railing', 'railingTall', 'fescRail', 'ladder', 'fstair', 'stairs', 'xmasLights', 'lightsWarm']) S[k].cast = 'none';
+  S.grate.cast = 'solid';
   C._shared = S;
   return S;
 }

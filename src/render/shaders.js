@@ -13,6 +13,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK; // x: world units per shadow-map texel, y: shadow-map depth per world unit
+uniform vec2 uDither;  // buffer pixel -> absolute art pixel offset (mod 4) for world-anchored dithering
 uniform float uShadowOn;
 uniform vec3 uSunDir;
 uniform vec3 uSunCol;
@@ -41,12 +43,18 @@ float nz(vec2 p) { return texture(uNoise, p).r; }
 
 float shadowAt(vec3 wp, vec3 n) {
   if (uShadowOn < 0.5) return 1.0;
-  vec4 sp = uShadowMat * vec4(wp + n * 0.07 + uSunDir * 0.03, 1.0);
+  // offsets measured in shadow texels so they hold at every shadow-map size: push the lookup out
+  // along the normal (more at grazing light) and add a slope-scaled depth bias against acne
+  float tx = uShadowK.x;
+  float ndl = clamp(dot(n, uSunDir), 0.0, 1.0);
+  float sinT = sqrt(1.0 - ndl * ndl);
+  vec4 sp = uShadowMat * vec4(wp + n * tx * (1.0 + 1.6 * sinT) + uSunDir * tx * 0.5, 1.0);
   vec3 s = sp.xyz * 0.5 + 0.5;
   if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
-  float v = texture(uShadow, vec3(s.xy, s.z - 0.0006));
+  float bias = tx * (0.6 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+  float v = texture(uShadow, vec3(s.xy, s.z - bias));
   // pixel-art: dither the penumbra instead of smooth blending
-  return step(bayer4(gl_FragCoord.xy), v);
+  return step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), v);
 }
 float cloudAt(vec3 wp) {
   float c = nz(wp.xy * 0.006 + uCloud.xy) * 0.65 + nz(wp.xy * 0.017 + uCloud.xy * 1.7) * 0.35;
@@ -82,7 +90,7 @@ flat out uvec4 vRect;
 flat out vec3 vNrm;
 flat out uvec4 vInfo;
 void main() {
-  if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vWorld = aPos;
   vUV = aUV;
   vRect = aRect;
@@ -308,8 +316,10 @@ flat out uvec4 vRect;
 flat out uint vLayer;
 flat out uint vMat;
 void main() {
-  if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vUV = aUV; vRect = aRect; vLayer = aInfo.x; vMat = aInfo.y;
+  // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vUV = aUV; vRect = aRect; vLayer = aInfo.x;
+  vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);
 }`;
 
@@ -321,7 +331,7 @@ flat in uint vMat;
 uniform sampler2DArray uAtlas;
 out vec4 o;
 void main() {
-  if ((vMat & 4u) != 0u) { o = vec4(1.0); return; }
+  if ((vMat & 260u) != 0u) { o = vec4(1.0); return; }
   ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
   if (texelFetch(uAtlas, ivec3(tc, int(vLayer)), 0).a < 0.5 / 255.0) discard;
   o = vec4(1.0);

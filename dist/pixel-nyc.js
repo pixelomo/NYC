@@ -80,6 +80,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK; // x: world units per shadow-map texel, y: shadow-map depth per world unit
+uniform vec2 uDither;  // buffer pixel -> absolute art pixel offset (mod 4) for world-anchored dithering
 uniform float uShadowOn;
 uniform vec3 uSunDir;
 uniform vec3 uSunCol;
@@ -108,12 +110,18 @@ float nz(vec2 p) { return texture(uNoise, p).r; }
 
 float shadowAt(vec3 wp, vec3 n) {
   if (uShadowOn < 0.5) return 1.0;
-  vec4 sp = uShadowMat * vec4(wp + n * 0.07 + uSunDir * 0.03, 1.0);
+  // offsets measured in shadow texels so they hold at every shadow-map size: push the lookup out
+  // along the normal (more at grazing light) and add a slope-scaled depth bias against acne
+  float tx = uShadowK.x;
+  float ndl = clamp(dot(n, uSunDir), 0.0, 1.0);
+  float sinT = sqrt(1.0 - ndl * ndl);
+  vec4 sp = uShadowMat * vec4(wp + n * tx * (1.0 + 1.6 * sinT) + uSunDir * tx * 0.5, 1.0);
   vec3 s = sp.xyz * 0.5 + 0.5;
   if (s.x < 0.0 || s.y < 0.0 || s.x > 1.0 || s.y > 1.0 || s.z > 1.0) return 1.0;
-  float v = texture(uShadow, vec3(s.xy, s.z - 0.0006));
+  float bias = tx * (0.6 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+  float v = texture(uShadow, vec3(s.xy, s.z - bias));
   // pixel-art: dither the penumbra instead of smooth blending
-  return step(bayer4(gl_FragCoord.xy), v);
+  return step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), v);
 }
 float cloudAt(vec3 wp) {
   float c = nz(wp.xy * 0.006 + uCloud.xy) * 0.65 + nz(wp.xy * 0.017 + uCloud.xy * 1.7) * 0.35;
@@ -147,7 +155,7 @@ flat out uvec4 vRect;
 flat out vec3 vNrm;
 flat out uvec4 vInfo;
 void main() {
-  if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vWorld = aPos;
   vUV = aUV;
   vRect = aRect;
@@ -368,8 +376,10 @@ flat out uvec4 vRect;
 flat out uint vLayer;
 flat out uint vMat;
 void main() {
-  if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vUV = aUV; vRect = aRect; vLayer = aInfo.x; vMat = aInfo.y;
+  // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vUV = aUV; vRect = aRect; vLayer = aInfo.x;
+  vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);
 }`, SHADOW_FS = HEAD + `
 in vec2 vUV;
@@ -379,7 +389,7 @@ flat in uint vMat;
 uniform sampler2DArray uAtlas;
 out vec4 o;
 void main() {
-  if ((vMat & 4u) != 0u) { o = vec4(1.0); return; }
+  if ((vMat & 260u) != 0u) { o = vec4(1.0); return; }
   ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
   if (texelFetch(uAtlas, ivec3(tc, int(vLayer)), 0).a < 0.5 / 255.0) discard;
   o = vec4(1.0);
@@ -674,17 +684,17 @@ void main() {
               mn[i] = Math.min(mn[i], a[i]), mx[i] = Math.max(mx[i], a[i]);
           }
       let c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], h = [(mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2 + 1], m = new Float32Array(16);
-      return m[0] = r[0] / h[0], m[4] = r[1] / h[0], m[8] = r[2] / h[0], m[12] = -c[0] / h[0], m[1] = u[0] / h[1], m[5] = u[1] / h[1], m[9] = u[2] / h[1], m[13] = -c[1] / h[1], m[2] = f[0] / h[2], m[6] = f[1] / h[2], m[10] = f[2] / h[2], m[14] = -c[2] / h[2], m[15] = 1, m;
+      return m[0] = r[0] / h[0], m[4] = r[1] / h[0], m[8] = r[2] / h[0], m[12] = -c[0] / h[0], m[1] = u[0] / h[1], m[5] = u[1] / h[1], m[9] = u[2] / h[1], m[13] = -c[1] / h[1], m[2] = f[0] / h[2], m[6] = f[1] / h[2], m[10] = f[2] / h[2], m[14] = -c[2] / h[2], m[15] = 1, this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])], m;
     }
     // Common lit-surface uniforms
     setLit(p, ctx) {
       let gl = this.gl, u = p.u, e = ctx.env;
-      gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), u.uShadowMat && gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform1f(u.uEmis, e.emis), gl.uniform1f(u.uSnow, e.snow), gl.uniform1f(u.uWet, e.wet), gl.uniform1f(u.uTime, ctx.time), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.shadowTex), gl.uniform1i(u.uShadow, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, this.lightTex), gl.uniform1i(u.uLightMap, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, this.noiseTex), gl.uniform1i(u.uNoise, 3);
+      gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), u.uShadowMat && gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), u.uShadowK && gl.uniform2fv(u.uShadowK, ctx.shadowK), u.uDither && gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform1f(u.uEmis, e.emis), gl.uniform1f(u.uSnow, e.snow), gl.uniform1f(u.uWet, e.wet), gl.uniform1f(u.uTime, ctx.time), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.shadowTex), gl.uniform1i(u.uShadow, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, this.lightTex), gl.uniform1i(u.uLightMap, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, this.noiseTex), gl.uniform1i(u.uNoise, 3);
     }
     render(camera, env, time, canvasW, canvasH) {
       let gl = this.gl, scale = camera.scale, linear = scale < 0.999, bw = Math.ceil(canvasW / scale) + 4, bh = Math.ceil(canvasH / scale) + 4;
       bw += bw & 1, bh += bh & 1, bw = Math.min(bw, 4096), bh = Math.min(bh, 4096), this._ensureTargets(bw, bh);
-      let { viewProj, frac } = camera.matrices(bw, bh), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ctx = { viewProj, shadowMat, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
+      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ctx = { viewProj, shadowMat, shadowK: this.shadowK, ditherOff, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
@@ -1199,7 +1209,7 @@ void main() {
     // does not receive sun shadow (e.g. emissive signage)
     FLAT: 128
     // no directional face shading (sprites-like)
-  }, GRP = {
+  }, CAST = { NONE: 128, SOLID: 64 }, GRP = {
     ALWAYS: 0,
     SPRING: 1,
     SUMMER: 2,
@@ -1238,7 +1248,7 @@ void main() {
     }
     _v(p, u, v, tex, n, mat, group, seed) {
       let k = this.nv++;
-      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex.x, this.rect[k * 4 + 1] = tex.y, this.rect[k * 4 + 2] = tex.w, this.rect[k * 4 + 3] = tex.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = 0, this.info[k * 4] = tex.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group, this.info[k * 4 + 3] = seed & 255, k;
+      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex.x, this.rect[k * 4 + 1] = tex.y, this.rect[k * 4 + 2] = tex.w, this.rect[k * 4 + 3] = tex.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = 0, this.info[k * 4] = tex.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group | (tex.cast === "none" ? CAST.NONE : tex.cast === "solid" ? CAST.SOLID : 0), this.info[k * 4 + 3] = seed & 255, k;
     }
     // p0..p3: TL, TR, BR, BL as seen from the front. uvs: [[u,v] x4]
     quad(p0, p1, p2, p3, uvs, tex, n, mat = 0, group = this.defaultGroup, seed = 0) {
@@ -2347,7 +2357,7 @@ void main() {
   function sharedTex(C) {
     if (C._shared) return C._shared;
     let A = C.atlas, S2 = {}, brickTile = (name, pal, seed) => A.shared(name, 128, 96, (p) => brickFill(p, 0, 0, 128, 96, pal, seed));
-    return S2.brickRed = brickTile("b_red", PAL.brickRed, 3), S2.brickBrown = brickTile("b_brown", PAL.brickBrown, 4), S2.brickOrange = brickTile("b_orange", PAL.brickOrange, 5), S2.brickTan = brickTile("b_tan", PAL.brickTan, 6), S2.brickPurple = brickTile("b_purple", PAL.brickPurple, 8), S2.brownstone = A.shared("s_brown", 128, 96, (p) => stoneFill(p, 0, 0, 128, 96, PAL.brownstone, 9, 12)), S2.limestone = A.shared("s_lime", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.limestone, 10, 16, { blocks: 32 })), S2.greystone = A.shared("s_grey", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.greystone, 11, 16, { blocks: 32 })), S2.concrete = A.shared("concrete", 128, 128, (p) => {
+    S2.brickRed = brickTile("b_red", PAL.brickRed, 3), S2.brickBrown = brickTile("b_brown", PAL.brickBrown, 4), S2.brickOrange = brickTile("b_orange", PAL.brickOrange, 5), S2.brickTan = brickTile("b_tan", PAL.brickTan, 6), S2.brickPurple = brickTile("b_purple", PAL.brickPurple, 8), S2.brownstone = A.shared("s_brown", 128, 96, (p) => stoneFill(p, 0, 0, 128, 96, PAL.brownstone, 9, 12)), S2.limestone = A.shared("s_lime", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.limestone, 10, 16, { blocks: 32 })), S2.greystone = A.shared("s_grey", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.greystone, 11, 16, { blocks: 32 })), S2.concrete = A.shared("concrete", 128, 128, (p) => {
       smoothFill(p, 0, 0, 128, 128, 12170926, 12, 0.05);
       for (let i = 0; i < 40; i++) p.set(i * 37 % 128, i * 59 % 128, 10131343);
     }), S2.darkMetal = A.shared("darkmetal", 32, 32, (p) => smoothFill(p, 0, 0, 32, 32, 2763568, 13, 0.06)), S2.metal = A.shared("metal", 32, 32, (p) => {
@@ -2446,7 +2456,9 @@ void main() {
       p.rect(0, 0, 24, 2, 8033406), p.hline(0, 9, 24, 4083776);
     }), S2.trashTop = A.shared("trash_t", 12, 12, (p) => {
       p.rect(0, 0, 12, 12, 4874316), p.ellipse(6, 6, 2.5, 2.5, 2767404), p.frame(0, 0, 12, 12, 6982254), p.hline(3, 2, 6, 8033406);
-    }), C._shared = S2, S2;
+    });
+    for (let k of ["railing", "railingTall", "fescRail", "ladder", "fstair", "stairs", "xmasLights", "lightsWarm"]) S2[k].cast = "none";
+    return S2.grate.cast = "solid", C._shared = S2, S2;
   }
   function rowhouse(C, fr, a0, W, D, o = {}) {
     let { mb, rng } = C, S2 = sharedTex(C), sb = o.setback ?? 1.5, nF = o.floors ?? 3, gardenH = 1.25, floorH = 1.5, band2 = 0.5, H = gardenH + nF * floorH + band2, z0 = fr.z0, tw = Math.round(W * 32), th = Math.round(H * 32), style = o.style ?? rng.pick(["brownstone", "brownstone", "brick", "limestone", "painted", "brick"]), wallPal = style === "brownstone" ? PAL.brownstone : style === "limestone" ? PAL.limestone : style === "painted" ? [rng.pick([15260864, 11060436, 11064504, 14854304, 14207200, 15784080])] : rng.pick([PAL.brickRed, PAL.brickBrown, PAL.brickOrange, PAL.brickPurple]), trim = style === "brownstone" ? shade(PAL.brownstone[0], 1.18) : style === "limestone" ? 15787724 : 14866106, frame = style === "limestone" ? rng.pick([2829104, 3099194, 6044458]) : rng.pick(PAL.frames), corniceC = rng.pick([3811874, 2829104, 3099194, 6965818, 15262416, 5906207]), doorSide = o.doorSide ?? (rng.chance(0.5) ? "L" : "R"), nb = Math.max(2, Math.floor(tw / 32)), bayW = tw / nb, doorBay = doorSide === "L" ? 0 : nb - 1, windows = [], floorT = [];
@@ -3068,7 +3080,7 @@ void main() {
   function propTex(C) {
     if (C._props) return C._props;
     let A = C.atlas, P = {}, solid = (name, c, amt = 0.04) => A.shared(name, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, c, 5, amt));
-    return P.pole = solid("pole", 6122082), P.poleDark = solid("pole_d", 2896688), P.black = solid("black", 1973794), P.yellow = solid("sig_y", 14198824), P.red = solid("red", 13119532), P.blue = solid("blue", 2052e3), P.green = solid("green", 3111482), P.orange = solid("orange", 15234074), P.silver = solid("silver", 12106946), P.wood = A.shared("bench_wood", 32, 8, (p) => {
+    P.pole = solid("pole", 6122082), P.poleDark = solid("pole_d", 2896688), P.black = solid("black", 1973794), P.yellow = solid("sig_y", 14198824), P.red = solid("red", 13119532), P.blue = solid("blue", 2052e3), P.green = solid("green", 3111482), P.orange = solid("orange", 15234074), P.silver = solid("silver", 12106946), P.wood = A.shared("bench_wood", 32, 8, (p) => {
       for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) {
         let r = y % 4, c = r === 3 ? 4861466 : r === 0 ? 11565640 : 10119742;
         r !== 3 && hash2i(x >> 2, y >> 2, 5) > 0.7 && (c = shade(c, 0.92)), p.set(x, y, c);
@@ -3160,7 +3172,9 @@ void main() {
     }), P.bleacher = A.shared("bleach", 32, 10, (p) => {
       p.rect(0, 0, 32, 10, 12106946), p.rect(0, 0, 32, 2, 14212322), p.rect(0, 8, 32, 2, 9080468);
       for (let x = 0; x < 32; x += 16) p.vline(x, 2, 6, 10133156);
-    }), C._props = P, P;
+    });
+    for (let k of ["chain", "chainLow", "net", "glass", "subwayRail"]) P[k].cast = "none";
+    return P.basket.cast = "solid", C._props = P, P;
   }
   var solidBox = (C, x0, y0, z0, x1, y1, z1, side, top, opt) => C.mb.box(x0, y0, z0, x1, y1, z1, { px: side, nx: side, py: side, ny: side, pz: top || side }, opt);
   function streetLamp(C, x, y, ax, ay, o = {}) {
@@ -5071,6 +5085,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
 uniform float uShadowOn;
 uniform vec3 uSunDir;
 uniform vec3 uSunCol;
@@ -5111,11 +5127,11 @@ void main() {
   }
   float s = 1.0;
   if (uShadowOn > 0.5 && (flags & 16) == 0) {
-    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * 0.12, 1.0);
+    vec4 spos = uShadowMat * vec4(vWorld + uSunDir * max(0.15, uShadowK.x * 3.0), 1.0);
     vec3 sc = spos.xyz * 0.5 + 0.5;
     if (sc.x > 0.0 && sc.y > 0.0 && sc.x < 1.0 && sc.y < 1.0 && sc.z < 1.0) {
-      s = texture(uShadow, vec3(sc.xy, sc.z - 0.0015));
-      s = step(bayer4(gl_FragCoord.xy), s);
+      s = texture(uShadow, vec3(sc.xy, sc.z - max(0.25, uShadowK.x * 5.0) * uShadowK.y));
+      s = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), s);
     }
   }
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
@@ -5182,7 +5198,7 @@ void main() {
     draw(ctx) {
       if (!this.count) return;
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     }
   };
 
@@ -5330,6 +5346,8 @@ uniform sampler2DShadow uShadow;
 uniform sampler2D uLightMap;
 uniform sampler2D uNoise;
 uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
 uniform float uShadowOn;
 uniform vec3 uSunDir, uSunCol, uAmb, uFace;
 uniform vec2 uRot;
@@ -5375,9 +5393,11 @@ void main() {
   float ndl = dot(n, uSunDir);
   float sh = 1.0;
   if (uShadowOn > 0.5 && ndl > 0.0) {
-    vec4 sp = uShadowMat * vec4(vWorld + n * 0.06 + uSunDir * 0.03, 1.0);
+    float tx = uShadowK.x, sinT = sqrt(max(1.0 - ndl * ndl, 0.0));
+    vec4 sp = uShadowMat * vec4(vWorld + n * tx * (1.0 + 1.6 * sinT) + uSunDir * tx * 0.5, 1.0);
     vec3 s = sp.xyz * 0.5 + 0.5;
-    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(gl_FragCoord.xy), texture(uShadow, vec3(s.xy, s.z - 0.0008)));
+    float bias = tx * (0.6 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
@@ -5883,7 +5903,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     draw(ctx) {
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.uniform3fv(u.uSkyTop, e.skyTop), gl.uniform3fv(u.uSkyHor, e.skyBottom), gl.uniform3fv(u.uViewDir, ctx.camera.viewDir()), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4);
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.uniform3fv(u.uSkyTop, e.skyTop), gl.uniform3fv(u.uSkyHor, e.skyBottom), gl.uniform3fv(u.uViewDir, ctx.camera.viewDir()), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4);
       for (let k in this.types) {
         let t = this.types[k];
         t.n && (gl.bindVertexArray(t.vao), gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n));
@@ -8640,7 +8660,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     };
     function frame(now) {
       let dt = Math.min(0.05, (now - last) / 1e3);
-      last = now, fpsAcc += dt, fpsN++, fpsAcc > 1 && (app.fps = Math.round(fpsN / fpsAcc), fpsAcc = 0, fpsN = 0, app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0, app.lowFps >= 4 && renderer.shadowSize > 2048 ? (renderer.setShadowSize(2048), app.lowFps = 0, console.log("quality: shadow map 2048")) : app.lowFps >= 4 && renderer.shadowSize > 1024 && (renderer.setShadowSize(1024), app.lowFps = 0, console.log("quality: shadow map 1024"))), step(dt), still || requestAnimationFrame(frame);
+      last = now, fpsAcc += dt, fpsN++, fpsAcc > 1 && (app.fps = Math.round(fpsN / fpsAcc), fpsAcc = 0, fpsN = 0, app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0, app.lowFps >= 4 && renderer.shadowSize > 2048 && (renderer.setShadowSize(2048), app.lowFps = 0, console.log("quality: shadow map 2048"))), step(dt), still || requestAnimationFrame(frame);
     }
     loading && loading.classList.add("hidden"), ui.toast("\u266A Tap the sound button for city sounds"), still ? (step(0.016), app.time = 1) : requestAnimationFrame(frame);
   }

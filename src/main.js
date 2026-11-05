@@ -109,7 +109,6 @@ async function boot() {
       // adaptive quality: shrink the shadow map if the GPU struggles
       app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0;
       if (app.lowFps >= 4 && renderer.shadowSize > 2048) { renderer.setShadowSize(2048); app.lowFps = 0; console.log('quality: shadow map 2048'); }
-      else if (app.lowFps >= 4 && renderer.shadowSize > 1024) { renderer.setShadowSize(1024); app.lowFps = 0; console.log('quality: shadow map 1024'); }
     }
     step(dt);
     if (!still) requestAnimationFrame(frame);
