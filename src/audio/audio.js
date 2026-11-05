@@ -85,7 +85,7 @@ export class AudioEngine {
       rain: loop(this.white, [['highpass', 900], ['lowpass', 6500]], 0),
       crickets: loop(this.crickets, [['highpass', 2000]], 0),
       water: loop(this.white, [['bandpass', 1800, 0.6]], 0),
-      steam: loop(this.white, [['highpass', 2800]], 0),
+      steam: loop(this.white, [['highpass', 2400], ['lowpass', 6000]], 0),
       siren: null,
     };
     return true;
@@ -114,7 +114,9 @@ export class AudioEngine {
     const css = app.camera.scale / (window.devicePixelRatio || 1);
     const zk = clamp(0.35 + css * 0.28, 0.4, 1.5);
     const g = Math.pow(clamp(1.3 - d, 0, 1), 1.6) * zk;
-    return { g, pan: clamp(dx * 0.85, -1, 1) };
+    const pan = clamp(dx * 0.85, -1, 1);
+    if (!Number.isFinite(g) || !Number.isFinite(pan)) return { g: 0, pan: 0 };
+    return { g, pan };
   }
   throttle(kind, dt) {
     const t = performance.now() / 1000;
@@ -124,9 +126,9 @@ export class AudioEngine {
   }
   out(gain, pan) {
     const g = this.ctx.createGain();
-    g.gain.value = gain;
+    g.gain.value = Number.isFinite(gain) ? gain : 0;
     const p = this.ctx.createStereoPanner();
-    p.pan.value = pan;
+    p.pan.value = Number.isFinite(pan) ? pan : 0;
     g.connect(p).connect(this.sfx);
     return g;
   }
@@ -172,8 +174,20 @@ export class AudioEngine {
   // ---------------------------------------------------------------- events
   event(kind, src) {
     if (!this.on || !src) return;
+    try {
+      this.play(kind, src);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+  // report audio errors once instead of letting them stop the frame loop
+  fail(e) {
+    if (!this.failed) console.warn('audio:', e);
+    this.failed = true;
+  }
+  play(kind, src) {
     const w = this.where(src);
-    if (w.g < 0.03) return;
+    if (!(w.g >= 0.03)) return;
     const t = this.now();
     const r = this.rng;
     const O = (k = 1) => this.out(w.g * k, w.pan);
@@ -305,7 +319,7 @@ export class AudioEngine {
     }
   }
   thunder(dist) {
-    if (!this.on) return;
+    if (!this.on || !Number.isFinite(dist)) return;
     const t = this.now() + 0.4 + dist * 2.2;
     const o = this.out(1.1 - dist * 0.5, this.rng.range(-0.5, 0.5));
     this.noise(t, 3.5 + dist * 2, o, [['lowpass', 380, 0.6, 70]], 1.0, 0.08, this.brown);
@@ -332,18 +346,25 @@ export class AudioEngine {
   // ---------------------------------------------------------------- per frame
   update(dt) {
     if (!this.ctx || !this.enabled) return;
+    try {
+      this.tick(dt);
+    } catch (e) {
+      this.fail(e);
+    }
+  }
+  tick(dt) {
     const app = this.app, env = app.env, city = app.city;
     const t = this.now();
     const L = this.L;
-    const set = (node, v, tc = 0.4) => node.g.gain.setTargetAtTime(v, t, tc);
+    const set = (node, v, tc = 0.4) => node.g.gain.setTargetAtTime(Number.isFinite(v) ? v : 0, t, tc);
     const css = app.camera.scale / (window.devicePixelRatio || 1);
     const close = clamp(css / 3, 0.3, 1.4);
     const cars = city.traffic.cars;
     let moving = 0;
     for (const c of cars) if (c.state !== 'parked' && c.v > 0.5) moving++;
     const busy = clamp(moving / 40, 0.15, 1.2);
-    set(L.city, 0.22 + 0.12 * busy);
-    set(L.traffic, 0.05 + 0.06 * busy * close);
+    set(L.city, 0.16 + 0.1 * busy);
+    set(L.traffic, 0.04 + 0.05 * busy * close);
     set(L.wind, 0.04 + env.wind * (env.season === 3 || env.season === 2 ? 0.12 : 0.06));
     L.wind.f[0].frequency.setTargetAtTime(380 + Math.sin(t * 0.3) * 160 + Math.sin(t * 0.17) * 90, t, 0.5);
     set(L.rain, env.raining ? 0.32 * env.precip : env.snowing ? 0.03 : 0, 0.8);
@@ -357,7 +378,7 @@ export class AudioEngine {
     if (city.activities?.hydrantOpen) { const w = this.where(city.activities.hydrantOpen.h); if (w.g * 1.4 > water) { water = w.g * 1.4; wpan = w.pan; } }
     for (const s of W.steam) if (s.kind === 'stack' || s.kind === 'manhole') { const w = this.where(s); if (w.g > steam) { steam = w.g; span = w.pan; } }
     set(L.water, water * 0.18, 0.3); L.water.pan.pan.setTargetAtTime(wpan, t, 0.3);
-    set(L.steam, steam * 0.07 * (env.season === 3 ? 1.6 : 1), 0.3); L.steam.pan.pan.setTargetAtTime(span, t, 0.3);
+    set(L.steam, steam * 0.045 * (env.season === 3 ? 1.5 : 1), 0.3); L.steam.pan.pan.setTargetAtTime(span, t, 0.3);
     void view;
     // birds by day in spring/summer
     this.birdT -= dt;

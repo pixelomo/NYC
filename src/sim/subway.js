@@ -55,6 +55,11 @@ export class Subway {
     }
     return best;
   }
+  // position object for positional sounds
+  soundAt(s) {
+    const [x, y] = this.at(s);
+    return { x, y, z: this.z };
+  }
   at(s) {
     s = ((s % this.len) + this.len) % this.len;
     let i = 1;
@@ -74,7 +79,7 @@ export class Subway {
         t.dwell -= dt;
         t.v = 0;
         if (t.dwell < 4 && this.waiting.length && this.rng.chance(dt * 3)) this.board();
-        if (t.dwell <= 0) { t.served = true; audio?.event('trainGo', this.at(t.s)); }
+        if (t.dwell <= 0) { t.served = true; audio?.event('trainGo', this.soundAt(t.s)); }
       } else {
         const toStop = this.ahead(t.s, this.stopS);
         const gap = this.ahead(t.s, other.s) - (CAR_LEN + GAP) * NCARS - 4;
@@ -86,13 +91,13 @@ export class Subway {
         t.v += clamp(vT - t.v, -3.2 * dt, 1.6 * dt);
         if (toStop < 0.15 && !t.served) {
           t.dwell = 7; t.v = 0;
-          audio?.event('trainStop', this.at(t.s));
+          audio?.event('trainStop', this.soundAt(t.s));
           this.alight();
         }
         if (toStop > 30 && toStop < this.len - 30) t.served = false;
         t.s = (t.s + t.v * dt) % this.len;
         t.brake = vT < t.v - 0.2;
-        if (t.v > 3 && this.rng.chance(dt * 0.6)) audio?.event('train', this.at(t.s));
+        if (t.v > 3 && this.rng.chance(dt * 0.6)) audio?.event('train', this.soundAt(t.s));
       }
       t.cars.forEach((car, k) => {
         const [x, y, h] = this.at(t.s - k * (CAR_LEN + GAP));

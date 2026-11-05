@@ -7982,6 +7982,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       return best;
     }
+    // position object for positional sounds
+    soundAt(s) {
+      let [x, y] = this.at(s);
+      return { x, y, z: this.z };
+    }
     at(s) {
       s = (s % this.len + this.len) % this.len;
       let i = 1;
@@ -7997,10 +8002,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let i = 0; i < this.trains.length; i++) {
         let t = this.trains[i], other = this.trains[(i + 1) % this.trains.length];
         if (t.dwell > 0)
-          t.dwell -= dt, t.v = 0, t.dwell < 4 && this.waiting.length && this.rng.chance(dt * 3) && this.board(), t.dwell <= 0 && (t.served = !0, audio?.event("trainGo", this.at(t.s)));
+          t.dwell -= dt, t.v = 0, t.dwell < 4 && this.waiting.length && this.rng.chance(dt * 3) && this.board(), t.dwell <= 0 && (t.served = !0, audio?.event("trainGo", this.soundAt(t.s)));
         else {
           let toStop = this.ahead(t.s, this.stopS), gap = this.ahead(t.s, other.s) - (CAR_LEN + GAP) * NCARS - 4, vT = 6.5;
-          (!t.served || toStop < this.len / 2) && toStop < 22 && (vT = Math.max(0.6, Math.sqrt(2 * 1.6 * toStop))), gap < 12 && (vT = Math.min(vT, Math.max(0, gap * 0.4))), t.v += clamp(vT - t.v, -3.2 * dt, 1.6 * dt), toStop < 0.15 && !t.served && (t.dwell = 7, t.v = 0, audio?.event("trainStop", this.at(t.s)), this.alight()), toStop > 30 && toStop < this.len - 30 && (t.served = !1), t.s = (t.s + t.v * dt) % this.len, t.brake = vT < t.v - 0.2, t.v > 3 && this.rng.chance(dt * 0.6) && audio?.event("train", this.at(t.s));
+          (!t.served || toStop < this.len / 2) && toStop < 22 && (vT = Math.max(0.6, Math.sqrt(2 * 1.6 * toStop))), gap < 12 && (vT = Math.min(vT, Math.max(0, gap * 0.4))), t.v += clamp(vT - t.v, -3.2 * dt, 1.6 * dt), toStop < 0.15 && !t.served && (t.dwell = 7, t.v = 0, audio?.event("trainStop", this.soundAt(t.s)), this.alight()), toStop > 30 && toStop < this.len - 30 && (t.served = !1), t.s = (t.s + t.v * dt) % this.len, t.brake = vT < t.v - 0.2, t.v > 3 && this.rng.chance(dt * 0.6) && audio?.event("train", this.soundAt(t.s));
         }
         t.cars.forEach((car, k) => {
           let [x, y, h] = this.at(t.s - k * (CAR_LEN + GAP));
@@ -8329,7 +8334,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         rain: loop(this.white, [["highpass", 900], ["lowpass", 6500]], 0),
         crickets: loop(this.crickets, [["highpass", 2e3]], 0),
         water: loop(this.white, [["bandpass", 1800, 0.6]], 0),
-        steam: loop(this.white, [["highpass", 2800]], 0),
+        steam: loop(this.white, [["highpass", 2400], ["lowpass", 6e3]], 0),
         siren: null
       }, !0;
     }
@@ -8351,8 +8356,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // positional gain/pan from world position
     where(src) {
-      let app = this.app, W = app.canvas.clientWidth, H = app.canvas.clientHeight, s = app.camera.worldToScreen(src.x, src.y, src.z || 0, W, H), dx = (s[0] - W / 2) / (W / 2), dy = (s[1] - H / 2) / (H / 2), d = Math.hypot(dx, dy * 1.2), css = app.camera.scale / (window.devicePixelRatio || 1), zk = clamp(0.35 + css * 0.28, 0.4, 1.5);
-      return { g: Math.pow(clamp(1.3 - d, 0, 1), 1.6) * zk, pan: clamp(dx * 0.85, -1, 1) };
+      let app = this.app, W = app.canvas.clientWidth, H = app.canvas.clientHeight, s = app.camera.worldToScreen(src.x, src.y, src.z || 0, W, H), dx = (s[0] - W / 2) / (W / 2), dy = (s[1] - H / 2) / (H / 2), d = Math.hypot(dx, dy * 1.2), css = app.camera.scale / (window.devicePixelRatio || 1), zk = clamp(0.35 + css * 0.28, 0.4, 1.5), g = Math.pow(clamp(1.3 - d, 0, 1), 1.6) * zk, pan = clamp(dx * 0.85, -1, 1);
+      return !Number.isFinite(g) || !Number.isFinite(pan) ? { g: 0, pan: 0 } : { g, pan };
     }
     throttle(kind, dt) {
       let t = performance.now() / 1e3;
@@ -8360,9 +8365,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     out(gain, pan) {
       let g = this.ctx.createGain();
-      g.gain.value = gain;
+      g.gain.value = Number.isFinite(gain) ? gain : 0;
       let p = this.ctx.createStereoPanner();
-      return p.pan.value = pan, g.connect(p).connect(this.sfx), g;
+      return p.pan.value = Number.isFinite(pan) ? pan : 0, g.connect(p).connect(this.sfx), g;
     }
     env(g, t, a, peak, d, sus = 0) {
       g.gain.setValueAtTime(1e-4, t), g.gain.linearRampToValueAtTime(peak, t + a), g.gain.exponentialRampToValueAtTime(Math.max(1e-4, sus || 1e-4), t + a + d);
@@ -8391,9 +8396,20 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // ---------------------------------------------------------------- events
     event(kind, src) {
-      if (!this.on || !src) return;
+      if (!(!this.on || !src))
+        try {
+          this.play(kind, src);
+        } catch (e) {
+          this.fail(e);
+        }
+    }
+    // report audio errors once instead of letting them stop the frame loop
+    fail(e) {
+      this.failed || console.warn("audio:", e), this.failed = !0;
+    }
+    play(kind, src) {
       let w = this.where(src);
-      if (w.g < 0.03) return;
+      if (!(w.g >= 0.03)) return;
       let t = this.now(), r = this.rng, O = (k = 1) => this.out(w.g * k, w.pan);
       switch (kind) {
         case "dribble":
@@ -8507,7 +8523,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
     }
     thunder(dist3) {
-      if (!this.on) return;
+      if (!this.on || !Number.isFinite(dist3)) return;
       let t = this.now() + 0.4 + dist3 * 2.2, o = this.out(1.1 - dist3 * 0.5, this.rng.range(-0.5, 0.5));
       this.noise(t, 3.5 + dist3 * 2, o, [["lowpass", 380, 0.6, 70]], 1, 0.08, this.brown), this.noise(t, 0.25, o, [["lowpass", 2e3, 0.5, 400]], 0.5 * (1 - dist3), 5e-3);
     }
@@ -8526,11 +8542,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // ---------------------------------------------------------------- per frame
     update(dt) {
-      if (!this.ctx || !this.enabled) return;
-      let app = this.app, env = app.env, city = app.city, t = this.now(), L = this.L, set = (node, v, tc = 0.4) => node.g.gain.setTargetAtTime(v, t, tc), css = app.camera.scale / (window.devicePixelRatio || 1), close = clamp(css / 3, 0.3, 1.4), cars = city.traffic.cars, moving = 0;
+      if (!(!this.ctx || !this.enabled))
+        try {
+          this.tick(dt);
+        } catch (e) {
+          this.fail(e);
+        }
+    }
+    tick(dt) {
+      let app = this.app, env = app.env, city = app.city, t = this.now(), L = this.L, set = (node, v, tc = 0.4) => node.g.gain.setTargetAtTime(Number.isFinite(v) ? v : 0, t, tc), css = app.camera.scale / (window.devicePixelRatio || 1), close = clamp(css / 3, 0.3, 1.4), cars = city.traffic.cars, moving = 0;
       for (let c of cars) c.state !== "parked" && c.v > 0.5 && moving++;
       let busy = clamp(moving / 40, 0.15, 1.2);
-      set(L.city, 0.22 + 0.12 * busy), set(L.traffic, 0.05 + 0.06 * busy * close), set(L.wind, 0.04 + env.wind * (env.season === 3 || env.season === 2 ? 0.12 : 0.06)), L.wind.f[0].frequency.setTargetAtTime(380 + Math.sin(t * 0.3) * 160 + Math.sin(t * 0.17) * 90, t, 0.5), set(L.rain, env.raining ? 0.32 * env.precip : env.snowing ? 0.03 : 0, 0.8);
+      set(L.city, 0.16 + 0.1 * busy), set(L.traffic, 0.04 + 0.05 * busy * close), set(L.wind, 0.04 + env.wind * (env.season === 3 || env.season === 2 ? 0.12 : 0.06)), L.wind.f[0].frequency.setTargetAtTime(380 + Math.sin(t * 0.3) * 160 + Math.sin(t * 0.17) * 90, t, 0.5), set(L.rain, env.raining ? 0.32 * env.precip : env.snowing ? 0.03 : 0, 0.8);
       let cr = env.season === 1 && (env.hour > 20 || env.hour < 4.5) ? 0.06 : env.season === 0 && env.hour > 21 ? 0.02 : 0;
       set(L.crickets, cr, 1);
       let view = city.view, water = 0, wpan = 0, steam = 0, span = 0, W = city.world;
@@ -8546,7 +8569,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let w = this.where(s);
         w.g > steam && (steam = w.g, span = w.pan);
       }
-      if (set(L.water, water * 0.18, 0.3), L.water.pan.pan.setTargetAtTime(wpan, t, 0.3), set(L.steam, steam * 0.07 * (env.season === 3 ? 1.6 : 1), 0.3), L.steam.pan.pan.setTargetAtTime(span, t, 0.3), this.birdT -= dt, this.birdT <= 0) {
+      if (set(L.water, water * 0.18, 0.3), L.water.pan.pan.setTargetAtTime(wpan, t, 0.3), set(L.steam, steam * 0.045 * (env.season === 3 ? 1.5 : 1), 0.3), L.steam.pan.pan.setTargetAtTime(span, t, 0.3), this.birdT -= dt, this.birdT <= 0) {
         let k = env.hour > 5.5 && env.hour < 19.5 ? (env.season === 0 || env.season === 1 ? 1 : env.season === 2 ? 0.4 : 0.15) * (env.hour < 9 ? 1.6 : 1) * (env.raining ? 0.2 : 1) : 0;
         this.birdT = this.rng.range(1.2, 4) / Math.max(0.2, k), k > 0 && this.birds(Math.min(1.4, k));
       }
@@ -8645,7 +8668,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let d = window.devicePixelRatio || 1, w = Math.round(canvas.clientWidth * d), h = Math.round(canvas.clientHeight * d);
       (canvas.width !== w || canvas.height !== h) && (canvas.width = w, canvas.height = h);
     }
-    let still = q.has("still");
+    let still = q.has("still"), frameErrors = /* @__PURE__ */ new Set();
     function step(dt) {
       app.time += dt, resize(), env.update(dt), ui.pan(dt), camera.update(dt), city.update(dt), city.prepare(canvas.width, canvas.height), renderer.render(camera, env.u, app.time, canvas.width, canvas.height), audio.update(dt), ui.update(dt);
     }
@@ -8660,7 +8683,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     };
     function frame(now) {
       let dt = Math.min(0.05, (now - last) / 1e3);
-      last = now, fpsAcc += dt, fpsN++, fpsAcc > 1 && (app.fps = Math.round(fpsN / fpsAcc), fpsAcc = 0, fpsN = 0, app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0, app.lowFps >= 4 && renderer.shadowSize > 2048 && (renderer.setShadowSize(2048), app.lowFps = 0, console.log("quality: shadow map 2048"))), step(dt), still || requestAnimationFrame(frame);
+      last = now, fpsAcc += dt, fpsN++, fpsAcc > 1 && (app.fps = Math.round(fpsN / fpsAcc), fpsAcc = 0, fpsN = 0, app.lowFps = app.fps < 32 ? (app.lowFps || 0) + 1 : 0, app.lowFps >= 4 && renderer.shadowSize > 2048 && (renderer.setShadowSize(2048), app.lowFps = 0, console.log("quality: shadow map 2048"))), still || requestAnimationFrame(frame);
+      try {
+        step(dt);
+      } catch (e) {
+        let msg = String(e && e.message);
+        frameErrors.has(msg) || (frameErrors.add(msg), console.error(e));
+      }
     }
     loading && loading.classList.add("hidden"), ui.toast("\u266A Tap the sound button for city sounds"), still ? (step(0.016), app.time = 1) : requestAnimationFrame(frame);
   }
