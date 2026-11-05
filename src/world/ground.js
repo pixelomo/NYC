@@ -218,10 +218,7 @@ export function paintLot(p, x0, y0, x1, y1, fn) {
 export function buildGroundGeometry(mb, ground, tex) {
   // road surface over entire map + diorama base sides
   const g = { t: ground, world: true, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-  mb.box(0, 0, -BASE_DEPTH, MAP, MAP, 0, {
-    pz: g,
-    px: tex.soil, nx: tex.soil, py: tex.soil, ny: tex.soil,
-  }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
+  mb.box(0, 0, -BASE_DEPTH, MAP, MAP, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
   const iv = raisedIntervals();
   for (const [ax, bx] of iv)
     for (const [ay, by] of iv) {
@@ -230,4 +227,107 @@ export function buildGroundGeometry(mb, ground, tex) {
         px: tex.curb, nx: tex.curb, py: tex.curb, ny: tex.curb,
       });
     }
+}
+
+// ---------------------------------------------------------------------------
+// Diorama sides with a subway tunnel cut-away running around the perimeter
+export const TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: MAP - 3, station: [14, 34] };
+
+export function buildSlabSides(mb, atlas, tex) {
+  const T16 = T;
+  const { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL;
+  const WH = Math.round((tz1 - tz0) * T16);
+  const wall = atlas.shared('tunnel_wall', 64, WH, (p) => {
+    const H = p.h;
+    for (let y = 0; y < H; y++) for (let x = 0; x < 64; x++) {
+      let c = (x % 8 === 0 || y % 6 === 0) ? 0x3e3a36 : (hash2i(x >> 3, Math.floor(y / 6), 3) < 0.15 ? 0x6a645a : 0x5a554c);
+      if (y < 30) c = shade(c, 0.55 + y / 70);
+      if (y > H - 5) c = 0x34302c;
+      p.set(x, y, c);
+    }
+    for (let x = 6; x < 64; x += 32) for (let y = 0; y < H - 4; y++) { p.set(x, y, 0x23262a); p.set(x + 1, y, 0x30343a); }
+    for (let y = 44; y < H - 6; y += 3) p.set(40, y, 0x7a3a2a);
+    for (const x of [20, 52]) p.rect(x, 40, 4, 2, 0xffe2a0, 128);
+  });
+  const station = atlas.shared('station_wall', 128, WH, (p) => {
+    const H = p.h;
+    for (let y = 0; y < H; y++) for (let x = 0; x < 128; x++) {
+      let c = (x % 4 === 0 || y % 4 === 0) ? 0xc8c4b8 : 0xeae6da;
+      if (y < 30) c = shade(c, 0.5 + y / 60);
+      p.set(x, y, c);
+    }
+    for (let x = 0; x < 128; x++) { p.set(x, 36, 0x2a6a4a); p.set(x, 37, 0x2a6a4a); p.set(x, 38, 0xc8a040); }
+    for (const ox of [8, 72]) {
+      p.rect(ox, 41, 46, 11, 0x2a6a4a);
+      p.frame(ox, 41, 46, 11, 0xc8a040);
+      p.text(ox + 5, 44, '23 ST', 0xf2efe6);
+    }
+    for (const x of [62, 124]) p.rect(x - 2, 30, 6, 2, 0xfff6d8, 128);
+  });
+  const track = atlas.shared('track', 32, Math.round(TD * T16), (p) => {
+    const H = p.h;
+    for (let y = 0; y < H; y++) for (let x = 0; x < 32; x++) p.set(x, y, hash2i(x, y, 8) < 0.3 ? 0x4a4440 : 0x5a544c);
+    for (let x = 0; x < 32; x += 4) for (let y = 6; y < H - 6; y++) p.set(x, y, 0x5a3e2a);
+    for (let x = 0; x < 32; x++) { p.set(x, 12, 0xb8bcc2); p.set(x, 13, 0x6a6e74); p.set(x, H - 14, 0xb8bcc2); p.set(x, H - 13, 0x6a6e74); }
+    for (let x = 0; x < 32; x++) p.set(x, H - 6, 0xf2c230); // third rail cover
+  });
+  const platformTop = atlas.shared('platform_top', 32, 16, (p) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x % 8 === 0 || y % 8 === 0) ? 0x9a968c : 0xb4b0a6);
+    for (let x = 0; x < 32; x++) { p.set(x, 0, 0xf2c230); p.set(x, 1, 0xf2c230); }
+  });
+  const concrete = atlas.shared('tunnel_conc', 16, 16, (p) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(0x6a6660, 0.9 + hash2i(x, y, 2) * 0.2));
+  });
+  const soil = tex.soil;
+  const sides = [
+    // [normal, point(a,d)->[x,y]]  a runs left->right as seen from outside; d goes into the slab
+    { key: 'py', n: [0, 1], pt: (a, d) => [a, MAP - d] },
+    { key: 'ny', n: [0, -1], pt: (a, d) => [MAP - a, d] },
+    { key: 'px', n: [1, 0], pt: (a, d) => [MAP - d, MAP - a] },
+    { key: 'nx', n: [-1, 0], pt: (a, d) => [d, a] },
+  ];
+  const quadSide = (S, aa0, aa1, d, zz0, zz1, texr, mat = 0) => {
+    const p0 = S.pt(aa0, d), p1 = S.pt(aa1, d);
+    const u0 = aa0 * T16, u1 = aa1 * T16, v0 = -zz1 * T16, v1 = -zz0 * T16;
+    mb.quad([p0[0], p0[1], zz1], [p1[0], p1[1], zz1], [p1[0], p1[1], zz0], [p0[0], p0[1], zz0],
+      [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], texr, [S.n[0], S.n[1], 0], mat);
+  };
+  for (const S of sides) {
+    // soil face around the opening
+    quadSide(S, 0, MAP, 0, tz1, 0, soil);
+    quadSide(S, 0, MAP, 0, -BASE_DEPTH, tz0, soil);
+    quadSide(S, 0, a0, 0, tz0, tz1, soil);
+    quadSide(S, a1, MAP, 0, tz0, tz1, soil);
+    // tunnel back wall (station tiles on the south side)
+    const st = TUNNEL.station;
+    if (S.key === 'py') {
+      quadSide(S, a0, st[0], TD, tz0, tz1, wall);
+      quadSide(S, st[0], st[1], TD, tz0, tz1, station);
+      quadSide(S, st[1], a1, TD, tz0, tz1, wall);
+    } else quadSide(S, a0, a1, TD, tz0, tz1, wall);
+    // floor (track bed): u along a, v across depth
+    {
+      const q0 = S.pt(a0, 0), q1 = S.pt(a1, 0), q2 = S.pt(a1, TD), q3 = S.pt(a0, TD);
+      const L = (a1 - a0) * T16, D = TD * T16;
+      mb.quad([q3[0], q3[1], tz0], [q2[0], q2[1], tz0], [q1[0], q1[1], tz0], [q0[0], q0[1], tz0],
+        [[0, 0], [L, 0], [L, D], [0, D]], track, [0, 0, 1], 0);
+    }
+    // inner pillar faces at both ends of the opening
+    {
+      const e0 = S.pt(a0, 0), e1 = S.pt(a0, TD);
+      const u = [S.n[1], -S.n[0]];
+      mb.quad([e1[0], e1[1], tz1], [e0[0], e0[1], tz1], [e0[0], e0[1], tz0], [e1[0], e1[1], tz0],
+        [[0, 0], [TD * T16, 0], [TD * T16, (tz1 - tz0) * T16], [0, (tz1 - tz0) * T16]], concrete, [u[0], u[1], 0], 0);
+      const f0 = S.pt(a1, 0), f1 = S.pt(a1, TD);
+      mb.quad([f0[0], f0[1], tz1], [f1[0], f1[1], tz1], [f1[0], f1[1], tz0], [f0[0], f0[1], tz0],
+        [[0, 0], [TD * T16, 0], [TD * T16, (tz1 - tz0) * T16], [0, (tz1 - tz0) * T16]], concrete, [-u[0], -u[1], 0], 0);
+    }
+    // station platform on the south side
+    if (S.key === 'py') {
+      const st2 = TUNNEL.station;
+      const [x0, y0] = S.pt(st2[0], TD), [x1, y1] = S.pt(st2[1], TD - 0.85);
+      mb.box(Math.min(x0, x1), Math.min(y0, y1), tz0, Math.max(x0, x1), Math.max(y0, y1), tz0 + 0.5,
+        { py: concrete, px: concrete, nx: concrete, pz: { t: platformTop, world: true } });
+    }
+  }
 }

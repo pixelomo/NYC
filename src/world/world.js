@@ -3,7 +3,7 @@
 import { Atlas } from './atlas.js';
 import { MeshBuilder } from './mesh.js';
 import { MAP, T, NB, BLOCK_TYPES } from './layout.js';
-import { paintGround, buildGroundGeometry } from './ground.js';
+import { paintGround, buildGroundGeometry, buildSlabSides } from './ground.js';
 import { makeBaseTextures } from './textures.js';
 import { makeContext, buildBlocks } from './blocks.js';
 import { RNG } from '../core/math.js';
@@ -17,6 +17,7 @@ export function buildWorld(seed = 1977, progress = () => {}) {
   const tex = makeBaseTextures(atlas);
   const mb = new MeshBuilder();
   buildGroundGeometry(mb, groundReg, tex);
+  buildSlabSides(mb, atlas, tex);
 
   const world = {
     rng, atlas, tex, ground: groundReg, groundInfo,

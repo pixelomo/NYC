@@ -55,6 +55,7 @@ float cloudAt(vec3 wp) {
   return 1.0 - m * uCloud.w;
 }
 vec3 lampAt(vec3 wp) {
+  if (wp.z < -0.5) return vec3(0.0);
   vec3 l = texture(uLightMap, wp.xy / 128.0).rgb;
   float hf = clamp(1.0 - (wp.z - 0.3) / 8.0, 0.0, 1.0);
   return l * (hf * hf);
@@ -258,6 +259,8 @@ void main() {
   vec3 lamp = lampAt(vWorld);
   light += lamp * (0.55 + 0.45 * max(n.z, 0.0));
   light += vec3(uFlash);
+  // underground (subway cut-away): dim, warm tunnel lighting
+  if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.17, 0.155, 0.13);
 
   float wetDark = 1.0 - wetK * 0.38;
   vec3 col = albedo * wetDark * light;

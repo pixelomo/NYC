@@ -280,6 +280,26 @@ export class AudioEngine {
         for (let k = 0; k < 5; k++) { this.osc('sine', f, t + k * 0.09, 0.07, o, 0.25, 0.01, f * 0.9); f *= 0.94; }
         break;
       }
+      case 'train': {
+        if (!this.throttle('train', 1.6)) return;
+        const o = O(0.55);
+        this.noise(t, 1.8, o, [['lowpass', 220]], 0.7, 0.3, this.brown);
+        for (let k = 0; k < 6; k++) this.noise(t + k * 0.21 + (k % 2) * 0.06, 0.05, o, [['bandpass', 900, 2]], 0.22);
+        break;
+      }
+      case 'trainStop': {
+        const o = O(0.4);
+        const v = this.osc('sine', 2350, t, 1.1, o, 0.12, 0.08, 2100);
+        const lfo = this.ctx.createOscillator(); const lg = this.ctx.createGain();
+        lfo.frequency.value = 9; lg.gain.value = 40; lfo.connect(lg).connect(v.frequency); lfo.start(t); lfo.stop(t + 1.3);
+        this.noise(t + 0.9, 0.5, o, [['highpass', 2500]], 0.25, 0.01);
+        break;
+      }
+      case 'trainGo': {
+        const o = O(0.35);
+        this.osc('sine', 660, t, 0.25, o, 0.2); this.osc('sine', 523, t + 0.3, 0.4, o, 0.2);
+        break;
+      }
       case 'siren':
         break;
     }

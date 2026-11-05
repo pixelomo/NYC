@@ -122,6 +122,7 @@ float cloudAt(vec3 wp) {
   return 1.0 - m * uCloud.w;
 }
 vec3 lampAt(vec3 wp) {
+  if (wp.z < -0.5) return vec3(0.0);
   vec3 l = texture(uLightMap, wp.xy / 128.0).rgb;
   float hf = clamp(1.0 - (wp.z - 0.3) / 8.0, 0.0, 1.0);
   return l * (hf * hf);
@@ -321,6 +322,8 @@ void main() {
   vec3 lamp = lampAt(vWorld);
   light += lamp * (0.55 + 0.45 * max(n.z, 0.0));
   light += vec3(uFlash);
+  // underground (subway cut-away): dim, warm tunnel lighting
+  if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.17, 0.155, 0.13);
 
   float wetDark = 1.0 - wetK * 0.38;
   vec3 col = albedo * wetDark * light;
@@ -1531,13 +1534,7 @@ void main() {
   }
   function buildGroundGeometry(mb, ground, tex) {
     let g = { t: ground, world: !0, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-    mb.box(0, 0, -7, 117, 117, 0, {
-      pz: g,
-      px: tex.soil,
-      nx: tex.soil,
-      py: tex.soil,
-      ny: tex.soil
-    }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
+    mb.box(0, 0, -7, 117, 117, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
     let iv = raisedIntervals();
     for (let [ax, bx] of iv)
       for (let [ay, by] of iv)
@@ -1548,6 +1545,116 @@ void main() {
           py: tex.curb,
           ny: tex.curb
         });
+  }
+  var TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: 114, station: [14, 34] };
+  function buildSlabSides(mb, atlas, tex) {
+    let T16 = 16, { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL, WH = Math.round((tz1 - tz0) * T16), wall = atlas.shared("tunnel_wall", 64, WH, (p) => {
+      let H = p.h;
+      for (let y = 0; y < H; y++) for (let x = 0; x < 64; x++) {
+        let c = x % 8 === 0 || y % 6 === 0 ? 4078134 : hash2i(x >> 3, Math.floor(y / 6), 3) < 0.15 ? 6972506 : 5920076;
+        y < 30 && (c = shade(c, 0.55 + y / 70)), y > H - 5 && (c = 3420204), p.set(x, y, c);
+      }
+      for (let x = 6; x < 64; x += 32) for (let y = 0; y < H - 4; y++)
+        p.set(x, y, 2303530), p.set(x + 1, y, 3159098);
+      for (let y = 44; y < H - 6; y += 3) p.set(40, y, 8010282);
+      for (let x of [20, 52]) p.rect(x, 40, 4, 2, 16769696, 128);
+    }), station = atlas.shared("station_wall", 128, WH, (p) => {
+      let H = p.h;
+      for (let y = 0; y < H; y++) for (let x = 0; x < 128; x++) {
+        let c = x % 4 === 0 || y % 4 === 0 ? 13157560 : 15394522;
+        y < 30 && (c = shade(c, 0.5 + y / 60)), p.set(x, y, c);
+      }
+      for (let x = 0; x < 128; x++)
+        p.set(x, 36, 2779722), p.set(x, 37, 2779722), p.set(x, 38, 13148224);
+      for (let ox of [8, 72])
+        p.rect(ox, 41, 46, 11, 2779722), p.frame(ox, 41, 46, 11, 13148224), p.text(ox + 5, 44, "23 ST", 15921126);
+      for (let x of [62, 124]) p.rect(x - 2, 30, 6, 2, 16774872, 128);
+    }), track = atlas.shared("track", 32, Math.round(TD * T16), (p) => {
+      let H = p.h;
+      for (let y = 0; y < H; y++) for (let x = 0; x < 32; x++) p.set(x, y, hash2i(x, y, 8) < 0.3 ? 4867136 : 5919820);
+      for (let x = 0; x < 32; x += 4) for (let y = 6; y < H - 6; y++) p.set(x, y, 5914154);
+      for (let x = 0; x < 32; x++)
+        p.set(x, 12, 12106946), p.set(x, 13, 6975092), p.set(x, H - 14, 12106946), p.set(x, H - 13, 6975092);
+      for (let x = 0; x < 32; x++) p.set(x, H - 6, 15909424);
+    }), platformTop = atlas.shared("platform_top", 32, 16, (p) => {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 || y % 8 === 0 ? 10131084 : 11841702);
+      for (let x = 0; x < 32; x++)
+        p.set(x, 0, 15909424), p.set(x, 1, 15909424);
+    }), concrete = atlas.shared("tunnel_conc", 16, 16, (p) => {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(6973024, 0.9 + hash2i(x, y, 2) * 0.2));
+    }), soil = tex.soil, sides = [
+      // [normal, point(a,d)->[x,y]]  a runs left->right as seen from outside; d goes into the slab
+      { key: "py", n: [0, 1], pt: (a, d) => [a, 117 - d] },
+      { key: "ny", n: [0, -1], pt: (a, d) => [117 - a, d] },
+      { key: "px", n: [1, 0], pt: (a, d) => [117 - d, 117 - a] },
+      { key: "nx", n: [-1, 0], pt: (a, d) => [d, a] }
+    ], quadSide = (S2, aa0, aa1, d, zz0, zz1, texr, mat = 0) => {
+      let p0 = S2.pt(aa0, d), p1 = S2.pt(aa1, d), u0 = aa0 * T16, u1 = aa1 * T16, v0 = -zz1 * T16, v1 = -zz0 * T16;
+      mb.quad(
+        [p0[0], p0[1], zz1],
+        [p1[0], p1[1], zz1],
+        [p1[0], p1[1], zz0],
+        [p0[0], p0[1], zz0],
+        [[u0, v0], [u1, v0], [u1, v1], [u0, v1]],
+        texr,
+        [S2.n[0], S2.n[1], 0],
+        mat
+      );
+    };
+    for (let S2 of sides) {
+      quadSide(S2, 0, 117, 0, tz1, 0, soil), quadSide(S2, 0, 117, 0, -7, tz0, soil), quadSide(S2, 0, a0, 0, tz0, tz1, soil), quadSide(S2, a1, 117, 0, tz0, tz1, soil);
+      let st = TUNNEL.station;
+      S2.key === "py" ? (quadSide(S2, a0, st[0], TD, tz0, tz1, wall), quadSide(S2, st[0], st[1], TD, tz0, tz1, station), quadSide(S2, st[1], a1, TD, tz0, tz1, wall)) : quadSide(S2, a0, a1, TD, tz0, tz1, wall);
+      {
+        let q0 = S2.pt(a0, 0), q1 = S2.pt(a1, 0), q2 = S2.pt(a1, TD), q3 = S2.pt(a0, TD), L = (a1 - a0) * T16, D = TD * T16;
+        mb.quad(
+          [q3[0], q3[1], tz0],
+          [q2[0], q2[1], tz0],
+          [q1[0], q1[1], tz0],
+          [q0[0], q0[1], tz0],
+          [[0, 0], [L, 0], [L, D], [0, D]],
+          track,
+          [0, 0, 1],
+          0
+        );
+      }
+      {
+        let e0 = S2.pt(a0, 0), e1 = S2.pt(a0, TD), u = [S2.n[1], -S2.n[0]];
+        mb.quad(
+          [e1[0], e1[1], tz1],
+          [e0[0], e0[1], tz1],
+          [e0[0], e0[1], tz0],
+          [e1[0], e1[1], tz0],
+          [[0, 0], [TD * T16, 0], [TD * T16, (tz1 - tz0) * T16], [0, (tz1 - tz0) * T16]],
+          concrete,
+          [u[0], u[1], 0],
+          0
+        );
+        let f0 = S2.pt(a1, 0), f1 = S2.pt(a1, TD);
+        mb.quad(
+          [f0[0], f0[1], tz1],
+          [f1[0], f1[1], tz1],
+          [f1[0], f1[1], tz0],
+          [f0[0], f0[1], tz0],
+          [[0, 0], [TD * T16, 0], [TD * T16, (tz1 - tz0) * T16], [0, (tz1 - tz0) * T16]],
+          concrete,
+          [-u[0], -u[1], 0],
+          0
+        );
+      }
+      if (S2.key === "py") {
+        let st2 = TUNNEL.station, [x0, y0] = S2.pt(st2[0], TD), [x1, y1] = S2.pt(st2[1], TD - 0.85);
+        mb.box(
+          Math.min(x0, x1),
+          Math.min(y0, y1),
+          tz0,
+          Math.max(x0, x1),
+          Math.max(y0, y1),
+          tz0 + 0.5,
+          { py: concrete, px: concrete, nx: concrete, pz: { t: platformTop, world: !0 } }
+        );
+      }
+    }
   }
 
   // src/world/textures.js
@@ -3295,7 +3402,7 @@ void main() {
     let rng = new RNG(seed), atlas = new Atlas(2048), groundReg = atlas.allocPage(117 * 16, 117 * 16);
     progress("Paving streets");
     let groundInfo = paintGround(groundReg, rng), tex = makeBaseTextures(atlas), mb = new MeshBuilder();
-    buildGroundGeometry(mb, groundReg, tex);
+    buildGroundGeometry(mb, groundReg, tex), buildSlabSides(mb, atlas, tex);
     let world = {
       rng,
       atlas,
@@ -4269,9 +4376,10 @@ void main() {
   }
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
   float hf = clamp(1.0 - (vWorld.z - 0.3) / 8.0, 0.0, 1.0);
   vec3 light = uAmb * 0.92 + uSunCol * 0.8 * s * cl * smoothstep(0.0, 0.15, uSunDir.z + 0.05) + lm * hf * hf * 1.1 + vec3(uFlash);
+  if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.2, 0.19, 0.16);
   if ((flags & 32) != 0) light = max(light, vec3(0.55));
   oColor = vec4(albedo * light, 1.0);
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
@@ -4494,8 +4602,9 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
   vec3 light = uAmb * faceShade(n) + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.6 + 0.4 * max(n.z, 0.0)) + vec3(uFlash);
+  if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
   // glossy paint / glass reflection
   if (slot == 3) {
@@ -4670,6 +4779,27 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         });
         return box(mb, L / 2 - cabL, -W / 2, 0, L / 2, W / 2, cabH, faces(cabSide, cabFr, this.solid.body, top(cabT, Wt))), box(mb, -L / 2, -W / 2, 0.2, L / 2 - cabL - 0.1, W / 2, boxH, faces(boxSide, this.solid.trim, boxBack, boxTop)), box(mb, -L / 2, -W / 2 + 0.1, 0, L / 2 - cabL, W / 2 - 0.1, 0.2, faces(this.solid.black, this.solid.black, this.solid.black, this.solid.black)), o.lightBar && (box(mb, L / 2 - 0.7, -0.4, cabH, L / 2 - 0.5, -0.02, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red)), box(mb, L / 2 - 0.7, 0.02, cabH, L / 2 - 0.5, 0.4, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red))), o.beacon && box(mb, L / 2 - 0.65, -0.12, cabH, L / 2 - 0.45, 0.12, cabH + 0.16, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), o.plow && box(mb, L / 2 + 0.05, -0.75, 0, L / 2 + 0.3, 0.75, 0.55, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), o.ladderTop && box(mb, -L / 2 + 0.2, -0.25, boxH, L / 2 - cabL, 0.25, boxH + 0.12, faces(this.solid.chrome, this.solid.chrome, this.solid.chrome, this.solid.chrome)), mb.finish();
       }, defs = {
+        subway: (() => {
+          let mb = new MeshBuilder(), L = 3.25, W = 1.125, H = 1.5, Lt = Math.round(L * T2), Wt = Math.round(W * T2), Ht = Math.round(H * T2), side = A.reg(Lt, Ht, (sp) => {
+            for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 6 === 0 ? 118 : 132) - (y > Ht - 5 ? 20 : 0));
+            for (let y = 4; y < 11; y++) for (let x = 3; x < Lt - 3; x++) {
+              let door = x > 9 && x < 15 || x > Lt - 16 && x < Lt - 10;
+              sp.set(x, y, door ? CS.BODY : x % 8 === 0 ? CS.BLACK : CS.INTERIOR, door ? 110 : y < 6 ? 140 : 120);
+            }
+            for (let dx of [9, 15, Lt - 16, Lt - 10]) for (let y = 3; y < Ht - 5; y++) sp.set(dx, y, CS.BLACK, 100);
+            for (let x = 0; x < Lt; x++)
+              sp.set(x, 13, CS.ACCENT, 128), sp.set(x, 14, CS.ACCENT, 110);
+            for (let wx of [8, Lt - 9]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 4; x <= wx + 4; x++) sp.set(x, y, CS.TIRE, 100);
+          }), end = A.reg(Wt, Ht, (sp) => {
+            for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 120);
+            for (let y = 4; y < 10; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 125);
+            for (let x = 5; x < Wt - 5; x++) sp.set(x, 2, CS.LED, 128);
+            sp.set(2, Ht - 6, CS.HEAD, 128), sp.set(Wt - 3, Ht - 6, CS.HEAD, 128), sp.set(3, Ht - 6, CS.HEAD, 128), sp.set(Wt - 4, Ht - 6, CS.HEAD, 128);
+          }), roof = A.reg(Lt, Wt, (sp) => {
+            for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y === 0 || y === Wt - 1 ? 110 : 140);
+          });
+          return box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, end, end, roof)), mb.finish();
+        })(),
         sedan: sedan(),
         taxi: sedan({ taxiSign: !0, checker: 3 }),
         suv: sedan({ len: 2.375, wid: 1, bodyH: 0.5625, cabH: 0.375, cabLen: 1.5, cabOff: -0.25 }),
@@ -4730,6 +4860,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         case "truck":
           P[CS.ACCENT] = r.pick([13119532, 2777016, 3115590, 14715440]);
           break;
+        case "subway":
+          body = 12896462, P[CS.ACCENT] = 2779864, P[CS.INTERIOR] = 16314576, P[CS.LED] = 16751152;
+          break;
       }
       P[CS.BODY] = body, car.palRow = this.pal.alloc(P), car.palBase = P, car.palState = "";
     }
@@ -4737,22 +4870,22 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       car.palRow >= 0 && this.pal.release(car.palRow), car.palRow = -1;
     }
     updatePalette(car, time) {
-      let lights = car.lights, siren = car.siren && Math.floor(time * 6) % 2, beacon2 = (car.special === "plow" || car.special === "garbage") && Math.floor(time * 4) % 2, busLit = car.type === "bus" || car.type === "icecream", key = `${lights ? 1 : 0}${car.brake ? 1 : 0}${car.siren ? siren ? 2 : 1 : 0}${beacon2 ? 1 : 0}${car.type === "taxi" && car.taxiFree ? 1 : 0}`;
+      let lights = car.lights, siren = car.siren && Math.floor(time * 6) % 2, beacon2 = (car.special === "plow" || car.special === "garbage") && Math.floor(time * 4) % 2, busLit = car.type === "bus" || car.type === "icecream" || car.type === "subway", key = `${lights ? 1 : 0}${car.brake ? 1 : 0}${car.siren ? siren ? 2 : 1 : 0}${beacon2 ? 1 : 0}${car.type === "taxi" && car.taxiFree ? 1 : 0}`;
       if (key === car.palState) return;
       car.palState = key;
       let P = car.palBase, row = car.palRow, pal = this.pal;
-      pal.set(row, CS.HEAD, lights ? 16774872 : P[CS.HEAD], lights ? 128 : 255), pal.set(row, CS.TAIL, car.brake ? 16724016 : lights ? 13639712 : P[CS.TAIL], car.brake || lights ? 128 : 255), car.siren && (pal.set(row, CS.SIREN_R, siren ? 16724016 : 7344144, siren ? 128 : 255), pal.set(row, CS.SIREN_B, siren ? 1056864 : car.type === "fire" ? 16724016 : 3174655, siren ? 255 : 128)), (car.special === "plow" || car.special === "garbage") && pal.set(row, CS.SIGN, beacon2 ? 16752672 : 9064464, beacon2 ? 128 : 255), car.type === "taxi" && pal.set(row, CS.SIGN, lights ? 16773808 : P[CS.SIGN], lights ? 128 : 255), busLit && pal.set(row, CS.INTERIOR, lights ? 16773312 : P[CS.INTERIOR], lights ? 128 : 255), car.type === "bus" && pal.set(row, CS.LED, 16752672, 128);
+      pal.set(row, CS.HEAD, lights ? 16774872 : P[CS.HEAD], lights ? 128 : 255), pal.set(row, CS.TAIL, car.brake ? 16724016 : lights ? 13639712 : P[CS.TAIL], car.brake || lights ? 128 : 255), car.siren && (pal.set(row, CS.SIREN_R, siren ? 16724016 : 7344144, siren ? 128 : 255), pal.set(row, CS.SIREN_B, siren ? 1056864 : car.type === "fire" ? 16724016 : 3174655, siren ? 255 : 128)), (car.special === "plow" || car.special === "garbage") && pal.set(row, CS.SIGN, beacon2 ? 16752672 : 9064464, beacon2 ? 128 : 255), car.type === "taxi" && pal.set(row, CS.SIGN, lights ? 16773808 : P[CS.SIGN], lights ? 128 : 255), busLit && pal.set(row, CS.INTERIOR, lights ? 16773312 : P[CS.INTERIOR], lights ? 128 : 255), (car.type === "bus" || car.type === "subway") && pal.set(row, CS.LED, 16752672, 128), car.type === "subway" && pal.set(row, CS.INTERIOR, 16773836, 128);
     }
     prepare(cars, time, env, view) {
       for (let k in this.types) this.types[k].n = 0;
       let snow = env.snowCover;
       for (let c of cars) {
-        if (!view.visible(c.x, c.y, 1, 6)) continue;
+        if (!view.visible(c.x, c.y, (c.z || 0) + 1, 6)) continue;
         let t = this.types[c.type];
         if (!t || t.n >= 256) continue;
         this.updatePalette(c, time);
         let o = t.n * 8, d = t.data;
-        d[o] = c.x, d[o + 1] = c.y, d[o + 2] = 0, d[o + 3] = c.h, d[o + 4] = c.palRow, d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0), d[o + 6] = c.state === "parked" ? snow : snow * 0.25, d[o + 7] = 0.02, t.n++;
+        d[o] = c.x, d[o + 1] = c.y, d[o + 2] = c.z || 0, d[o + 3] = c.h, d[o + 4] = c.palRow, d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0), d[o + 6] = c.state === "parked" ? snow : snow * 0.25, d[o + 7] = 0.02, t.n++;
       }
       let gl = this.gl;
       for (let k in this.types) {
@@ -6826,6 +6959,99 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
   };
 
+  // src/sim/subway.js
+  var CAR_LEN = 3.25, GAP = 0.15, NCARS = 5, OFF = 0.9, Subway = class {
+    constructor(city) {
+      this.city = city, this.rng = new RNG(23);
+      let c = OFF, r = 0.9, M = 117, pts = [], arc = (cx, cy, a0, a1) => {
+        for (let k = 0; k <= 6; k++) {
+          let a = a0 + (a1 - a0) * k / 6;
+          pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+        }
+      };
+      arc(c + r, c + r, Math.PI, Math.PI * 1.5), arc(M - c - r, c + r, -Math.PI / 2, 0), arc(M - c - r, M - c - r, 0, Math.PI / 2), arc(c + r, M - c - r, Math.PI / 2, Math.PI), pts.push(pts[0]), this.pts = pts, this.cum = [0];
+      for (let i = 1; i < pts.length; i++) this.cum.push(this.cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+      this.len = this.cum[this.cum.length - 1], this.z = TUNNEL.z0 + 0.02, this.stopS = this.sAt(TUNNEL.station[0] + 1.8, M - c), this.trains = [0, 1].map((k) => ({ s: (this.stopS + 30 + k * this.len / 2) % this.len, v: 5, dwell: 0, served: !1, cars: [] }));
+      for (let t of this.trains)
+        for (let k = 0; k < NCARS; k++) {
+          let car = { type: "subway", x: 0, y: 0, z: this.z, h: 0, len: CAR_LEN, state: "drive", lights: !0, brake: !1, palRow: -1, special: "subway" };
+          city.carLayer.assignPalette(car), t.cars.push(car);
+        }
+      this.cars = this.trains.flatMap((t) => t.cars), this.waiting = [], this.leaving = [], this.spawnT = 2;
+    }
+    sAt(x, y) {
+      let best = 0, bd = 1 / 0;
+      for (let i = 1; i < this.pts.length; i++) {
+        let a = this.pts[i - 1], b = this.pts[i], dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1, t = clamp(((x - a[0]) * dx + (y - a[1]) * dy) / L2, 0, 1), px = a[0] + dx * t, py = a[1] + dy * t, d = Math.hypot(px - x, py - y);
+        d < bd && (bd = d, best = this.cum[i - 1] + Math.sqrt(L2) * t);
+      }
+      return best;
+    }
+    at(s) {
+      s = (s % this.len + this.len) % this.len;
+      let i = 1;
+      for (; i < this.cum.length - 1 && this.cum[i] < s; ) i++;
+      let a = this.pts[i - 1], b = this.pts[i], seg = this.cum[i] - this.cum[i - 1] || 1, t = (s - this.cum[i - 1]) / seg;
+      return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, Math.atan2(b[1] - a[1], b[0] - a[0])];
+    }
+    ahead(a, b) {
+      return ((b - a) % this.len + this.len) % this.len;
+    }
+    update(dt) {
+      let audio = this.city.audio;
+      for (let i = 0; i < this.trains.length; i++) {
+        let t = this.trains[i], other = this.trains[(i + 1) % this.trains.length];
+        if (t.dwell > 0)
+          t.dwell -= dt, t.v = 0, t.dwell < 4 && this.waiting.length && this.rng.chance(dt * 3) && this.board(), t.dwell <= 0 && (t.served = !0, audio?.event("trainGo", this.at(t.s)));
+        else {
+          let toStop = this.ahead(t.s, this.stopS), gap = this.ahead(t.s, other.s) - (CAR_LEN + GAP) * NCARS - 4, vT = 6.5;
+          (!t.served || toStop < this.len / 2) && toStop < 22 && (vT = Math.max(0.6, Math.sqrt(2 * 1.6 * toStop))), gap < 12 && (vT = Math.min(vT, Math.max(0, gap * 0.4))), t.v += clamp(vT - t.v, -3.2 * dt, 1.6 * dt), toStop < 0.15 && !t.served && (t.dwell = 7, t.v = 0, audio?.event("trainStop", this.at(t.s)), this.alight()), toStop > 30 && toStop < this.len - 30 && (t.served = !1), t.s = (t.s + t.v * dt) % this.len, t.brake = vT < t.v - 0.2, t.v > 3 && this.rng.chance(dt * 0.6) && audio?.event("train", this.at(t.s));
+        }
+        t.cars.forEach((car, k) => {
+          let [x, y, h] = this.at(t.s - k * (CAR_LEN + GAP));
+          car.x = x, car.y = y, car.h = h, car.v = t.v, car.brake = t.brake && k === 0;
+        });
+      }
+      this.spawnT -= dt, this.spawnT <= 0 && this.waiting.length < 7 && (this.spawnT = this.rng.range(2.5, 7), this.waiting.push(this.makePassenger(this.rng.range(TUNNEL.station[0] + 1, TUNNEL.station[1] - 1), 0)));
+      for (let p of this.waiting)
+        p.alpha = Math.min(1, p.alpha + dt * 1.5), p.t += dt;
+      for (let i = this.leaving.length - 1; i >= 0; i--) {
+        let p = this.leaving[i];
+        p.t += dt, p.boarding ? p.alpha -= dt * 2 : (p.x -= dt * 0.9, p.dist += dt * 0.9, p.x < TUNNEL.station[0] + 0.6 && (p.alpha -= dt * 2.5)), p.alpha <= 0 && (this.city.pal.release(p.pal), this.leaving.splice(i, 1));
+      }
+    }
+    makePassenger(x, alpha) {
+      let P = this.city.people, role = this.rng.pick(["resident", "worker", "tourist", "resident"]), p = P.create(role);
+      return p.x = x, p.y = 117 - TUNNEL.depth + 0.42, p.z = TUNNEL.z0 + 0.5, p.alpha = alpha, p.t = this.rng.range(0, 3), p.front = !0, p.flip = this.rng.chance(0.5), p;
+    }
+    board() {
+      let p = this.waiting.shift();
+      p && (p.boarding = !0, this.leaving.push(p));
+    }
+    alight() {
+      let n = this.rng.int(1, 3);
+      for (let k = 0; k < n; k++) {
+        let p = this.makePassenger(this.rng.range(TUNNEL.station[0] + 6, TUNNEL.station[1] - 2), 1);
+        p.walking = !0, this.leaving.push(p);
+      }
+    }
+    emit(L, view) {
+      let cam = this.city.camera, draw = (p, walking) => {
+        if (!view.visible(p.x, p.y, p.z, 2)) return;
+        let f;
+        if (walking) {
+          let d = cam.screenDir(-1, 0);
+          f = (d[1] >= 0 ? p.frames.front : p.frames.back).walk[Math.floor(p.dist / 0.16) % 4], p.flip = d[0] < 0;
+        } else f = p.frames.front.idle[Math.floor(p.t * 1.3) % 2];
+        L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | SF.NOSHADE | SF.BRIGHT, clamp(p.alpha, 0, 1), 3e-3);
+      };
+      for (let p of this.waiting) draw(p, !1);
+      for (let p of this.leaving) draw(p, !p.boarding);
+    }
+    lights(LL) {
+    }
+  };
+
   // src/sim/city.js
   var City = class {
     constructor(gl, renderer, world, env, camera) {
@@ -6836,7 +7062,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         draw: (ctx) => {
           this.carLayer.draw(ctx), this.sprites.draw(ctx);
         }
-      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.traffic.init(), this.people.init();
+      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.traffic.init(), this.people.init();
     }
     addSystem(s) {
       return this.systems.push(s), s;
@@ -6858,7 +7084,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let view = this.computeView(canvasW, canvasH), env = this.env, L = this.sprites;
       L.begin(), this.statics.emit(L, env, this.camera, this.time, view);
       for (let s of this.systems) s.emit && s.emit(L, view);
-      L.end(), this.carLayer.prepare(this.traffic.cars, this.time, env, view);
+      L.end(), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
       let LL = this.lightLayer;
       LL.begin(), this.statics.lights(LL, env, this.time), this.carLayer.lights(LL, this.traffic.cars, env);
       for (let s of this.systems) s.lights && s.lights(LL, env);
@@ -7262,6 +7488,23 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           let o = O(0.3), f = r.range(900, 1100);
           for (let k = 0; k < 5; k++)
             this.osc("sine", f, t + k * 0.09, 0.07, o, 0.25, 0.01, f * 0.9), f *= 0.94;
+          break;
+        }
+        case "train": {
+          if (!this.throttle("train", 1.6)) return;
+          let o = O(0.55);
+          this.noise(t, 1.8, o, [["lowpass", 220]], 0.7, 0.3, this.brown);
+          for (let k = 0; k < 6; k++) this.noise(t + k * 0.21 + k % 2 * 0.06, 0.05, o, [["bandpass", 900, 2]], 0.22);
+          break;
+        }
+        case "trainStop": {
+          let o = O(0.4), v = this.osc("sine", 2350, t, 1.1, o, 0.12, 0.08, 2100), lfo = this.ctx.createOscillator(), lg = this.ctx.createGain();
+          lfo.frequency.value = 9, lg.gain.value = 40, lfo.connect(lg).connect(v.frequency), lfo.start(t), lfo.stop(t + 1.3), this.noise(t + 0.9, 0.5, o, [["highpass", 2500]], 0.25, 0.01);
+          break;
+        }
+        case "trainGo": {
+          let o = O(0.35);
+          this.osc("sine", 660, t, 0.25, o, 0.2), this.osc("sine", 523, t + 0.3, 0.4, o, 0.2);
           break;
         }
         case "siren":

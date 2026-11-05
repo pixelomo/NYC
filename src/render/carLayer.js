@@ -104,8 +104,9 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
   vec3 light = uAmb * faceShade(n) + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.6 + 0.4 * max(n.z, 0.0)) + vec3(uFlash);
+  if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
   // glossy paint / glass reflection
   if (slot == 3) {
@@ -342,7 +343,32 @@ export class CarLayer {
       return mb.finish();
     };
 
+    const subway = () => {
+      const mb = new MeshBuilder();
+      const L = 3.25, W = 1.125, H = 1.5;
+      const Lt = Math.round(L * T), Wt = Math.round(W * T), Ht = Math.round(H * T);
+      const side = A.reg(Lt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 6 === 0 ? 118 : 132) - (y > Ht - 5 ? 20 : 0));
+        for (let y = 4; y < 11; y++) for (let x = 3; x < Lt - 3; x++) {
+          const door = (x > 9 && x < 15) || (x > Lt - 16 && x < Lt - 10);
+          sp.set(x, y, door ? CS.BODY : (x % 8 === 0 ? CS.BLACK : CS.INTERIOR), door ? 110 : y < 6 ? 140 : 120);
+        }
+        for (const dx of [9, 15, Lt - 16, Lt - 10]) for (let y = 3; y < Ht - 5; y++) sp.set(dx, y, CS.BLACK, 100);
+        for (let x = 0; x < Lt; x++) { sp.set(x, 13, CS.ACCENT, 128); sp.set(x, 14, CS.ACCENT, 110); }
+        for (const wx of [8, Lt - 9]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 4; x <= wx + 4; x++) sp.set(x, y, CS.TIRE, 100);
+      });
+      const end = A.reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 120);
+        for (let y = 4; y < 10; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 125);
+        for (let x = 5; x < Wt - 5; x++) sp.set(x, 2, CS.LED, 128);
+        sp.set(2, Ht - 6, CS.HEAD, 128); sp.set(Wt - 3, Ht - 6, CS.HEAD, 128); sp.set(3, Ht - 6, CS.HEAD, 128); sp.set(Wt - 4, Ht - 6, CS.HEAD, 128);
+      });
+      const roof = A.reg(Lt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y === 0 || y === Wt - 1 ? 110 : 140); });
+      box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, end, end, roof));
+      return mb.finish();
+    };
     const defs = {
+      subway: subway(),
       sedan: sedan(),
       taxi: sedan({ taxiSign: true, checker: 3 }),
       suv: sedan({ len: 2.375, wid: 1.0, bodyH: 0.5625, cabH: 0.375, cabLen: 1.5, cabOff: -0.25 }),
@@ -390,6 +416,7 @@ export class CarLayer {
       case 'icecream': body = 0xf8f6f0; P[CS.ACCENT] = 0xf07ab0; P[CS.INTERIOR] = 0xffe2a0; P[CS.WHITE] = 0xfff0d8; break;
       case 'garbage': case 'plow': body = 0xf2f2ee; P[CS.ACCENT] = 0x2f8a46; P[CS.SIGN] = 0xf08a1a; break;
       case 'truck': P[CS.ACCENT] = r.pick([0xc8302c, 0x2a5fb8, 0x2f8a46, 0xe08a30]); break;
+      case 'subway': body = 0xc4c8ce; P[CS.ACCENT] = 0x2a6ad8; P[CS.INTERIOR] = 0xf8f0d0; P[CS.LED] = 0xff9a30; break;
     }
     P[CS.BODY] = body;
     car.palRow = this.pal.alloc(P);
@@ -404,7 +431,7 @@ export class CarLayer {
     const lights = car.lights;
     const siren = car.siren && Math.floor(time * 6) % 2;
     const beacon = (car.special === 'plow' || car.special === 'garbage') && Math.floor(time * 4) % 2;
-    const busLit = car.type === 'bus' || car.type === 'icecream';
+    const busLit = car.type === 'bus' || car.type === 'icecream' || car.type === 'subway';
     const key = `${lights ? 1 : 0}${car.brake ? 1 : 0}${car.siren ? (siren ? 2 : 1) : 0}${beacon ? 1 : 0}${car.type === 'taxi' ? (car.taxiFree ? 1 : 0) : 0}`;
     if (key === car.palState) return;
     car.palState = key;
@@ -418,19 +445,20 @@ export class CarLayer {
     if (car.special === 'plow' || car.special === 'garbage') pal.set(row, CS.SIGN, beacon ? 0xffa020 : 0x8a5010, beacon ? 128 : 255);
     if (car.type === 'taxi') pal.set(row, CS.SIGN, lights ? 0xfff2b0 : P[CS.SIGN], lights ? 128 : 255);
     if (busLit) pal.set(row, CS.INTERIOR, lights ? 0xfff0c0 : P[CS.INTERIOR], lights ? 128 : 255);
-    if (car.type === 'bus') pal.set(row, CS.LED, 0xffa020, 128);
+    if (car.type === 'bus' || car.type === 'subway') pal.set(row, CS.LED, 0xffa020, 128);
+    if (car.type === 'subway') pal.set(row, CS.INTERIOR, 0xfff2cc, 128);
   }
 
   prepare(cars, time, env, view) {
     for (const k in this.types) this.types[k].n = 0;
     const snow = env.snowCover;
     for (const c of cars) {
-      if (!view.visible(c.x, c.y, 1, 6)) continue;
+      if (!view.visible(c.x, c.y, (c.z || 0) + 1, 6)) continue;
       const t = this.types[c.type];
       if (!t || t.n >= 256) continue;
       this.updatePalette(c, time);
       const o = t.n * 8, d = t.data;
-      d[o] = c.x; d[o + 1] = c.y; d[o + 2] = 0; d[o + 3] = c.h;
+      d[o] = c.x; d[o + 1] = c.y; d[o + 2] = c.z || 0; d[o + 3] = c.h;
       d[o + 4] = c.palRow; d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0);
       d[o + 6] = c.state === 'parked' ? snow : snow * 0.25; d[o + 7] = 0.02;
       t.n++;

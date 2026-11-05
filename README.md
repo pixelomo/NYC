@@ -22,8 +22,9 @@ npm run build
 
 ## What's in the city
 
-- **4×4 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab (with soil, schist and
-  utility pipes in the cross-section):
+- **4×4 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab. The slab's
+  cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver
+  trains loop around the city and stop at a tiled station with passengers waiting on the platform.
   - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
     colours, a blue glass curtain-wall tower, a dark bronze modernist tower with plaza fountains,
     a limestone office with a copper roof, and a hotel with a vertical neon sign and marquee

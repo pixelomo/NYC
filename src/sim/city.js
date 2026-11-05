@@ -10,6 +10,7 @@ import { People } from './people.js';
 import { Activities } from './activities.js';
 import { Animals } from './animals.js';
 import { Particles } from './particles.js';
+import { Subway } from './subway.js';
 
 export class City {
   constructor(gl, renderer, world, env, camera) {
@@ -43,6 +44,8 @@ export class City {
     this.addSystem(this.activities);
     this.addSystem(this.animals);
     this.addSystem(this.particles);
+    this.subway = new Subway(this);
+    this.addSystem(this.subway);
     this.traffic.init();
     this.people.init();
   }
@@ -78,7 +81,7 @@ export class City {
     this.statics.emit(L, env, this.camera, this.time, view);
     for (const s of this.systems) s.emit && s.emit(L, view);
     L.end();
-    this.carLayer.prepare(this.traffic.cars, this.time, env, view);
+    this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
     const LL = this.lightLayer;
     LL.begin();
     this.statics.lights(LL, env, this.time);
