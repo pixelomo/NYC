@@ -11,6 +11,7 @@ import { Activities } from './activities.js';
 import { Animals } from './animals.js';
 import { Particles } from './particles.js';
 import { Subway } from './subway.js';
+import { T } from '../world/layout.js';
 
 export class City {
   constructor(gl, renderer, world, env, camera) {
@@ -68,7 +69,7 @@ export class City {
     const hw = bw / 2, hh = bh / 2;
     v.visible = (x, y, z, m = 2) => {
       const p = cam.project(x, y, z);
-      const mm = m * 16;
+      const mm = m * T;
       return Math.abs(p[0] - t[0]) < hw + mm && p[1] - t[1] < hh + mm && t[1] - p[1] < hh + mm * 2;
     };
     return v;

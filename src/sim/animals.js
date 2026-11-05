@@ -1,6 +1,6 @@
 // Animals: pigeons, dogs, squirrels, cats, ducks, rats, geese.
 
-import { paintPigeon, paintDog, paintCat, paintSquirrel, paintDuck, DOG_BREEDS, S } from '../render/sprites.js';
+import { paintPigeon, paintDog, paintCat, paintSquirrel, paintDuck, paintRat, DOG_BREEDS, dogFrameSize, selOut, S } from '../render/sprites.js';
 import { SF } from '../render/spriteLayer.js';
 import { RNG, clamp, dist, dist2 } from '../core/math.js';
 import { CURB, MAP } from '../world/layout.js';
@@ -10,17 +10,17 @@ export class Animals {
     this.city = city;
     this.rng = new RNG(99);
     const A = city.atlas;
-    const mk = (name, w, h, fn) => A.add(name, w, h, fn);
+    const mk = (name, w, h, fn) => A.add(name, w, h, (sp) => { fn(sp); selOut(sp, 0.8, 1.05); });
     this.f = {
-      pigeon: { walk: [0, 1].map((f) => mk(null, 8, 7, (sp) => paintPigeon(sp, 'walk', f))), peck: [0, 1].map((f) => mk(null, 8, 7, (sp) => paintPigeon(sp, 'peck', f))), fly: [0, 1].map((f) => mk(null, 9, 8, (sp) => paintPigeon(sp, 'fly', f))) },
-      cat: { walk: [0, 1].map((f) => mk(null, 9, 7, (sp) => paintCat(sp, 'walk', f))), sit: [0, 1].map((f) => mk(null, 6, 8, (sp) => paintCat(sp, 'sit', f))) },
-      squirrel: { run: [0, 1].map((f) => mk(null, 7, 7, (sp) => paintSquirrel(sp, 'run', f))), stand: [mk(null, 7, 7, (sp) => paintSquirrel(sp, 'stand', 0))] },
-      duck: { swim: [0, 1].map((f) => mk(null, 8, 6, (sp) => paintDuck(sp, 'swim', f))) },
-      rat: { run: [0, 1].map((f) => mk(null, 7, 4, (sp) => { const g = 3; for (let x = 1; x < 5; x++) sp.set(x, g - 1, S.BODY, 128); sp.set(2, g - 2, S.BODY, 140); sp.set(3, g - 2, S.BODY, 140); sp.set(5, g - 1, S.BODY, 120); sp.set(5, g - 2, S.EYE, 128); sp.set(0, g - 1 + f, S.BODY_L, 110); sp.set(1 + f, g, S.BODY_D, 100); sp.set(4 - f, g, S.BODY_D, 100); })) },
+      pigeon: { walk: [0, 1].map((f) => mk(null, 16, 14, (sp) => paintPigeon(sp, 'walk', f))), peck: [0, 1].map((f) => mk(null, 16, 14, (sp) => paintPigeon(sp, 'peck', f))), fly: [0, 1].map((f) => mk(null, 18, 16, (sp) => paintPigeon(sp, 'fly', f))) },
+      cat: { walk: [0, 1].map((f) => mk(null, 18, 14, (sp) => paintCat(sp, 'walk', f))), sit: [0, 1].map((f) => mk(null, 12, 16, (sp) => paintCat(sp, 'sit', f))) },
+      squirrel: { run: [0, 1].map((f) => mk(null, 14, 14, (sp) => paintSquirrel(sp, 'run', f))), stand: [mk(null, 14, 14, (sp) => paintSquirrel(sp, 'stand', 0))] },
+      duck: { swim: [0, 1].map((f) => mk(null, 16, 12, (sp) => paintDuck(sp, 'swim', f))) },
+      rat: { run: [0, 1].map((f) => mk(null, 14, 8, (sp) => paintRat(sp, f))) },
     };
     this.dogFrames = {};
     for (const breed in DOG_BREEDS) {
-      const w = DOG_BREEDS[breed].len + 8, h = DOG_BREEDS[breed].hgt + DOG_BREEDS[breed].leg + DOG_BREEDS[breed].head + 2;
+      const [w, h] = dogFrameSize(breed);
       this.dogFrames[breed] = {
         walk: [0, 1, 2, 3].map((f) => mk(null, w, h, (sp) => paintDog(sp, breed, 'walk', f))),
         run: [0, 1].map((f) => mk(null, w, h, (sp) => paintDog(sp, breed, 'run', f))),
@@ -54,13 +54,17 @@ export class Animals {
     this.planeTimer = 8;
     this.planeRows = { body: city.pal.alloc({ [S.BODY]: 0xd8dce2, [S.BODY_D]: 0x8a9098, [S.BODY_L]: 0xf2f4f8, [S.EYE]: 0x2a2a30, [S.BEAK]: 0xd8dce2, [S.ACCENT]: 0x2a5fb8 }),
       red: city.pal.alloc({ [S.C1]: [0xff3030, 128] }), white: city.pal.alloc({ [S.C1]: [0xffffff, 128] }), green: city.pal.alloc({ [S.C1]: [0x30ff60, 128] }) };
-    this.planeFrame = city.atlas.add('plane', 13, 5, (sp) => {
-      for (let x = 0; x < 12; x++) sp.set(x, 2, S.BODY, x < 3 ? 150 : 128);
-      for (let x = 3; x < 11; x++) sp.set(x, 3, S.BODY_D, 110);
-      sp.set(12, 2, S.BODY_L, 150);
-      sp.set(1, 1, S.ACCENT, 128); sp.set(0, 0, S.ACCENT, 128); sp.set(1, 0, S.ACCENT, 110);
-      sp.set(5, 1, S.BODY_L, 140); sp.set(6, 0, S.BODY_L, 140); sp.set(6, 4, S.BODY_D, 100); sp.set(7, 4, S.BODY_D, 100);
-      for (let x = 4; x < 10; x += 2) sp.set(x, 2, S.EYE, 128);
+    this.planeFrame = city.atlas.add('plane', 26, 10, (sp) => {
+      // airliner in side view: fuselage, swept wing, tail fin, cabin windows
+      for (let x = 3; x < 23; x++) { sp.set(x, 4, S.BODY, x < 7 ? 150 : 136); sp.set(x, 5, S.BODY, 122); sp.set(x, 6, S.BODY_D, 100); }
+      sp.set(23, 5, S.BODY_L, 150); sp.set(23, 4, S.BODY_L, 140); sp.set(24, 5, S.BODY_L, 128); sp.set(23, 6, S.BODY_D, 110);
+      for (let k = 0; k < 4; k++) { sp.set(3 + k, 3 - k, S.ACCENT, 136); sp.set(4 + k, 3 - k, S.ACCENT, 116); }
+      sp.set(2, 4, S.ACCENT, 120); sp.set(2, 3, S.ACCENT, 128);
+      for (let k = 0; k < 5; k++) { sp.set(11 + k, 7 + (k >> 1), S.BODY_D, 110); sp.set(12 + k, 7 + (k >> 1), S.BODY_D, 96); }
+      sp.set(13, 9, S.BODY_D, 90); sp.set(14, 9, S.BODY_D, 90);
+      for (let x = 8; x < 22; x += 2) sp.set(x, 4, S.EYE, 128);
+      sp.set(21, 4, S.EYE, 140); sp.set(22, 4, S.EYE, 140);
+      for (let x = 5; x < 22; x++) sp.set(x, 5, S.ACCENT, 96);
     });
     this.initPigeons();
     this.initOthers();

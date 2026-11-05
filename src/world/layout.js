@@ -1,6 +1,7 @@
 // City layout constants. 1 world unit = 2 m = 16 texels/pixels. x = east, y = south, z = up.
 
-export const T = 16; // texels (pixels) per world unit
+export const T = 32; // texels (pixels) per world unit (2x pixel density)
+export const K = T / 16; // scale factor for pixel-art sizes authored at 16 texels/unit
 export const NB = 4; // blocks per side
 export const BLOCK = 18;
 export const SIDEWALK = 2;

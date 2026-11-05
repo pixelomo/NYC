@@ -1,6 +1,8 @@
 // Isometric camera: 2:1 pixel projection with smooth 90-degree rotations and integer pixel zoom.
 
-import { MAP } from '../world/layout.js';
+import { MAP, T } from '../world/layout.js';
+
+const HX = T, HY = T / 2, HZ = T; // screen px per world unit (x half-width, y, height)
 import { clamp, easeInOut } from '../core/math.js';
 
 const CX = MAP / 2, CY = MAP / 2;
@@ -71,20 +73,20 @@ export class Camera {
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     const dx = x - CX, dy = y - CY;
     const xr = c * dx - s * dy, yr = s * dx + c * dy;
-    return [(xr - yr) * 16, (xr + yr) * 8 - z * 16, -(xr + yr)];
+    return [(xr - yr) * HX, (xr + yr) * HY - z * HZ, -(xr + yr)];
   }
   // screen-space direction (art px) of a world direction
   screenDir(nx, ny) {
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     const xr = c * nx - s * ny, yr = s * nx + c * ny;
-    return [(xr - yr) * 16, (xr + yr) * 8];
+    return [(xr - yr) * HX, (xr + yr) * HY];
   }
   screenDirX(nx, ny) {
     return this.screenDir(nx, ny)[0];
   }
   // art-pixel screen delta -> world delta on the ground plane
   unprojectDelta(dsx, dsy) {
-    const a = dsx / 16, b = dsy / 8; // a = xr - yr, b = xr + yr
+    const a = dsx / HX, b = dsy / HY; // a = xr - yr, b = xr + yr
     const xr = (a + b) / 2, yr = (b - a) / 2;
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     return [c * xr + s * yr, -s * xr + c * yr];
@@ -94,8 +96,8 @@ export class Camera {
     const scaleCss = this.scale / (window.devicePixelRatio || 1);
     const t = this.project(this.x, this.y, 0);
     const sx = t[0] + (px - viewW / 2) / scaleCss;
-    const sy = t[1] + (py - viewH / 2) / scaleCss + z * 16;
-    const a = sx / 16, b = sy / 8;
+    const sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ;
+    const a = sx / HX, b = sy / HY;
     const xr = (a + b) / 2, yr = (b - a) / 2;
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     return [CX + c * xr + s * yr, CY - s * xr + c * yr];
@@ -125,15 +127,15 @@ export class Camera {
     const m = new Float32Array(16);
     const kx = 2 / bw, ky = 2 / bh;
     // clip_x
-    m[0] = 16 * (c - s) * kx;
-    m[4] = -16 * (s + c) * kx;
+    m[0] = HX * (c - s) * kx;
+    m[4] = -HX * (s + c) * kx;
     m[8] = 0;
-    m[12] = (16 * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx;
+    m[12] = (HX * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx;
     // clip_y
-    m[1] = -8 * (c + s) * ky;
-    m[5] = -8 * (c - s) * ky;
-    m[9] = 16 * ky;
-    m[13] = -(8 * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky;
+    m[1] = -HY * (c + s) * ky;
+    m[5] = -HY * (c - s) * ky;
+    m[9] = HZ * ky;
+    m[13] = -(HY * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky;
     // clip_z
     m[2] = -(c + s) / D;
     m[6] = -(c - s) / D;

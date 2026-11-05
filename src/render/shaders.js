@@ -98,6 +98,8 @@ flat in uvec4 vRect;
 flat in vec3 vNrm;
 flat in uvec4 vInfo;
 uniform sampler2DArray uAtlas;
+uniform highp sampler2D uGround;
+uniform float uGroundScale;
 uniform float uResLit;
 uniform float uOffLit;
 uniform float uLeaves;
@@ -122,10 +124,15 @@ vec3 windowColor(float h) {
 }
 
 void main() {
-  ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
-  vec4 tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
-  if (tex.a < 0.5 / 255.0) discard;
   uint mat = vInfo.y;
+  bool ground = (mat & 4u) != 0u;
+  vec4 tex;
+  if (ground) tex = texelFetch(uGround, ivec2(floor(vUV * uGroundScale)), 0);
+  else {
+    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+    tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
+  }
+  if (tex.a < 0.5 / 255.0) discard;
   vec3 n = normalize(vNrm);
   vec3 albedo = tex.rgb;
   float code = floor(tex.a * 255.0 + 0.5);
@@ -134,21 +141,20 @@ void main() {
   float refl = 0.0;
   float wetK = 0.0;
   float puddle = 0.0;
-  bool ground = (mat & 4u) != 0u;
   vec2 wp2 = vWorld.xy;
   // stable per-texel world coordinate for noise (texel grid)
-  vec2 tp = floor(vWorld.xy * 16.0) / 16.0;
+  vec2 tp = floor(vWorld.xy * 32.0) / 32.0;
 
   if (ground) {
     int g = int(code);
     float n1 = nz(tp * 0.11);
-    float n2 = hash12(floor(vWorld.xy * 8.0));
+    float n2 = hash12(floor(vWorld.xy * 16.0));
     float n3 = nz(tp * 0.035 + 0.3);
     // water
     if (g == 15) {
       if (uIce > 0.5) {
         albedo = mix(vec3(0.78, 0.88, 0.95), vec3(0.92, 0.96, 1.0), step(0.6, n1));
-        if (hash12(floor(vWorld.xy * 16.0)) < 0.04) albedo *= 0.85;
+        if (hash12(floor(vWorld.xy * 32.0)) < 0.04) albedo *= 0.85;
       } else {
         float w = nz(tp * 0.25 + vec2(uTime * 0.02, uTime * 0.013)) + nz(tp * 0.31 - vec2(uTime * 0.017, -uTime * 0.01));
         albedo = mix(vec3(0.16, 0.42, 0.55), vec3(0.28, 0.62, 0.72), smoothstep(0.7, 1.3, w));
@@ -160,15 +166,15 @@ void main() {
     if (uLeaves > 0.0 && (g == 6 || g == 8 || g == 9 || g == 11 || g == 17 || g == 22)) {
       float k = (g == 8 || g == 9) ? 1.0 : 0.55;
       if (n2 < uLeaves * 0.26 * k * smoothstep(0.35, 0.75, n3)) {
-        float h = hash12(floor(vWorld.xy * 8.0) + 7.0);
+        float h = hash12(floor(vWorld.xy * 16.0) + 7.0);
         albedo = h < 0.33 ? vec3(0.85, 0.42, 0.12) : h < 0.66 ? vec3(0.72, 0.22, 0.10) : vec3(0.88, 0.66, 0.18);
       }
     }
     // spring/summer flowers
     if (g == 10) {
-      float h = hash12(floor(vWorld.xy * 8.0) + 3.0);
-      if (uFlowers > 0.0 && h < 0.42 * uFlowers) {
-        float c = hash12(floor(vWorld.xy * 8.0) + 11.0);
+      float h = hash12(floor(vWorld.xy * 16.0) + 3.0);
+      if (uFlowers > 0.0 && h < 0.32 * uFlowers) {
+        float c = hash12(floor(vWorld.xy * 16.0) + 11.0);
         vec3 fc = uSeason < 0.5 ? (c < 0.4 ? vec3(0.95, 0.2, 0.25) : c < 0.75 ? vec3(1.0, 0.85, 0.2) : vec3(0.95, 0.55, 0.85))
                 : uSeason < 1.5 ? (c < 0.3 ? vec3(0.95, 0.35, 0.6) : c < 0.6 ? vec3(0.4, 0.5, 0.95) : vec3(1.0, 0.95, 0.9))
                 : (c < 0.5 ? vec3(0.95, 0.55, 0.15) : vec3(0.75, 0.2, 0.2));
@@ -214,7 +220,7 @@ void main() {
     // non-ground: snow on top-facing surfaces
     if ((mat & 1u) != 0u && n.z > 0.55 && uSnow > 0.001) {
       float n1 = nz(tp * 0.13 + vWorld.z * 0.07);
-      float n2 = hash12(floor(vWorld.xy * 8.0));
+      float n2 = hash12(floor(vWorld.xy * 16.0));
       if (n1 * 0.85 + n2 * 0.15 < uSnow * 1.3 - 0.05) {
         albedo = mix(vec3(0.86, 0.9, 0.98), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nz(tp * 0.05)));
         code = 255.0;
@@ -300,9 +306,10 @@ uniform uint uVis;
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out uint vLayer;
+flat out uint vMat;
 void main() {
   if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vUV = aUV; vRect = aRect; vLayer = aInfo.x;
+  vUV = aUV; vRect = aRect; vLayer = aInfo.x; vMat = aInfo.y;
   gl_Position = uShadowVP * vec4(aPos, 1.0);
 }`;
 
@@ -310,9 +317,11 @@ export const SHADOW_FS = HEAD + `
 in vec2 vUV;
 flat in uvec4 vRect;
 flat in uint vLayer;
+flat in uint vMat;
 uniform sampler2DArray uAtlas;
 out vec4 o;
 void main() {
+  if ((vMat & 4u) != 0u) { o = vec4(1.0); return; }
   ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
   if (texelFetch(uAtlas, ivec3(tc, int(vLayer)), 0).a < 0.5 / 255.0) discard;
   o = vec4(1.0);

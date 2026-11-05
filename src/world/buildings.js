@@ -72,128 +72,159 @@ export function sharedTex(C) {
   if (C._shared) return C._shared;
   const A = C.atlas;
   const S = {};
-  const brickTile = (name, pal, seed) => A.shared(name, 64, 64, (p) => brickFill(p, 0, 0, 64, 64, pal, seed));
+  const brickTile = (name, pal, seed) => A.shared(name, 128, 96, (p) => brickFill(p, 0, 0, 128, 96, pal, seed));
   S.brickRed = brickTile('b_red', PAL.brickRed, 3);
   S.brickBrown = brickTile('b_brown', PAL.brickBrown, 4);
   S.brickOrange = brickTile('b_orange', PAL.brickOrange, 5);
   S.brickTan = brickTile('b_tan', PAL.brickTan, 6);
   S.brickPurple = brickTile('b_purple', PAL.brickPurple, 8);
-  S.brownstone = A.shared('s_brown', 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.brownstone, 9, 6));
-  S.limestone = A.shared('s_lime', 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.limestone, 10, 8, { blocks: 16 }));
-  S.greystone = A.shared('s_grey', 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.greystone, 11, 8, { blocks: 16 }));
-  S.concrete = A.shared('concrete', 64, 64, (p) => smoothFill(p, 0, 0, 64, 64, 0xb9b6ae, 12, 0.05));
-  S.darkMetal = A.shared('darkmetal', 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, 0x2a2b30, 13, 0.06));
-  S.metal = A.shared('metal', 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, 0x8d9097, 14, 0.05));
-  S.blackIron = A.shared('iron', 8, 8, (p) => p.rect(0, 0, 8, 8, 0x1e1e22));
-  S.roofSilver = A.shared('r_silver', 64, 64, (p) => roofFill(p, 64, 64, 'silver', C.rng));
-  S.roofTar = A.shared('r_tar', 64, 64, (p) => roofFill(p, 64, 64, 'tar', C.rng));
-  S.roofGravel = A.shared('r_gravel', 64, 64, (p) => roofFill(p, 64, 64, 'gravel', C.rng));
-  S.roofDeck = A.shared('r_deck', 64, 64, (p) => roofFill(p, 64, 64, 'deck', C.rng));
-  S.roofGreen = A.shared('r_green', 64, 64, (p) => roofFill(p, 64, 64, 'green', C.rng));
-  S.railing = A.shared('railing', 48, 9, (p) => railingTex(p, 48, 9, 0x1e1e22, 2));
-  S.railingTall = A.shared('railing_t', 48, 12, (p) => railingTex(p, 48, 12, 0x1e1e22, 3));
-  S.fescRail = A.shared('fesc_rail', 48, 10, (p) => {
+  S.brownstone = A.shared('s_brown', 128, 96, (p) => stoneFill(p, 0, 0, 128, 96, PAL.brownstone, 9, 12));
+  S.limestone = A.shared('s_lime', 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.limestone, 10, 16, { blocks: 32 }));
+  S.greystone = A.shared('s_grey', 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.greystone, 11, 16, { blocks: 32 }));
+  S.concrete = A.shared('concrete', 128, 128, (p) => {
+    smoothFill(p, 0, 0, 128, 128, 0xb9b6ae, 12, 0.05);
+    for (let i = 0; i < 40; i++) p.set((i * 37) % 128, (i * 59) % 128, 0x9a978f);
+  });
+  S.darkMetal = A.shared('darkmetal', 32, 32, (p) => smoothFill(p, 0, 0, 32, 32, 0x2a2b30, 13, 0.06));
+  S.metal = A.shared('metal', 32, 32, (p) => { smoothFill(p, 0, 0, 32, 32, 0x8d9097, 14, 0.05); for (let x = 0; x < 32; x += 8) p.vline(x, 0, 32, 0x9fa2a8); });
+  S.blackIron = A.shared('iron', 16, 16, (p) => { p.rect(0, 0, 16, 16, 0x1e1e22); p.vline(0, 0, 16, 0x3a3a40); });
+  S.roofSilver = A.shared('r_silver', 128, 128, (p) => roofFill(p, 128, 128, 'silver', C.rng));
+  S.roofTar = A.shared('r_tar', 128, 128, (p) => roofFill(p, 128, 128, 'tar', C.rng));
+  S.roofGravel = A.shared('r_gravel', 128, 128, (p) => roofFill(p, 128, 128, 'gravel', C.rng));
+  S.roofDeck = A.shared('r_deck', 128, 128, (p) => roofFill(p, 128, 128, 'deck', C.rng));
+  S.roofGreen = A.shared('r_green', 128, 128, (p) => roofFill(p, 128, 128, 'green', C.rng));
+  S.railing = A.shared('railing', 96, 18, (p) => railingTex(p, 96, 18, 0x1e1e22, 4));
+  S.railingTall = A.shared('railing_t', 96, 24, (p) => railingTex(p, 96, 24, 0x1e1e22, 5));
+  S.fescRail = A.shared('fesc_rail', 96, 20, (p) => {
     p.clear();
-    p.rect(0, 0, 48, 1, 0x1a1a1e);
-    p.rect(0, 4, 48, 1, 0x1a1a1e);
-    for (let x = 0; x < 48; x += 2) p.rect(x, 0, 1, 10, 0x1a1a1e);
+    p.rect(0, 0, 96, 2, 0x1a1a1e);
+    p.hline(0, 0, 96, 0x4a4a52);
+    p.rect(0, 9, 96, 1, 0x1a1a1e);
+    for (let x = 0; x < 96; x += 3) p.rect(x, 0, 1, 20, 0x1a1a1e);
+    for (let x = 0; x < 96; x += 24) { p.rect(x, 0, 2, 20, 0x26262c); }
   });
-  S.ladder = A.shared('ladder', 6, 12, (p) => ladderTex(p, 6, 12));
-  S.fstair = A.shared('fstair', 32, 4, (p) => {
+  S.ladder = A.shared('ladder', 12, 24, (p) => ladderTex(p, 12, 24));
+  S.fstair = A.shared('fstair', 64, 8, (p) => {
     p.clear();
-    p.rect(0, 0, 32, 1, 0x1a1a1e);
-    p.rect(0, 3, 32, 1, 0x1a1a1e);
-    for (let x = 0; x < 32; x += 2) p.rect(x, 1, 1, 2, 0x2a2a30);
+    p.rect(0, 0, 64, 2, 0x1a1a1e);
+    p.hline(0, 0, 64, 0x44444c);
+    p.rect(0, 6, 64, 2, 0x1a1a1e);
+    for (let x = 0; x < 64; x += 3) p.rect(x, 2, 2, 4, 0x2a2a30);
   });
-  S.stairs = A.shared('fesc_stairs', 10, 32, (p) => {
+  S.stairs = A.shared('fesc_stairs', 20, 64, (p) => {
     p.clear();
-    p.rect(0, 0, 1, 32, 0x1a1a1e);
-    p.rect(9, 0, 1, 32, 0x1a1a1e);
-    for (let y = 1; y < 32; y += 2) p.rect(0, y, 10, 1, 0x26262b);
+    p.rect(0, 0, 2, 64, 0x1a1a1e);
+    p.rect(18, 0, 2, 64, 0x1a1a1e);
+    for (let y = 1; y < 64; y += 4) p.rect(0, y, 20, 2, 0x26262b);
   });
-  S.grate = A.shared('grate', 16, 16, (p) => {
+  S.grate = A.shared('grate', 32, 32, (p) => {
     p.clear();
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (x % 2 === 0 || y % 2 === 0) p.set(x, y, 0x1a1a1e);
-  });
-  S.hvac = A.shared('hvac', 32, 16, (p) => grilleTex(p, 32, 16, 0xa9aba6));
-  S.hvacTop = A.shared('hvac_top', 32, 32, (p) => {
-    smoothFill(p, 0, 0, 32, 32, 0xb4b6b1, 15, 0.04);
-    p.ellipse(10, 16, 7, 7, 0x3a3b40);
-    p.ellipse(10, 16, 5, 5, 0x55565c);
-    p.rect(9, 10, 2, 12, 0x2a2b30);
-    p.rect(4, 15, 12, 2, 0x2a2b30);
-  });
-  S.tank = A.shared('tank', 64, 32, (p) => plankTex(p, 64, 32, 0x8a6a48));
-  S.tankDark = A.shared('tank2', 64, 32, (p) => plankTex(p, 64, 32, 0x6a5038));
-  S.tankRoof = A.shared('tank_roof', 64, 32, (p) => {
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) p.set(x, y, shade(0x4a4c52, 0.9 + hash2i(x, y, 3) * 0.15));
-  });
-  S.wood = A.shared('wood', 32, 16, (p) => plankTex(p, 32, 16, 0x9a6a44, false));
-  S.fenceWood = A.shared('fence_w', 32, 16, (p) => {
-    plankTex(p, 32, 16, 0x8a5e3c, false);
-    for (let x = 0; x < 32; x += 4) p.set(x, 0, 0, 0);
-  });
-  S.chimney = A.shared('chimney', 16, 16, (p) => brickFill(p, 0, 0, 16, 16, PAL.brickRed, 19));
-  S.chimneyTop = A.shared('chimney_top', 8, 8, (p) => { p.rect(0, 0, 8, 8, 0x8a8a88); p.rect(2, 2, 4, 4, 0x1e1e20); });
-  S.skylight = A.shared('skylight', 16, 16, (p) => {
-    p.rect(0, 0, 16, 16, 0x9a9da3);
-    for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) p.set(x, y, (x + y) % 6 < 2 ? 0x9cc4dd : 0x4b6f8f);
-  });
-  S.glassBlue = A.shared('glass_b', 16, 16, (p) => {
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, (x + y) % 9 < 2 ? 0x8cb4d4 : 0x3d6385, winCode(0.5));
-  });
-  S.stoneStep = A.shared('step', 32, 8, (p) => {
-    stoneFill(p, 0, 0, 32, 8, PAL.brownstone, 21, 0);
-    p.rect(0, 0, 32, 1, shade(PAL.brownstone[0], 1.2));
-  });
-  S.stoneStepTop = A.shared('step_top', 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [0x8f6250], 22, 0));
-  S.limeStep = A.shared('lstep', 32, 8, (p) => { stoneFill(p, 0, 0, 32, 8, PAL.limestone, 23, 0); p.rect(0, 0, 32, 1, 0xf0e6d0); });
-  S.limeTop = A.shared('ltop', 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [0xe2d6ba], 24, 0));
-  S.acUnit = A.shared('ac', 8, 6, (p) => {
-    p.rect(0, 0, 8, 6, 0xe0dcd0);
-    for (let y = 1; y < 5; y += 2) p.rect(1, y, 6, 1, 0xa8a49a);
-    p.frame(0, 0, 8, 6, 0xb8b4a8);
-  });
-  S.acTop = A.shared('ac_top', 8, 8, (p) => p.rect(0, 0, 8, 8, 0xd4d0c4));
-  S.flowerBox = A.shared('fbox', 16, 4, (p) => {
-    p.rect(0, 0, 16, 4, 0x6b4a32);
-    for (let x = 0; x < 16; x++) {
-      p.set(x, 0, [0xe84a5f, 0xf2c230, 0x58ac43, 0xe58fb5, 0x58ac43][(x * 7) % 5]);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+      if (x % 4 === 0 || y % 4 === 0) p.set(x, y, (x % 4 === 0 && y % 4 === 0) ? 0x2a2a30 : 0x1a1a1e);
     }
   });
-  S.flowerTop = A.shared('ftop', 16, 8, (p) => {
-    for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) p.set(x, y, [0x58ac43, 0x3f8a35, 0xe84a5f, 0xf2c230, 0x58ac43, 0xe58fb5][Math.floor(hash2i(x, y, 4) * 6)]);
+  S.hvac = A.shared('hvac', 32, 16, (p) => {
+    grilleTex(p, 32, 16, 0xa9aba6);
+    p.rect(24, 3, 6, 4, 0x6a6c70); p.hline(25, 4, 4, 0xd8d8d4);
+    p.hline(0, 15, 32, 0x6a6c68);
   });
-  S.xmasLights = A.shared('xmas', 32, 3, (p) => {
+  S.hvacTop = A.shared('hvac_top', 32, 24, (p) => {
+    smoothFill(p, 0, 0, 32, 24, 0xb4b6b1, 15, 0.04);
+    p.frame(0, 0, 32, 24, 0x8a8c88);
+    const cx = 16, cy = 12;
+    p.ellipse(cx, cy, 9.5, 9.5, 0x2e2f34);
+    p.ellipse(cx, cy, 8, 8, 0x4a4b51);
+    for (let a = 0; a < 4; a++) {
+      const ang = (a / 4) * Math.PI * 2 + 0.4;
+      for (let r = 2; r < 8; r++) p.set(Math.round(cx + Math.cos(ang) * r), Math.round(cy + Math.sin(ang) * r), 0x2a2b30);
+    }
+    for (let r = 0; r < 3; r++) p.ring(cx, cy, 9 - r * 3, 9 - r * 3, 0.6, 0x5e6066);
+    p.ellipse(cx, cy, 1.5, 1.5, 0x8a8c90);
+  });
+  S.tank = A.shared('tank', 128, 64, (p) => plankTex(p, 128, 64, 0x8a6a48));
+  S.tankDark = A.shared('tank2', 128, 64, (p) => plankTex(p, 128, 64, 0x6a5038));
+  S.tankRoof = A.shared('tank_roof', 128, 64, (p) => {
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) p.set(x, y, shade(x % 8 === 0 ? 0x3e4046 : 0x4a4c52, 0.9 + hash2i(x, y, 3) * 0.15));
+  });
+  S.wood = A.shared('wood', 64, 32, (p) => plankTex(p, 64, 32, 0x9a6a44, false));
+  S.fenceWood = A.shared('fence_w', 64, 32, (p) => {
+    plankTex(p, 64, 32, 0x8a5e3c, false);
+    for (let x = 0; x < 64; x += 8) { p.set(x, 0, 0, 0); p.set(x + 1, 0, 0, 0); p.set(x, 1, 0, 0); }
+    p.hline(0, 8, 64, 0x6a4a2c); p.hline(0, 24, 64, 0x6a4a2c);
+  });
+  S.chimney = A.shared('chimney', 32, 32, (p) => { brickFill(p, 0, 0, 32, 32, PAL.brickRed, 19); p.rect(0, 0, 32, 3, 0x9a9a98); p.hline(0, 3, 32, 0x6a6a68); });
+  S.chimneyTop = A.shared('chimney_top', 12, 12, (p) => { p.rect(0, 0, 12, 12, 0x8a8a88); p.rect(2, 2, 8, 8, 0x2a2a2c); p.rect(4, 4, 4, 4, 0x111114); });
+  S.skylight = A.shared('skylight', 24, 24, (p) => {
+    p.rect(0, 0, 24, 24, 0x9a9da3);
+    for (let y = 2; y < 22; y++) for (let x = 2; x < 22; x++) p.set(x, y, (x + y) % 12 < 3 ? 0x9cc4dd : 0x4b6f8f);
+    p.vline(12, 2, 20, 0x9a9da3); p.hline(2, 12, 20, 0x9a9da3);
+    p.frame(0, 0, 24, 24, 0x7a7d83);
+  });
+  S.glassBlue = A.shared('glass_b', 32, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x + y) % 18 < 3 ? 0x8cb4d4 : 0x3d6385, winCode(0.5));
+  });
+  S.stoneStep = A.shared('step', 64, 8, (p) => {
+    stoneFill(p, 0, 0, 64, 8, PAL.brownstone, 21, 0);
+    p.rect(0, 0, 64, 2, shade(PAL.brownstone[0], 1.22));
+    p.hline(0, 2, 64, shade(PAL.brownstone[0], 1.08));
+    p.hline(0, 7, 64, shade(PAL.brownstone[0], 0.72));
+  });
+  S.stoneStepTop = A.shared('step_top', 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, [0x8f6250], 22, 0));
+  S.limeStep = A.shared('lstep', 64, 8, (p) => { stoneFill(p, 0, 0, 64, 8, PAL.limestone, 23, 0); p.rect(0, 0, 64, 2, 0xf0e6d0); p.hline(0, 7, 64, 0xb8ab90); });
+  S.limeTop = A.shared('ltop', 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, [0xe2d6ba], 24, 0));
+  S.acUnit = A.shared('ac', 16, 12, (p) => {
+    p.rect(0, 0, 16, 12, 0xe4e0d4);
+    for (let y = 2; y < 10; y += 2) p.rect(2, y, 8, 1, 0xa8a49a);
+    p.rect(11, 3, 3, 3, 0x8a867c); p.set(12, 4, 0x4ac06a);
+    p.frame(0, 0, 16, 12, 0xb8b4a8);
+    p.hline(0, 11, 16, 0x9a968c);
+  });
+  S.acTop = A.shared('ac_top', 16, 16, (p) => { p.rect(0, 0, 16, 16, 0xd4d0c4); p.frame(0, 0, 16, 16, 0xbcb8ac); });
+  S.flowerBox = A.shared('fbox', 32, 8, (p) => {
+    p.rect(0, 2, 32, 6, 0x6b4a32);
+    p.hline(0, 2, 32, 0x8a6244);
+    for (let x = 0; x < 32; x++) {
+      p.set(x, 0, [0xe84a5f, 0xf2c230, 0x58ac43, 0xe58fb5, 0x58ac43, 0x3f8a35][(x * 7) % 6]);
+      p.set(x, 1, [0x58ac43, 0x3f8a35, 0xe84a5f, 0x58ac43][(x * 5) % 4]);
+    }
+  });
+  S.flowerTop = A.shared('ftop', 32, 16, (p) => {
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, [0x58ac43, 0x3f8a35, 0xe84a5f, 0xf2c230, 0x58ac43, 0xe58fb5, 0x6cc050][Math.floor(hash2i(x >> 1, y >> 1, 4) * 7)]);
+  });
+  S.xmasLights = A.shared('xmas', 64, 6, (p) => {
     p.clear();
     const cols = [0xff3040, 0x40ff60, 0x4080ff, 0xffd040, 0xff60e0];
-    for (let x = 0; x < 32; x++) p.set(x, 1, 0x1e2a1e, 255);
-    for (let x = 1; x < 32; x += 3) p.set(x, 2, cols[(x / 3) % 5 | 0], winCode(0.01, true));
+    for (let x = 0; x < 64; x++) p.set(x, 1 + Math.round(Math.sin((x / 64) * Math.PI * 4) * 1), 0x1e2a1e, 255);
+    for (let x = 2; x < 64; x += 6) { const c = cols[(x / 6) % 5 | 0]; p.rect(x, 3, 2, 2, c, winCode(0.01, true)); p.set(x, 5, shade(c, 0.7), winCode(0.01, true)); }
   });
-  S.lightsWarm = A.shared('warmlights', 32, 3, (p) => {
+  S.lightsWarm = A.shared('warmlights', 64, 6, (p) => {
     p.clear();
-    for (let x = 0; x < 32; x++) p.set(x, 0, 0x2a2a2a, 255);
-    for (let x = 1; x < 32; x += 4) p.set(x, 1, 0xffd890, winCode(0.01, true));
+    for (let x = 0; x < 64; x++) p.set(x, Math.round(Math.sin((x / 64) * Math.PI) * 2), 0x2a2a2a, 255);
+    for (let x = 3; x < 64; x += 8) { p.rect(x, 2, 2, 3, 0xffd890, winCode(0.01, true)); }
   });
-  S.wreath = A.shared('wreath', 8, 8, (p) => {
+  S.wreath = A.shared('wreath', 16, 16, (p) => {
     p.clear();
-    p.ring(4, 4, 4, 4, 1.6, 0x2f7a3a);
-    p.set(2, 2, 0xd8302c); p.set(5, 5, 0xd8302c); p.set(5, 2, 0xffd040);
-    p.rect(3, 6, 2, 2, 0xd8302c);
+    p.ring(8, 8, 7.5, 7.5, 3, 0x2f7a3a);
+    for (let a = 0; a < 12; a++) { const ang = (a / 12) * Math.PI * 2; p.set(Math.round(8 + Math.cos(ang) * 6), Math.round(8 + Math.sin(ang) * 6), a % 3 ? 0x3f9a4a : 0xd8302c); }
+    p.rect(6, 13, 4, 3, 0xd8302c); p.set(5, 15, 0xd8302c); p.set(10, 15, 0xd8302c);
   });
-  S.pumpkin = A.shared('pumpkin', 8, 6, (p) => {
-    p.rect(0, 1, 8, 5, 0xe87a1a);
-    p.rect(1, 0, 6, 6, 0xf08a22);
-    p.set(3, 0, 0x3f8a35);
-    p.set(2, 2, 0xffd040, winCode(0.01, true)); p.set(5, 2, 0xffd040, winCode(0.01, true));
-    p.rect(2, 4, 4, 1, 0xffd040, winCode(0.01, true));
+  S.pumpkin = A.shared('pumpkin', 10, 8, (p) => {
+    p.clear();
+    p.ellipse(5, 5, 4.9, 3.2, 0xe87a1a);
+    p.ellipse(5, 5, 3, 2.8, 0xf08a22);
+    p.vline(3, 3, 4, 0xd06810); p.vline(7, 3, 4, 0xd06810);
+    p.rect(4, 0, 2, 2, 0x3f8a35);
+    const g = winCode(0.01, true);
+    p.set(3, 4, 0xffd040, g); p.set(6, 4, 0xffd040, g);
+    p.hline(3, 6, 4, 0xffd040, g);
   });
-  S.pumpkinTop = A.shared('pumpkin_t', 8, 8, (p) => { p.rect(0, 0, 8, 8, 0xf08a22); p.set(3, 3, 0x3f8a35); p.set(4, 4, 0x3f8a35); });
-  S.trashCan = A.shared('trash', 12, 10, (p) => {
-    for (let y = 0; y < 10; y++) for (let x = 0; x < 12; x++) p.set(x, y, x % 3 === 0 ? 0x3e5040 : 0x56705a);
-    p.rect(0, 0, 12, 1, 0x7a947e);
+  S.pumpkinTop = A.shared('pumpkin_t', 10, 7, (p) => { p.ellipse(5, 3.5, 4.8, 3.4, 0xf08a22); p.rect(4, 3, 2, 2, 0x3f8a35); });
+  S.trashCan = A.shared('trash', 24, 20, (p) => {
+    for (let y = 0; y < 20; y++) for (let x = 0; x < 24; x++) p.set(x, y, x % 6 === 0 ? 0x3e5040 : x % 6 === 1 ? 0x6a8a6e : 0x56705a);
+    p.rect(0, 0, 24, 2, 0x7a947e);
+    p.hline(0, 9, 24, 0x3e5040);
   });
-  S.trashTop = A.shared('trash_t', 8, 8, (p) => { p.rect(0, 0, 8, 8, 0x4a604c); p.rect(2, 2, 4, 4, 0x2a3a2c); });
+  S.trashTop = A.shared('trash_t', 12, 12, (p) => { p.rect(0, 0, 12, 12, 0x4a604c); p.ellipse(6, 6, 2.5, 2.5, 0x2a3a2c); p.frame(0, 0, 12, 12, 0x6a8a6e); p.hline(3, 2, 6, 0x7a947e); });
   C._shared = S;
   return S;
 }
@@ -218,7 +249,7 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
   const frame = style === 'limestone' ? rng.pick([0x2b2b30, 0x2f4a3a, 0x5c3b2a]) : rng.pick(PAL.frames);
   const corniceC = rng.pick([0x3a2a22, 0x2b2b30, 0x2f4a3a, 0x6a4a3a, 0xe8e2d0, 0x5a1f1f]);
   const doorSide = o.doorSide ?? (rng.chance(0.5) ? 'L' : 'R');
-  const nb = Math.max(2, Math.floor(tw / 16));
+  const nb = Math.max(2, Math.floor(tw / 32));
   const bayW = tw / nb;
   const doorBay = doorSide === 'L' ? 0 : nb - 1;
   const windows = [];
@@ -228,42 +259,48 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
 
   const front = region(C, tw, th, (p) => {
     // wall
-    if (style === 'brownstone') stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 6);
-    else if (style === 'limestone') stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 8, { blocks: 16 });
+    if (style === 'brownstone') stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 12);
+    else if (style === 'limestone') stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 16, { blocks: 32 });
     else if (style === 'painted') smoothFill(p, 0, 0, tw, th, wallPal[0], 3, 0.04);
     else brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
     // garden level rustication
     const gy = Math.round((band + nF * floorH) * T);
-    rustication(p, 0, gy, tw, th - gy, style === 'brick' ? PAL.brownstone[0] : shade(wallPal[0], 0.92), 3);
-    // frieze band
-    corniceBand(p, 0, 0, tw, 8, shade(corniceC, 1.0));
+    rustication(p, 0, gy, tw, th - gy, style === 'brick' ? PAL.brownstone[0] : shade(wallPal[0], 0.92), 6);
+    // frieze band with attic vents
+    corniceBand(p, 0, 0, tw, 16, shade(corniceC, 1.0));
+    // string course above the garden level
+    p.rect(0, gy - 3, tw, 3, trim); p.hline(0, gy - 3, tw, shade(trim, 1.12)); p.hline(0, gy - 1, tw, shade(trim, 0.7));
+    const wallC = wallPal[0];
     // floors (top to bottom)
     for (let f = 0; f < nF; f++) {
       const fy = Math.round((band + f * floorH) * T);
       const parlor = f === nF - 1;
-      const wh = parlor ? 17 : 13;
-      const wy = fy + (parlor ? 4 : 6);
+      const wh = parlor ? 34 : 27;
+      const wy = fy + (parlor ? 8 : 12);
       for (let b = 0; b < nb; b++) {
         const cx = Math.round(bayW * b + bayW / 2);
         if (parlor && b === doorBay) {
           // door with hood
-          const dw = 9, dh = 20;
-          const dx = cx - 4;
-          const dy = fy + 24 - dh;
-          p.rect(dx - 2, dy - 3, dw + 4, 3, trim);
-          p.hline(dx - 2, dy - 1, dw + 4, shade(trim, 0.75));
-          p.rect(dx - 1, dy, 1, dh, shade(trim, 0.9));
-          p.rect(dx + dw, dy, 1, dh, shade(trim, 0.9));
+          const dw = 18, dh = 40;
+          const dx = cx - 9;
+          const dy = fy + 48 - dh;
+          // hood with brackets
+          p.rect(dx - 5, dy - 7, dw + 10, 5, trim);
+          p.hline(dx - 5, dy - 7, dw + 10, shade(trim, 1.15));
+          p.hline(dx - 5, dy - 3, dw + 10, shade(trim, 0.7));
+          p.rect(dx - 4, dy - 2, 3, 4, shade(trim, 0.9)); p.rect(dx + dw + 1, dy - 2, 3, 4, shade(trim, 0.9));
+          p.rect(dx - 2, dy, 2, dh, shade(trim, 0.92));
+          p.rect(dx + dw, dy, 2, dh, shade(trim, 0.85));
           drawDoor(p, dx, dy, dw, dh, { color: rng.pick([0x5c3b2a, 0x2b2b30, 0x7a1f1f, 0x2f4a3a, 0x1f3a5f, 0x8a5a2a]), t: floorT[f] * 0.5, number: o.number, glass: rng.chance(0.3) });
           windows.push({ x: dx, y: dy, w: dw, h: dh, f, door: true });
           continue;
         }
-        const ww = 8;
-        const wx = cx - 4;
+        const ww = 16;
+        const wx = cx - 8;
         const t = floorT[f] * 0.6 + rng.next() * 0.4;
         const det = rng.next();
         drawWindow(p, wx, wy, ww, wh, {
-          frame, lintel: trim, sill: trim, t, keystone: style !== 'painted' && rng.chance(0.4),
+          frame, lintel: trim, sill: trim, t, keystone: style !== 'painted' && rng.chance(0.4), wall: wallC, panes: rng.chance(0.3) ? '6/6' : '2/2',
           curtain: det < 0.35 ? curtainC : null, blinds: det >= 0.35 && det < 0.55,
           plant: det > 0.9 ? 'flower' : det > 0.85, cat: det > 0.975 ? rng.pick([0x1e1e1e, 0xe08a3a, 0xf2efe6]) : null,
         }, rng);
@@ -276,31 +313,34 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
       const cx = Math.round(bayW * b + bayW / 2);
       if (b === doorBay) {
         // under-stoop door
-        p.rect(cx - 4, gy + 6, 8, gH - 6, 0x1e1e22);
-        p.rect(cx - 3, gy + 7, 6, gH - 7, 0x3a2a22);
-        for (let x = cx - 3; x < cx + 3; x += 2) p.vline(x, gy + 7, gH - 7, 0x1e1e22);
+        p.rect(cx - 8, gy + 12, 16, gH - 12, 0x1e1e22);
+        p.rect(cx - 6, gy + 14, 12, gH - 14, 0x3a2a22);
+        for (let x = cx - 6; x < cx + 6; x += 3) p.vline(x, gy + 14, gH - 14, 0x1e1e22);
+        p.hline(cx - 6, gy + 20, 12, 0x1e1e22);
         continue;
       }
-      const wx = cx - 4, wy = gy + 5;
-      drawWindow(p, wx, wy, 8, 10, { frame: 0x2b2b30, t: rng.next(), rail: false }, rng);
-      for (let x = wx; x < wx + 8; x += 2) p.vline(x, wy - 1, 12, 0x161618);
+      const wx = cx - 8, wy = gy + 10;
+      drawWindow(p, wx, wy, 16, 20, { frame: 0x2b2b30, t: rng.next(), rail: false, wall: wallC }, rng);
+      for (let x = wx + 1; x < wx + 16; x += 3) p.vline(x, wy - 2, 24, 0x161618);
+      p.hline(wx, wy + 6, 16, 0x161618); p.hline(wx, wy + 14, 16, 0x161618);
     }
   });
 
   // rear facade
   const back = region(C, tw, th, (p) => {
     brickFill(p, 0, 0, tw, th, style === 'brick' ? wallPal : PAL.brickRed, rng.int(1, 999));
-    p.rect(0, 0, tw, 2, 0x8a8a88);
+    p.rect(0, 0, tw, 4, 0x8a8a88);
+    p.hline(0, 4, tw, 0x5a5a58);
     for (let f = 0; f < nF + 1; f++) {
       const fy = Math.round((band + f * floorH) * T);
       const n = Math.max(2, nb);
       for (let b = 0; b < n; b++) {
         if (f === nF && b === 0) {
-          drawDoor(p, Math.round(bayW / 2) - 4, fy + 4, 8, 16, { color: 0x5c3b2a, transom: false });
+          drawDoor(p, Math.round(bayW / 2) - 8, fy + 8, 16, 32, { color: 0x5c3b2a, transom: false });
           continue;
         }
         const cx = Math.round((tw / n) * b + tw / n / 2);
-        drawWindow(p, cx - 4, fy + 6, 8, 12, { frame: 0xf2efe6, sill: 0x9a9a98, t: rng.next(), curtain: rng.chance(0.25) ? rng.pick(PAL.curtains) : null }, rng);
+        drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 0xf2efe6, sill: 0x9a9a98, t: rng.next(), curtain: rng.chance(0.25) ? rng.pick(PAL.curtains) : null, blinds: rng.chance(0.2) }, rng);
       }
     }
   });
@@ -314,10 +354,10 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
   markHeight(C.world, ...aabb, z0 + H);
 
   // cornice (protruding)
-  const corn = C.atlas.shared('cornice_' + corniceC, 32, 6, (p) => {
-    corniceBand(p, 0, 0, 32, 6, corniceC);
+  const corn = C.atlas.shared('cornice_' + corniceC, 64, 14, (p) => {
+    corniceBand(p, 0, 0, 64, 14, corniceC);
   });
-  const cornTop = C.atlas.shared('cornice_top_' + corniceC, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, shade(corniceC, 1.1), 3, 0.05));
+  const cornTop = C.atlas.shared('cornice_top_' + corniceC, 32, 32, (p) => { smoothFill(p, 0, 0, 32, 32, shade(corniceC, 1.1), 3, 0.05); p.hline(0, 0, 32, shade(corniceC, 1.25)); });
   fr.box(mb, a0 - 0.0625, a0 + W + 0.0625, sb - 0.25, sb + 0.01, z0 + H - 0.375, z0 + H + 0.0625,
     { front: corn, left: corn, right: corn, top: { t: cornTop, world: true } });
   // parapets on back & sides
@@ -344,9 +384,9 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
     const hR = 0.56;
     const len = Math.hypot(pt_[0] - pb[0], pt_[1] - pb[1]) * T;
     mb.quad([pb[0], pb[1], zb + hR + 0.15], [pt_[0], pt_[1], zt + hR], [pt_[0], pt_[1], zt], [pb[0], pb[1], zb],
-      [[0, 0], [len, 0], [len, 9], [0, 9]], S.railing, [fr.ux, fr.uy, 0], MAT.FLAT);
+      [[0, 0], [len, 0], [len, 18], [0, 18]], S.railing, [fr.ux, fr.uy, 0], MAT.FLAT);
     mb.quad([pb[0], pb[1], zb + hR + 0.15], [pt_[0], pt_[1], zt + hR], [pt_[0], pt_[1], zt], [pb[0], pb[1], zb],
-      [[0, 0], [len, 0], [len, 9], [0, 9]], S.xmasLights, [fr.ux, fr.uy, 0], MAT.FLAT | MAT.NOSHADOW, GRP.XMAS);
+      [[0, 0], [len, 0], [len, 6], [0, 6]], S.xmasLights, [fr.ux, fr.uy, 0], MAT.FLAT | MAT.NOSHADOW, GRP.XMAS);
     // newel post
     fr.box(mb, a - 0.06, a + 0.06, 0.0, 0.12, z0, z0 + 0.25 + 0.75, { front: S.blackIron, left: S.blackIron, right: S.blackIron, top: S.blackIron });
   }
@@ -357,7 +397,7 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
   // trash cans in areaway
   const canA = doorSide === 'L' ? a0 + W - 0.55 : a0 + 0.3;
   if (rng.chance(0.7)) {
-    fr.box(mb, canA, canA + 0.36, 0.3, 0.66, z0, z0 + 0.6, { front: S.trashCan, left: S.trashCan, right: S.trashCan, top: S.trashTop });
+    fr.box(mb, canA, canA + 0.375, 0.3, 0.675, z0, z0 + 0.625, { front: S.trashCan, left: S.trashCan, right: S.trashCan, top: S.trashTop });
   }
   // areaway garden
   if (C.ground) {
@@ -373,7 +413,7 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
   for (const w of windows) {
     if (w.door) {
       // wreath
-      fr.facadeQuad(mb, toA(w.x + 0.5), toA(w.x + 8.5), sb - 0.03, toZ(w.y + 14), toZ(w.y + 6), S.wreath, { group: GRP.XMAS });
+      fr.facadeQuad(mb, toA(w.x + 1), toA(w.x + 17), sb - 0.03, toZ(w.y + 30), toZ(w.y + 14), S.wreath, { group: GRP.XMAS });
       continue;
     }
     const r = rng.next();
@@ -382,7 +422,7 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
       const a = toA(w.x + 0.0), zb = toZ(w.y + w.h) + 0.0625;
       fr.box(mb, a, a + 0.5, sb - 0.3, sb, zb, zb + 0.375, { front: S.acUnit, left: S.acUnit, right: S.acUnit, top: S.acTop }, { group: GRP.WARM });
     } else if (w.f === nF - 1 && r < 0.55) {
-      const a = toA(w.x - 1), zb = toZ(w.y + w.h) - 0.05;
+      const a = toA(w.x - 2), zb = toZ(w.y + w.h) - 0.05;
       fr.box(mb, a, a + 0.625, sb - 0.2, sb, zb, zb + 0.25, { front: S.flowerBox, left: S.flowerBox, right: S.flowerBox, top: S.flowerTop }, { group: GRP.SUMMER_OR_SPRING });
     }
   }
@@ -392,7 +432,7 @@ export function rowhouse(C, fr, a0, W, D, o = {}) {
       if (rng.chance(0.4)) continue;
       const d = sb - 0.5 - 0.25 * i - 0.2, zt = z0 + gardenH - 0.25 * i;
       const a = rng.chance(0.5) ? sa0 + 0.12 : sa1 - 0.42;
-      fr.box(mb, a, a + 0.3, d - 0.05, d + 0.15, zt, zt + 0.25, { front: S.pumpkin, left: S.pumpkin, right: S.pumpkin, top: S.pumpkinTop }, { group: GRP.AUTUMN });
+      fr.box(mb, a, a + 0.3125, d - 0.05, d + 0.17, zt, zt + 0.25, { front: S.pumpkin, left: S.pumpkin, right: S.pumpkin, top: S.pumpkinTop }, { group: GRP.AUTUMN });
     }
   }
 
@@ -433,75 +473,77 @@ export function walkup(C, fr, a0, W, D, o = {}) {
   const trim = rng.pick([0xe2d6ba, 0xd8cdb2, 0xf0e6d0, 0xb8b2a4]);
   const frame = rng.pick([0xf2efe6, 0xf2efe6, 0x2b2b30, 0x2f4a3a, 0x7a1f1f]);
   const corniceC = rng.pick([0x2b2b30, 0x3a2a22, 0x2f4a3a, 0xe8e2d0, 0x6a6a68, 0x5a1f1f]);
-  const nb = Math.max(2, Math.round(tw / 18));
+  const nb = Math.max(2, Math.round(tw / 36));
   const bayW = tw / nb;
   const shop = o.shop === undefined ? rng.pick(['bodega', 'pizza', 'laundry', 'coffee', 'bar', 'books', 'flowers', 'chinese', 'nails', 'hardware', 'bagels', 'diner']) : o.shop;
   const esc = o.fireEscape ?? (nb >= 3 && rng.chance(0.85));
   const escBays = esc ? (nb >= 4 ? [1, 2] : [0, 1]).map((b) => Math.min(b, nb - 1)) : [];
   const windows = [];
   let shopInfo = null;
-  const shopTW = shop ? (o.resDoor === false ? tw : tw - 12) : 0;
-  const resDoorX = o.resDoorLeft ? 1 : tw - 11;
+  const shopTW = shop ? (o.resDoor === false ? tw : tw - 24) : 0;
+  const resDoorX = o.resDoorLeft ? 2 : tw - 22;
   const floorT = [];
   for (let f = 0; f < nF; f++) floorT.push(rng.next());
 
   const paintFacade = (p, wide, withShop, sideMode) => {
     brickFill(p, 0, 0, wide, th, wallPal, rng.int(1, 999));
     // cornice band
-    p.rect(0, 0, wide, 4, shade(corniceC, 0.9));
-    corniceBand(p, 0, 4, wide, 8, corniceC);
+    p.rect(0, 0, wide, 8, shade(corniceC, 0.9));
+    corniceBand(p, 0, 8, wide, 16, corniceC);
     // floors
-    const n = Math.max(2, Math.round(wide / 18));
+    const n = Math.max(2, Math.round(wide / 36));
     const bw = wide / n;
     for (let f = 0; f < nF; f++) {
       const fy = Math.round((band + f * fH) * T);
       // belt course
-      if (f === nF - 1) p.rect(0, fy + 23, wide, 1, trim);
+      if (f === nF - 1) { p.rect(0, fy + 45, wide, 3, trim); p.hline(0, fy + 45, wide, shade(trim, 1.12)); p.hline(0, fy + 47, wide, shade(trim, 0.7)); }
       for (let b = 0; b < n; b++) {
         const cx = Math.round(bw * b + bw / 2);
         const t = floorT[f] * 0.5 + rng.next() * 0.5;
         const det = rng.next();
-        drawWindow(p, cx - 4, fy + 6, 8, 14, {
+        drawWindow(p, cx - 8, fy + 12, 16, 28, {
           frame, lintel: trim, sill: trim, t, curtain: det < 0.3 ? rng.pick(PAL.curtains) : null, blinds: det > 0.3 && det < 0.5,
-          plant: det > 0.92, cat: det > 0.985 ? 0x1e1e1e : null, keystone: rng.chance(0.2),
+          plant: det > 0.92, cat: det > 0.985 ? 0x1e1e1e : null, keystone: rng.chance(0.2), wall: wallPal[0], panes: rng.chance(0.25) ? '1/1' : '2/2',
         }, rng);
-        if (!sideMode) windows.push({ x: cx - 4, y: fy + 6, w: 8, h: 14, f, b });
+        if (!sideMode) windows.push({ x: cx - 8, y: fy + 12, w: 16, h: 28, f, b });
       }
     }
     // ground floor
     const gy = Math.round((band + nF * fH) * T);
     const gh = th - gy;
     if (withShop && shop) {
-      const sx = o.resDoorLeft ? 12 : 0;
+      const sx = o.resDoorLeft ? 24 : 0;
       shopInfo = drawShopfront(p, sx, gy, shopTW, gh, shop, rng, { doorLeft: rng.chance(0.5) });
       if (o.resDoor !== false) {
         // residential entrance
         const rx = resDoorX;
-        p.rect(rx - 1, gy, 12, gh, trim);
-        drawDoor(p, rx + 1, gy + 4, 8, gh - 4, { color: rng.pick([0x2b2b30, 0x5c3b2a, 0x7a1f1f]), glass: true, number: o.number });
+        p.rect(rx - 2, gy, 24, gh, trim);
+        p.hline(rx - 2, gy, 24, shade(trim, 1.15));
+        drawDoor(p, rx + 2, gy + 10, 18, gh - 10, { color: rng.pick([0x2b2b30, 0x5c3b2a, 0x7a1f1f]), glass: true, number: o.number });
+        for (const by of [gy + 6]) p.rect(rx + 4, by - 3, 14, 2, 0xc8a050);
       }
     } else {
       // residential ground floor
-      p.rect(0, gy, wide, 1, trim);
+      p.rect(0, gy, wide, 3, trim);
       for (let b = 0; b < n; b++) {
         const cx = Math.round(bw * b + bw / 2);
         if (!sideMode && b === Math.floor(n / 2)) {
-          p.rect(cx - 6, gy + 1, 12, gh - 1, trim);
-          drawDoor(p, cx - 4, gy + 6, 8, gh - 6, { color: 0x2b2b30, glass: true, number: o.number });
-        } else drawWindow(p, cx - 4, gy + 6, 8, 14, { frame, sill: trim, t: rng.next() }, rng);
+          p.rect(cx - 12, gy + 3, 24, gh - 3, trim);
+          drawDoor(p, cx - 9, gy + 14, 18, gh - 14, { color: 0x2b2b30, glass: true, number: o.number });
+        } else drawWindow(p, cx - 8, gy + 12, 16, 28, { frame, sill: trim, t: rng.next(), wall: wallPal[0] }, rng);
       }
     }
     // ghost sign on side walls
     if (sideMode && rng.chance(0.55)) {
       const txt = rng.pick(['ROOMS', 'SODA 5C', 'PIANOS', 'COAL & ICE', 'LOFTS', 'GARAGE', 'HATS', 'BAKERY', 'TAILOR', 'FURS']);
-      const sw = textWidth(txt, 2) + 8;
-      if (sw < wide - 4) {
-        const sx = Math.floor((wide - sw) / 2), sy = 14;
+      const sw = textWidth(txt, 2, true) + 16;
+      if (sw < wide - 8) {
+        const sx = Math.floor((wide - sw) / 2), sy = 30;
         const col = rng.pick([0xf2efe6, 0xf2c230, 0x5aa0d8]);
-        for (let yy = 0; yy < 18; yy++) for (let xx = 0; xx < sw; xx++) p.blend(sx + xx, sy + yy, 0x2a2420, 0.55);
-        const q = p.sub(sx, sy, sw, 18);
-        q.text(4, 4, txt, col, 255, 2);
-        for (let yy = 0; yy < 18; yy++) for (let xx = 0; xx < sw; xx++) if (hash2i(xx + sx, yy + sy, 3) < 0.3) p.blend(sx + xx, sy + yy, wallPal[0], 0.5);
+        for (let yy = 0; yy < 26; yy++) for (let xx = 0; xx < sw; xx++) p.blend(sx + xx, sy + yy, 0x2a2420, 0.55);
+        const q = p.sub(sx, sy, sw, 26);
+        q.text7(8, 6, txt, col, 255, 2);
+        for (let yy = 0; yy < 26; yy++) for (let xx = 0; xx < sw; xx++) if (hash2i(xx + sx, yy + sy, 3) < 0.3) p.blend(sx + xx, sy + yy, wallPal[0], 0.5);
       }
     }
   };
@@ -515,7 +557,7 @@ export function walkup(C, fr, a0, W, D, o = {}) {
       const fy = Math.round((band + f * fH) * T);
       for (let b = 0; b < nb; b++) {
         const cx = Math.round(bayW * b + bayW / 2);
-        drawWindow(p, cx - 4, fy + 6, 8, 12, { frame: 0xf2efe6, sill: 0x9a9a98, t: rng.next() }, rng);
+        drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 0xf2efe6, sill: 0x9a9a98, t: rng.next() }, rng);
       }
     }
   });
@@ -531,11 +573,11 @@ export function walkup(C, fr, a0, W, D, o = {}) {
   const toA = (tx) => a0 + tx / T;
 
   // big sheet-metal cornice
-  const corn = C.atlas.shared('wcornice_' + corniceC, 32, 10, (p) => {
-    corniceBand(p, 0, 0, 32, 10, corniceC);
-    for (let x = 1; x < 32; x += 8) { p.rect(x, 2, 2, 7, shade(corniceC, 0.75)); p.rect(x, 8, 3, 1, shade(corniceC, 0.6)); }
+  const corn = C.atlas.shared('wcornice_' + corniceC, 64, 22, (p) => {
+    corniceBand(p, 0, 0, 64, 22, corniceC);
+    for (let x = 2; x < 64; x += 16) { p.rect(x, 5, 4, 14, shade(corniceC, 0.75)); p.rect(x, 17, 6, 2, shade(corniceC, 0.6)); p.vline(x, 5, 14, shade(corniceC, 1.15)); }
   });
-  const cornTop = C.atlas.shared('cornice_top_' + corniceC, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, shade(corniceC, 1.1), 3, 0.05));
+  const cornTop = C.atlas.shared('cornice_top_' + corniceC, 32, 32, (p) => { smoothFill(p, 0, 0, 32, 32, shade(corniceC, 1.1), 3, 0.05); p.hline(0, 0, 32, shade(corniceC, 1.25)); });
   const cornA0 = a0 - (o.cornerSide === 'L' ? 0.3 : 0.0625), cornA1 = a0 + W + (o.cornerSide === 'R' ? 0.3 : 0.0625);
   fr.box(mb, cornA0, cornA1, -0.3, 0.02, zTop - 0.625, zTop + 0.0625, { front: corn, left: corn, right: corn, top: { t: cornTop, world: true } });
   if (o.cornerSide) {
@@ -548,16 +590,18 @@ export function walkup(C, fr, a0, W, D, o = {}) {
 
   // storefront awning + night gate
   if (shop && shopInfo) {
-    const sx0 = o.resDoorLeft ? 12 : 0;
+    const sx0 = o.resDoorLeft ? 24 : 0;
     const aA0 = toA(sx0 + 0.5), aA1 = toA(sx0 + shopTW - 0.5);
     const zA = z0 + gH - 0.375;
     const awnC = shopInfo.color;
     const striped = rng.chance(0.4);
-    const awTex = C.atlas.shared(`awn_${awnC}_${striped}`, 32, 12, (p) => awningTex(p, 32, 12, awnC, striped, null, rng));
+    const awTex = C.atlas.shared(`awn_${awnC}_${striped}`, 64, 24, (p) => awningTex(p, 64, 24, awnC, striped, null, rng));
     const valW = Math.round((aA1 - aA0) * T);
-    const valance = region(C, valW, 4, (p) => {
-      awningTex(p, valW, 4, awnC, striped, null, rng);
-      p.rect(0, 3, valW, 1, shade(awnC, 0.7));
+    const valance = region(C, valW, 8, (p) => {
+      awningTex(p, valW, 8, awnC, striped, null, rng);
+      for (let x = 0; x < valW; x++) if (x % 8 === 0 || x % 8 === 7) { p.setA(x, 7, 0); p.setA(x, 6, x % 8 === 0 ? 0 : 255); }
+      p.hline(0, 0, valW, shade(awnC, 1.2));
+      if (shopInfo.name && textWidth(shopInfo.name, 1, true) < valW - 8) p.text7(Math.floor((valW - textWidth(shopInfo.name, 1, true)) / 2), 0, shopInfo.name, striped ? 0x1b1b1b : 0xffffff);
     });
     if (rng.chance(0.8)) {
       const p0 = fr.pt(aA0, 0), p1 = fr.pt(aA1, 0), q0 = fr.pt(aA0, -1.0), q1 = fr.pt(aA1, -1.0);
@@ -572,12 +616,12 @@ export function walkup(C, fr, a0, W, D, o = {}) {
     const lp = fr.pt(toA(sx0 + shopTW / 2), -0.9);
     C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 2.2, color: [1.0, 0.85, 0.6], k: 0.55, kind: 'shop', group: GRP.DAY });
     // blade sign
-    if (rng.chance(0.45)) bladeSign(C, fr, toA(sx0 + 2), zA + 0.2, shopInfo.name, rng);
+    if (rng.chance(0.45)) bladeSign(C, fr, toA(sx0 + 4), zA + 0.2, shopInfo.name, rng);
   }
   // fire escape
   if (esc) {
-    const ex0 = toA(Math.round(bayW * escBays[0] + bayW / 2) - 9);
-    const ex1 = toA(Math.round(bayW * escBays[escBays.length - 1] + bayW / 2) + 9);
+    const ex0 = toA(Math.round(bayW * escBays[0] + bayW / 2) - 18);
+    const ex1 = toA(Math.round(bayW * escBays[escBays.length - 1] + bayW / 2) + 18);
     fireEscape(C, fr, ex0, ex1, 0, z0 + gH, fH, nF);
   }
   // seasonal: AC units in non-escape windows, xmas lights under cornice
@@ -595,7 +639,7 @@ export function walkup(C, fr, a0, W, D, o = {}) {
   roofClutter(C, fr, roof, { waterTower: o.waterTower ?? rng.chance(0.45), billboard: o.billboard });
 
   // door (residential)
-  const rdA = o.resDoorLeft ? toA(6) : toA(resDoorX + 5);
+  const rdA = o.resDoorLeft ? toA(12) : toA(resDoorX + 10);
   const st = fr.pt(shop ? rdA : a0 + W / 2, -0.7), dp = fr.pt(shop ? rdA : a0 + W / 2, 0.2);
   C.world.doors.push({ x: st[0], y: st[1], sx: st[0], sy: st[1], dx: dp[0], dy: dp[1], dz: z0, kind: 'home', n: fr.n });
   return { H: zTop };
@@ -608,13 +652,14 @@ function ptObj(p) {
 // Blade sign perpendicular to the facade
 export function bladeSign(C, fr, a, z, text, rng) {
   const word = text.split(' ')[0].slice(0, 7);
-  const hh = word.length * 6 + 4;
+  const hh = word.length * 10 + 8;
   const bg = rng.pick([0x1b1b1b, 0xc8302c, 0x1f4f9a, 0x2f4a3a]);
   const fg = rng.pick([0xff4f6a, 0x4fd2ff, 0xffd84f, 0xffffff]);
-  const tex = region(C, 12, hh, (p) => {
-    p.rect(0, 0, 12, hh, bg);
-    p.frame(0, 0, 12, hh, shade(bg, 1.6));
-    for (let i = 0; i < word.length; i++) p.text(4, 2 + i * 6, word[i], fg, winCode(0.02, true));
+  const tex = region(C, 24, hh, (p) => {
+    p.rect(0, 0, 24, hh, bg);
+    p.frame(0, 0, 24, hh, shade(bg, 1.6));
+    p.frame(2, 2, 20, hh - 4, fg, winCode(0.02, true));
+    for (let i = 0; i < word.length; i++) p.text7(10, 5 + i * 10, word[i], fg, winCode(0.02, true));
   });
   const H = hh / T;
   fr.sideQuad(C.mb, a, -0.2, -0.95, z, z + H, tex, { mat: MAT.NOSHADOW });
@@ -648,7 +693,7 @@ export function fireEscape(C, fr, ea0, ea1, dFace, zFirst, fH, nF) {
       const sl = Math.hypot(len, fH) * T;
       const th = 0.25;
       mb.quad([p0[0], p0[1], zf + th], [p1[0], p1[1], zf + fH + th - 0.06], [p1[0], p1[1], zf + fH - 0.06], [p0[0], p0[1], zf],
-        [[0, 0], [sl, 0], [sl, 4], [0, 4]], S.fstair, [fr.nx, fr.ny, 0], MAT.FLAT);
+        [[0, 0], [sl, 0], [sl, 8], [0, 8]], S.fstair, [fr.nx, fr.ny, 0], MAT.FLAT);
     }
   }
   // drop ladder
@@ -686,15 +731,17 @@ export function roofClutter(C, fr, roof, o = {}) {
 
 export function bulkhead(C, fr, a0, a1, d0, d1, z, h) {
   const S = sharedTex(C);
-  const tex = C.atlas.shared('bulk', 32, 20, (p) => {
-    brickFill(p, 0, 0, 32, 20, PAL.brickBrown, 31);
-    p.rect(0, 0, 32, 2, 0x8a8a88);
+  const tex = C.atlas.shared('bulk', 64, 40, (p) => {
+    brickFill(p, 0, 0, 64, 40, PAL.brickBrown, 31);
+    p.rect(0, 0, 64, 4, 0x8a8a88); p.hline(0, 4, 64, 0x5a5a58);
   });
-  const doorT = C.atlas.shared('bulk_door', 24, 20, (p) => {
-    brickFill(p, 0, 0, 24, 20, PAL.brickBrown, 31);
-    p.rect(0, 0, 24, 2, 0x8a8a88);
-    p.rect(8, 6, 8, 14, 0x5a5d63);
-    p.frame(8, 6, 8, 14, 0x3a3d43);
+  const doorT = C.atlas.shared('bulk_door', 48, 40, (p) => {
+    brickFill(p, 0, 0, 48, 40, PAL.brickBrown, 31);
+    p.rect(0, 0, 48, 4, 0x8a8a88); p.hline(0, 4, 48, 0x5a5a58);
+    p.rect(16, 12, 16, 28, 0x5a5d63);
+    p.frame(16, 12, 16, 28, 0x3a3d43);
+    for (let y = 16; y < 38; y += 4) p.hline(18, y, 12, 0x6a6d73);
+    p.rect(28, 26, 2, 2, 0xc8c8c4);
   });
   fr.box(C.mb, a0, a1, d0, d1, z, z + h, { front: doorT, back: tex, left: tex, right: tex, top: { t: S.roofTar, world: true } });
   markHeight(C.world, ...fr.aabb(a0, a1, d0, d1), z + h);
@@ -719,17 +766,21 @@ export function waterTower(C, x, y, z, r = 0.95) {
   // finial
   mb.solid(x - 0.04, y - 0.04, z + legH + tankH + 0.8, x + 0.04, y + 0.04, z + legH + tankH + 1.05, iron, iron);
   // ladder
-  mb.vquad(x - 0.15, y + r + 0.02, x + 0.15, y + r + 0.02, z, z + legH + tankH, S.ladder);
+  mb.vquad(x - 0.1875, y + r + 0.02, x + 0.1875, y + r + 0.02, z, z + legH + tankH, S.ladder);
   markHeight(C.world, x - r, y - r, x + r, y + r, z + legH + tankH + 0.9);
   C.world.perches.push({ x, y, z: z + legH + tankH + 0.85 });
 }
 
 function flagTank(C) {
-  return C.atlas.shared('tank_flag', 64, 30, (p) => {
-    for (let y = 0; y < 30; y++) for (let x = 0; x < 64; x++) p.set(x, y, Math.floor(y / 3) % 2 ? 0xf2efe6 : 0xc8302c);
-    p.rect(0, 0, 26, 15, 0x1f3a7a);
-    for (let y = 2; y < 14; y += 3) for (let x = 2; x < 25; x += 4) p.set(x + (y % 2) * 2, y, 0xffffff);
-    for (let x = 1; x < 64; x += 2) p.set(x, 29, 0x3a3a3e);
+  return C.atlas.shared('tank_flag', 128, 61, (p) => {
+    for (let y = 0; y < 61; y++) for (let x = 0; x < 128; x++) {
+      let c = Math.floor(y / 5) % 2 ? 0xf2efe6 : 0xc8302c;
+      if (x % 4 === 3) c = shade(c, 0.88);
+      p.set(x, y, c);
+    }
+    p.rect(0, 0, 52, 30, 0x1f3a7a);
+    for (let y = 3; y < 28; y += 5) for (let x = 3; x < 50; x += 8) { const sx = x + (Math.floor(y / 5) % 2) * 4; p.set(sx, y, 0xffffff); p.set(sx - 1, y + 1, 0xffffff); p.set(sx + 1, y + 1, 0xffffff); p.set(sx, y + 2, 0xffffff); }
+    for (let x = 1; x < 128; x += 2) p.set(x, 60, 0x3a3a3e);
   });
 }
 
@@ -776,8 +827,8 @@ export function billboard(C, fr, a0, a1, d, z, kind) {
   const W = a1 - a0, H = 1.75, legH = 1.0;
   const tw = Math.round(W * T), th = Math.round(H * T);
   const art = region(C, tw, th, (p) => billboardArt(p, tw, th, kind, C.rng));
-  const backT = C.atlas.shared('bb_back', 16, 16, (p) => {
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, x % 4 === 0 || y % 8 === 0 ? 0x4a4c52 : 0x6a6c72);
+  const backT = C.atlas.shared('bb_back', 32, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 || y % 16 === 0 ? 0x4a4c52 : (x + y) % 16 === 0 ? 0x5a5c62 : 0x6a6c72);
   });
   // legs
   for (const a of [a0 + 0.4, a1 - 0.4]) {

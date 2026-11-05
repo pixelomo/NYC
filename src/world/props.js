@@ -11,7 +11,7 @@ export function propTex(C) {
   if (C._props) return C._props;
   const A = C.atlas;
   const P = {};
-  const solid = (name, c, amt = 0.04) => A.shared(name, 8, 8, (p) => smoothFill(p, 0, 0, 8, 8, c, 5, amt));
+  const solid = (name, c, amt = 0.04) => A.shared(name, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, c, 5, amt));
   P.pole = solid('pole', 0x5d6a62);
   P.poleDark = solid('pole_d', 0x2c3330);
   P.black = solid('black', 0x1e1e22);
@@ -21,111 +21,202 @@ export function propTex(C) {
   P.green = solid('green', 0x2f7a3a);
   P.orange = solid('orange', 0xe8741a);
   P.silver = solid('silver', 0xb8bcc2);
-  P.wood = A.shared('bench_wood', 16, 4, (p) => {
-    for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) p.set(x, y, y === 1 || y === 3 ? 0x6b4428 : 0x9a6a3e);
+  P.wood = A.shared('bench_wood', 32, 8, (p) => {
+    for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) {
+      const r = y % 4;
+      let c = r === 3 ? 0x4a2e1a : r === 0 ? 0xb07a48 : 0x9a6a3e;
+      if (r !== 3 && hash2i(x >> 2, y >> 2, 5) > 0.7) c = shade(c, 0.92);
+      p.set(x, y, c);
+    }
   });
-  P.lampHead = A.shared('lamp_head', 8, 4, (p) => { p.rect(0, 0, 8, 4, 0x4a524e); p.rect(1, 3, 6, 1, 0xfff0c0, winCode(0.32, true)); });
-  P.lantern = A.shared('lantern', 6, 8, (p) => {
-    p.rect(0, 0, 6, 8, 0x1e1e22);
-    p.rect(1, 1, 4, 6, 0xffe2a0, winCode(0.32, true));
-    p.vline(3, 1, 6, 0x1e1e22);
+  P.lampHead = A.shared('lamp_head', 16, 6, (p) => {
+    p.rect(0, 0, 16, 6, 0x4a524e);
+    p.hline(0, 0, 16, 0x6a746e);
+    p.rect(1, 4, 14, 2, 0xfff0c0, winCode(0.32, true));
   });
-  P.globe = A.shared('globe', 4, 4, (p) => { p.rect(0, 0, 4, 4, 0x3fbf5a, winCode(0.0, true)); p.set(0, 0, 0x2a8a3a, winCode(0.0, true)); });
-  P.sigHead = A.shared('sig_head', 4, 12, (p) => {
-    p.rect(0, 0, 4, 12, 0x2a2a26);
-    p.frame(0, 0, 4, 12, 0xc8a228);
-    for (let i = 0; i < 3; i++) p.rect(1, 1 + i * 4, 2, 2, 0x111111);
+  P.lantern = A.shared('lantern', 11, 14, (p) => {
+    p.rect(0, 0, 11, 14, 0x1e1e22);
+    p.hline(1, 0, 9, 0x3a3a40);
+    p.rect(2, 2, 7, 11, 0xffe2a0, winCode(0.32, true));
+    p.rect(3, 3, 2, 4, 0xfff4d0, winCode(0.32, true));
+    p.vline(5, 2, 11, 0x1e1e22);
   });
-  P.pedHead = A.shared('ped_head', 4, 6, (p) => { p.rect(0, 0, 4, 6, 0x2a2a26); p.frame(0, 0, 4, 6, 0xc8a228); });
-  P.streetSign = A.shared('st_sign', 16, 3, (p) => { p.rect(0, 0, 16, 3, 0x1f7a3a); p.hline(1, 1, 14, 0xe8f0e8); p.set(3, 1, 0x1f7a3a); p.set(8, 1, 0x1f7a3a); });
-  P.hydrant = A.shared('hydrant', 6, 8, (p) => {
-    p.rect(0, 0, 6, 8, 0xc8302c);
-    p.rect(0, 0, 6, 2, 0xd8d8d0);
-    p.rect(0, 4, 6, 1, 0xa02020);
-    p.set(1, 1, 0xffffff);
+  P.globe = A.shared('globe', 8, 8, (p) => {
+    const t = winCode(0.0, true);
+    p.rect(0, 0, 8, 8, 0x3fbf5a, t);
+    p.rect(1, 1, 3, 2, 0x8af0a0, t);
+    p.hline(0, 7, 8, 0x2a8a3a, t);
+    p.vline(7, 0, 8, 0x2a8a3a, t);
   });
-  P.hydrantTop = A.shared('hydrant_t', 4, 4, (p) => { p.rect(0, 0, 4, 4, 0xd8d8d0); p.set(1, 1, 0xa8a8a0); });
-  P.mailbox = A.shared('mailbox', 10, 14, (p) => {
-    p.rect(0, 0, 10, 14, 0x1f4fa0);
-    p.rect(0, 0, 10, 2, 0x2a5fb8);
-    p.rect(2, 4, 6, 2, 0x163a78);
-    p.text(1, 7, 'US', 0xffffff);
-    p.rect(1, 12, 2, 2, 0x163a78); p.rect(7, 12, 2, 2, 0x163a78);
+  P.sigHead = A.shared('sig_head', 8, 24, (p) => {
+    p.rect(0, 0, 8, 24, 0x2a2a26);
+    p.frame(0, 0, 8, 24, 0xc8a228);
+    for (let i = 0; i < 3; i++) {
+      p.ellipse(3.5, 4.5 + i * 8, 2.4, 2.4, 0x111111);
+      p.hline(1, 1 + i * 8, 6, 0x4a4a42); // visor
+    }
   });
-  P.newsBoxes = ['news_r', 'news_y', 'news_b', 'news_g'].map((k, i) => A.shared(k, 6, 9, (p) => {
+  P.pedHead = A.shared('ped_head', 7, 12, (p) => {
+    p.rect(0, 0, 7, 12, 0x2a2a26);
+    p.frame(0, 0, 7, 12, 0xc8a228);
+    p.rect(1, 1, 5, 10, 0x111111);
+    p.hline(1, 6, 5, 0x2a2a26);
+  });
+  P.streetSign = A.shared('st_sign', 32, 5, (p) => {
+    p.rect(0, 0, 32, 5, 0x1f7a3a);
+    p.hline(0, 0, 32, 0x2f9a4a);
+    p.hline(0, 4, 32, 0x175a2a);
+    p.rect(2, 2, 28, 1, 0xe8f0e8);
+    for (const x of [6, 12, 17, 23]) p.set(x, 2, 0x1f7a3a);
+  });
+  P.hydrant = A.shared('hydrant', 9, 14, (p) => {
+    p.rect(0, 0, 9, 14, 0xc8302c);
+    p.rect(1, 0, 7, 3, 0xd8d8d0);
+    p.hline(1, 0, 7, 0xf2f2ec);
+    p.hline(0, 3, 9, 0xa02020);
+    p.vline(0, 4, 8, 0xd84a3c);
+    p.vline(8, 4, 8, 0x9a2020);
+    p.rect(0, 7, 9, 2, 0xa02020);
+    p.rect(3, 6, 3, 3, 0xd8d8d0);
+    p.set(4, 7, 0x9a9a92);
+    p.hline(0, 12, 9, 0x8a1a1a);
+    p.hline(0, 13, 9, 0x6a1414);
+    p.set(2, 1, 0xffffff);
+  });
+  P.hydrantTop = A.shared('hydrant_t', 9, 9, (p) => { p.rect(0, 0, 9, 9, 0xd8d8d0); p.ellipse(4, 4, 2.5, 2.5, 0xa8a8a0); p.set(4, 4, 0x6a6a64); p.set(2, 2, 0xffffff); });
+  P.mailbox = A.shared('mailbox', 19, 27, (p) => {
+    p.rect(0, 0, 19, 27, 0x1f4fa0);
+    p.rect(0, 0, 19, 4, 0x2a5fb8);
+    p.hline(0, 0, 19, 0x4a7fd0);
+    p.rect(3, 7, 13, 3, 0x163a78);
+    p.hline(3, 7, 13, 0x5a8ad8);
+    p.text7(4, 12, 'US', 0xffffff);
+    p.text(2, 20, 'MAIL', 0xd8e4f8);
+    p.vline(18, 4, 23, 0x173f86);
+    p.rect(0, 25, 19, 2, 0x1a1a1e);
+    p.rect(1, 25, 3, 2, 0x163a78); p.rect(15, 25, 3, 2, 0x163a78);
+  });
+  P.newsBoxes = ['news_r', 'news_y', 'news_b', 'news_g'].map((k, i) => A.shared(k, 11, 18, (p) => {
     const c = [0xc8302c, 0xe8c030, 0x2a5fb8, 0x2f8a46][i];
-    p.rect(0, 0, 6, 9, c);
-    p.rect(1, 1, 4, 3, 0xd8e0e8);
-    p.rect(1, 6, 4, 1, shade(c, 0.6));
+    p.rect(0, 0, 11, 18, c);
+    p.hline(0, 0, 11, shade(c, 1.25));
+    p.rect(2, 2, 7, 6, 0xd8e0e8);
+    p.hline(3, 3, 5, 0x4a4a4a); p.hline(3, 5, 4, 0x8a8a8a); p.hline(3, 6, 5, 0x9a9a9a);
+    p.rect(3, 10, 5, 2, shade(c, 0.6));
+    p.rect(0, 14, 11, 4, shade(c, 0.75));
+    p.vline(10, 0, 18, shade(c, 0.8));
   }));
-  P.basket = A.shared('basket', 8, 10, (p) => {
+  P.basket = A.shared('basket', 13, 19, (p) => {
     p.clear();
-    for (let y = 0; y < 10; y++) for (let x = 0; x < 8; x++) if ((x + y) % 2 === 0 || y === 0 || y === 9) p.set(x, y, 0x2f6a3a);
+    for (let y = 0; y < 19; y++) for (let x = 0; x < 13; x++)
+      if ((x + y) % 3 === 0 || (x - y + 99) % 3 === 0 || y <= 1 || y >= 17) p.set(x, y, y <= 1 ? 0x3f7a4a : 0x2f6a3a);
   });
-  P.basketTop = A.shared('basket_t', 8, 8, (p) => { p.rect(0, 0, 8, 8, 0x2f6a3a); p.rect(1, 1, 6, 6, 0x3a3a36); p.set(3, 3, 0xe8e8e0); p.set(5, 2, 0xc8302c); });
-  P.chain = A.shared('chainlink', 32, 40, (p) => chainLinkTex(p, 32, 40));
-  P.chainLow = A.shared('chainlink_low', 32, 12, (p) => chainLinkTex(p, 32, 12));
-  P.backboard = A.shared('backboard', 28, 17, (p) => {
-    p.rect(0, 0, 28, 17, 0xf2f2f0);
-    p.frame(0, 0, 28, 17, 0xc8302c);
-    p.frame(9, 7, 10, 8, 0xc8302c);
+  P.basketTop = A.shared('basket_t', 13, 13, (p) => {
+    p.rect(0, 0, 13, 13, 0x2f6a3a);
+    p.rect(2, 2, 9, 9, 0x3a3a36);
+    p.rect(4, 4, 2, 2, 0xe8e8e0); p.rect(7, 3, 2, 3, 0xc8302c); p.set(5, 8, 0xf2c230); p.rect(7, 7, 3, 2, 0xd8d0c0);
   });
-  P.net = A.shared('net', 8, 6, (p) => {
+  P.chain = A.shared('chainlink', 48, 80, (p) => chainLinkTex(p, 48, 80));
+  P.chainLow = A.shared('chainlink_low', 48, 36, (p) => chainLinkTex(p, 48, 36));
+  P.backboard = A.shared('backboard', 58, 34, (p) => {
+    p.rect(0, 0, 58, 34, 0xf2f2f0);
+    p.frame(0, 0, 58, 34, 0xc8302c); p.frame(1, 1, 56, 32, 0xc8302c);
+    p.frame(19, 15, 20, 15, 0xc8302c); p.frame(20, 16, 18, 13, 0xc8302c);
+    p.hline(2, 2, 54, 0xffffff);
+    for (const [bx, by] of [[4, 4], [53, 4], [4, 29], [53, 29]]) p.set(bx, by, 0x8a8a88);
+  });
+  P.net = A.shared('net', 14, 12, (p) => {
     p.clear();
-    for (let y = 0; y < 6; y++) for (let x = y >> 1; x < 8 - (y >> 1); x++) if ((x + y) % 2 === 0) p.set(x, y, 0xf2f2f0);
+    for (let y = 0; y < 12; y++) {
+      const inset = Math.floor(y / 4);
+      for (let x = inset; x < 14 - inset; x++) if ((x + y) % 3 === 0 || (x - y + 99) % 3 === 0) p.set(x, y, 0xf2f2f0);
+    }
   });
   P.rim = solid('rim', 0xe8601a, 0.02);
-  P.stack = A.shared('steam_stack', 16, 16, (p) => {
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, Math.floor(y / 4) % 2 ? 0xf2f2ee : 0xf07a1a);
+  P.stack = A.shared('steam_stack', 32, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(Math.floor(y / 8) % 2 ? 0xf2f2ee : 0xf07a1a, 0.94 + hash2i(x, y, 3) * 0.08));
   });
-  P.stackTop = A.shared('steam_stack_t', 8, 8, (p) => { p.rect(0, 0, 8, 8, 0x3a3a3a); p.rect(2, 2, 4, 4, 0x1a1a1a); });
-  P.barrel = A.shared('barrel', 8, 10, (p) => {
-    for (let y = 0; y < 10; y++) p.rect(0, y, 8, 1, y % 4 < 2 ? 0xf07a1a : 0xf2f2ee);
+  P.stackTop = A.shared('steam_stack_t', 16, 16, (p) => { p.rect(0, 0, 16, 16, 0x3a3a3a); p.ellipse(8, 8, 5, 5, 0x1a1a1a); });
+  P.barrel = A.shared('barrel', 16, 20, (p) => {
+    for (let y = 0; y < 20; y++) p.rect(0, y, 16, 1, y % 8 < 4 ? 0xf07a1a : 0xf2f2ee);
+    p.hline(0, 0, 16, 0x2a2a2a);
+    for (let x = 0; x < 16; x += 4) p.set(x, 2, 0xffd0a0);
   });
-  P.cone = A.shared('cone', 8, 8, (p) => {
-    for (let y = 0; y < 8; y++) p.rect(0, y, 8, 1, y === 3 || y === 4 ? 0xf2f2ee : 0xf07a1a);
+  P.cone = A.shared('cone', 16, 14, (p) => {
+    for (let y = 0; y < 14; y++) p.rect(0, y, 16, 1, y >= 5 && y <= 7 ? 0xf2f2ee : 0xf07a1a);
+    p.rect(0, 12, 16, 2, 0x2a2a2a);
   });
-  P.stoneWall = A.shared('parkwall', 32, 12, (p) => {
-    stoneFill(p, 0, 0, 32, 12, [0x8e8a80], 17, 4, { blocks: 8 });
-    p.rect(0, 0, 32, 1, 0xb0aca2);
+  P.stoneWall = A.shared('parkwall', 64, 22, (p) => {
+    stoneFill(p, 0, 0, 64, 22, [0x8e8a80], 17, 8, { blocks: 16 });
+    p.rect(0, 0, 64, 3, 0xb0aca2);
+    p.hline(0, 3, 64, 0x6e6a62);
   });
-  P.stoneWallTop = A.shared('parkwall_t', 16, 16, (p) => stoneFill(p, 0, 0, 16, 16, [0xa8a49a], 18, 0));
+  P.stoneWallTop = A.shared('parkwall_t', 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [0xa8a49a], 18, 0));
   P.concrete = sharedTex(C).concrete;
-  P.glass = A.shared('shelter_glass', 16, 16, (p) => {
+  P.glass = A.shared('shelter_glass', 32, 32, (p) => {
     p.clear();
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if ((x + y) % 7 === 0) p.set(x, y, 0xd8e8f0);
-    p.frame(0, 0, 16, 16, 0x5a6066);
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) if ((x + y) % 14 === 0 || (x + y) % 14 === 1) p.set(x, y, 0xd8e8f0);
+    p.frame(0, 0, 32, 32, 0x5a6066);
+    p.hline(0, 1, 32, 0x7a8086);
   });
-  P.adPanel = A.shared('ad_panel', 16, 28, (p) => {
-    p.rect(0, 0, 16, 28, 0x5a6066);
-    for (let y = 1; y < 27; y++) for (let x = 1; x < 15; x++) p.set(x, y, y < 14 ? 0xff7ae0 : 0x4fd2ff, winCode(0.15, true));
-    p.text(2, 3, 'NEW', 0xffffff, winCode(0.15, true));
-    p.text(2, 16, 'SHOW', 0x1b1b1b, winCode(0.15, true));
+  P.adPanel = A.shared('ad_panel', 29, 58, (p) => {
+    p.rect(0, 0, 29, 58, 0x5a6066);
+    const t = winCode(0.15, true);
+    for (let y = 2; y < 56; y++) for (let x = 2; x < 27; x++) p.set(x, y, y < 30 ? ((x + y) % 9 === 0 ? 0xff9ae8 : 0xff7ae0) : 0x4fd2ff, t);
+    p.ellipse(14, 12, 5, 6, 0xffe0c8, t);
+    p.rect(9, 6, 10, 3, 0x3a2418, t);
+    p.rect(8, 19, 12, 11, 0x1b1b1b, t);
+    p.text7(4, 34, 'NEW', 0xffffff, t);
+    p.text7(3, 45, 'SHOW', 0x1b1b1b, t);
   });
-  P.kiosk = A.shared('kiosk', 8, 32, (p) => {
-    p.rect(0, 0, 8, 32, 0x2a2e33);
-    p.rect(1, 3, 6, 20, 0x5aa0d8, winCode(0.0, true));
-    p.text(1, 8, 'NY', 0xffffff, winCode(0.0, true));
+  P.kiosk = A.shared('kiosk', 9, 64, (p) => {
+    p.rect(0, 0, 9, 64, 0x2a2e33);
+    p.hline(0, 0, 9, 0x4a4e53);
+    const t = winCode(0.0, true);
+    p.rect(1, 6, 7, 40, 0x5aa0d8, t);
+    p.rect(1, 6, 7, 8, 0x1f4fa0, t);
+    p.text(1, 8, 'NY', 0xffffff, t);
+    p.rect(2, 20, 5, 12, 0xd8e8f0, t);
+    p.rect(3, 50, 3, 2, 0x111111);
   });
-  P.subwayRail = A.shared('sub_rail', 32, 10, (p) => {
+  P.subwayRail = A.shared('sub_rail', 64, 24, (p) => {
     p.clear();
-    p.rect(0, 0, 32, 1, 0x1f5a2a);
-    p.rect(0, 9, 32, 1, 0x1f5a2a);
-    for (let x = 0; x < 32; x += 4) p.rect(x, 0, 1, 10, 0x1f5a2a);
+    p.rect(0, 0, 64, 2, 0x1f5a2a);
+    p.hline(0, 0, 64, 0x3f8a4a);
+    p.rect(0, 21, 64, 2, 0x1f5a2a);
+    for (let x = 0; x < 64; x += 6) p.rect(x, 0, 1, 24, 0x1f5a2a);
+    for (let x = 0; x < 64; x += 32) p.rect(x, 0, 2, 24, 0x174a22);
   });
-  P.subwaySign = A.shared('sub_sign', 24, 7, (p) => {
-    p.rect(0, 0, 24, 7, 0x1b1b1b);
-    p.text(1, 1, 'SUBWAY', 0xffffff, winCode(0.2, true));
+  P.subwaySign = A.shared('sub_sign', 48, 14, (p) => {
+    p.rect(0, 0, 48, 14, 0x1b1b1b);
+    p.hline(0, 0, 48, 0x3a3a3a);
+    p.text7(6, 4, 'SUBWAY', 0xffffff, winCode(0.2, true));
   });
-  P.lineDots = A.shared('sub_dots', 24, 4, (p) => {
-    p.rect(0, 0, 24, 4, 0x1b1b1b);
+  P.lineDots = A.shared('sub_dots', 48, 8, (p) => {
+    p.rect(0, 0, 48, 8, 0x1b1b1b);
     const c = [0xee352e, 0x00933c, 0xb933ad, 0x0039a6, 0xfccc0a];
-    for (let i = 0; i < 5; i++) p.rect(1 + i * 5, 0, 3, 3, c[i], winCode(0.2, true));
+    for (let i = 0; i < 5; i++) p.ellipse(4.5 + i * 9, 3.5, 3, 3, c[i], winCode(0.2, true));
   });
-  P.planter = A.shared('planter', 16, 8, (p) => { smoothFill(p, 0, 0, 16, 8, 0xb4ada0, 7, 0.05); p.rect(0, 0, 16, 1, 0xc8c2b6); });
-  P.soilTop = A.shared('soil_top', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, hash2i(x, y, 3) < 0.5 ? 0x4a7a32 : 0x3a6a2a); });
-  P.scaffold = A.shared('scaffold', 16, 16, (p) => { smoothFill(p, 0, 0, 16, 16, 0x2f7a46, 3, 0.05); p.rect(0, 0, 16, 1, 0x3f9a56); });
-  P.bleacher = A.shared('bleach', 16, 4, (p) => { p.rect(0, 0, 16, 4, 0xb8bcc2); p.rect(0, 0, 16, 1, 0xd8dce2); p.rect(0, 3, 16, 1, 0x8a8e94); });
+  P.planter = A.shared('planter', 32, 16, (p) => {
+    smoothFill(p, 0, 0, 32, 16, 0xb4ada0, 7, 0.05);
+    p.rect(0, 0, 32, 2, 0xc8c2b6);
+    p.hline(0, 2, 32, 0x8a8478);
+    for (let x = 0; x < 32; x += 16) p.vline(x, 3, 13, 0x9a9488);
+  });
+  P.soilTop = A.shared('soil_top', 32, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, hash2i(x >> 1, y >> 1, 3) < 0.5 ? 0x4a7a32 : hash2i(x, y, 4) < 0.15 ? 0x6a9a42 : 0x3a6a2a);
+  });
+  P.scaffold = A.shared('scaffold', 32, 32, (p) => {
+    smoothFill(p, 0, 0, 32, 32, 0x2f7a46, 3, 0.05);
+    p.rect(0, 0, 32, 2, 0x3f9a56);
+    for (let x = 0; x < 32; x += 16) p.vline(x, 0, 32, 0x24603a);
+  });
+  P.bleacher = A.shared('bleach', 32, 10, (p) => {
+    p.rect(0, 0, 32, 10, 0xb8bcc2);
+    p.rect(0, 0, 32, 2, 0xd8dce2);
+    p.rect(0, 8, 32, 2, 0x8a8e94);
+    for (let x = 0; x < 32; x += 16) p.vline(x, 2, 6, 0x9a9ea4);
+  });
   C._props = P;
   return P;
 }
@@ -382,11 +473,11 @@ export function handballWall(C, x0, y0, x1, y1, h) {
   const W = Math.round(Math.max(x1 - x0, y1 - y0) * T), H = Math.round(h * T);
   const front = C.atlas.alloc(W, H);
   front.p.rect(0, 0, W, H, 0xb9b6ae);
-  mural(front.p, 2, 2, W - 4, H - 10, C.rng);
-  front.p.rect(0, H - 8, W, 1, 0xf2f2ee);
+  mural(front.p, 4, 4, W - 8, H - 20, C.rng);
+  front.p.rect(0, H - 16, W, 2, 0xf2f2ee);
   const back = C.atlas.alloc(W, H);
   smoothFill(back.p, 0, 0, W, H, 0xb9b6ae, 4, 0.05);
-  mural(back.p, 3, 3, W - 6, H - 12, C.rng);
+  mural(back.p, 6, 6, W - 12, H - 24, C.rng);
   if (x1 - x0 > y1 - y0) C.mb.box(x0, y0, CURB, x1, y1, CURB + h, { py: front, ny: back, px: P.concrete, nx: P.concrete, pz: P.concrete });
   else C.mb.box(x0, y0, CURB, x1, y1, CURB + h, { px: front, nx: back, py: P.concrete, ny: P.concrete, pz: P.concrete });
   markHeight(C.world, x0, y0, x1, y1, CURB + h);
@@ -410,7 +501,7 @@ export function playground(C, x0, y0, x1, y1) {
   // slide: ladder tower + sloped chute
   const tx = x1 - 1.6, ty = y0 + 0.8;
   solidBox(C, tx, ty, z, tx + 0.8, ty + 0.8, z + 1.2, P.yellow, P.blue);
-  const chute = C.atlas.shared('chute', 12, 16, (p) => { p.rect(0, 0, 12, 16, 0xe8c030); p.rect(0, 0, 1, 16, 0xc89a20); p.rect(11, 0, 1, 16, 0xc89a20); });
+  const chute = C.atlas.shared('chute', 24, 32, (p) => { p.rect(0, 0, 24, 32, 0xe8c030); p.rect(0, 0, 3, 32, 0xc89a20); p.rect(21, 0, 3, 32, 0xc89a20); p.vline(3, 0, 32, 0xf8e070); });
   C.mb.slope([tx + 0.05, ty + 2.6, z + 0.1], [tx + 0.75, ty + 2.6, z + 0.1], [tx + 0.05, ty + 0.8, z + 1.2], [tx + 0.75, ty + 0.8, z + 1.2], chute, { mat: MAT.SNOW });
   C.world.slides.push({ x: tx + 0.4, y: ty + 0.4, z: z + 1.2, ex: tx + 0.4, ey: ty + 2.5 });
   // climber dome (frame of bars)

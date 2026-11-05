@@ -11,7 +11,7 @@ import {
   busShelter, subwayEntrance, parkWall, chainFence, hoop, bleachers, handballWall, playground, scaffolding,
 } from './props.js';
 import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard } from './facades.js';
-import { winCode } from '../core/painter.js';
+import { winCode, textWidth } from '../core/painter.js';
 
 export function makeContext(world, mb, atlas, rng) {
   const gp = world.ground.p;
@@ -80,39 +80,53 @@ function groundFill(kind, x, y, X0, Y0, X1, Y1) {
   const h = hash2i(x, y, 51);
   switch (kind) {
     case 'flowerbed': {
-      const edge = x === X0 || y === Y0 || x === X1 - 1 || y === Y1 - 1;
-      if (edge) return [0x9a968c, GC.CURB];
-      return [shade(0x5a3e2a, 0.9 + h * 0.2), GC.FLOWERBED];
+      const e = Math.min(x - X0, y - Y0, X1 - 1 - x, Y1 - 1 - y);
+      if (e < 2) return [e === 0 ? 0xb0aca2 : 0x8a867c, GC.CURB];
+      return [shade(hash2i(x >> 1, y >> 1, 8) > 0.5 ? 0x5a3e2a : 0x4e3424, 0.9 + h * 0.2), GC.FLOWERBED];
     }
     case 'soil':
       return [shade(0x5a3e2a, 0.88 + h * 0.24), GC.SOIL];
     case 'treepit': {
-      const edge = x === X0 || y === Y0 || x === X1 - 1 || y === Y1 - 1;
-      if (edge) return [0x8a8680, GC.CURB];
-      return [shade(0x4e3626, 0.88 + h * 0.24), GC.SOIL];
+      const e = Math.min(x - X0, y - Y0, X1 - 1 - x, Y1 - 1 - y);
+      if (e < 2) return [e === 0 ? 0x9a968e : 0x7a766e, GC.CURB];
+      // iron tree grate ring around a mulch centre
+      const cx = (X0 + X1) / 2, cy = (Y0 + Y1) / 2, r = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+      if (r > 7 && e > 2 && ((x - X0) % 4 === 0 || (y - Y0) % 4 === 0)) return [0x3a3530, GC.SOIL];
+      return [shade(hash2i(x >> 1, y >> 1, 6) > 0.6 ? 0x5e4230 : 0x4e3626, 0.88 + h * 0.24), GC.SOIL];
     }
     case 'patio': {
-      const jx = x % 8 === 0, jy = y % 8 === 0;
-      const c = jx || jy ? 0x7a6e62 : shade(mixc(0xa8927a, 0xb89a80, hash2i(x >> 3, y >> 3, 3)), 0.95 + h * 0.08);
+      // running-bond brick pavers
+      const row = y >> 3, off = row % 2 ? 8 : 0;
+      const jx = (x + off) % 16 === 0, jy = y % 8 === 0;
+      let c = shade(mixc(0xa8927a, 0xb89a80, hash2i((x + off) >> 4, row, 3)), 0.95 + h * 0.08);
+      if (jy) c = 0x7a6e62;
+      else if (jx) c = 0x86796c;
+      else if (y % 8 === 1) c = shade(c, 1.06);
       return [c, GC.PATIO];
     }
     case 'plaza': {
-      const jx = x % 16 === 0, jy = y % 16 === 0;
-      const tile = hash2i(x >> 4, y >> 4, 9);
+      const jx = x % 32 === 0, jy = y % 32 === 0;
+      const tile = hash2i(x >> 5, y >> 5, 9);
       let c = shade(mixc(0xc9c6c0, 0xb5b2ac, tile), 0.97 + h * 0.05);
       if (jx || jy) c = 0x9a9790;
+      else if (x % 32 === 1 || y % 32 === 1) c = shade(c, 1.05);
       return [c, GC.PLAZA];
     }
     case 'grass': {
-      const n = valueNoise(x * 0.08, y * 0.08, 5);
+      const n = valueNoise(x * 0.04, y * 0.04, 5);
+      const n2 = valueNoise(x * 0.15, y * 0.15, 6);
       let c = n > 0.55 ? COL.grass : mixc(COL.grass, COL.grassDark, 0.55);
-      c = shade(c, 0.92 + h * 0.14);
-      if (h > 0.97) c = shade(c, 1.2);
+      c = shade(c, 0.9 + h * 0.12 + (n2 - 0.5) * 0.1);
+      // blades: short vertical darker/lighter streaks
+      const b = hash2i(x, y >> 1, 77);
+      if (b > 0.9) c = shade(c, 1.16);
+      else if (b < 0.08) c = shade(c, 0.84);
+      if (h > 0.996) c = [0xf2f2e8, 0xf2d84a, 0xd8d0f0][Math.floor(hash2i(x, y, 3) * 3)]; // clover / dandelions
       return [c, GC.GRASS];
     }
     case 'path': {
       // hexagonal asphalt pavers
-      const hx = x / 6, hy = y / 5.2;
+      const hx = x / 12, hy = y / 10.4;
       const row = Math.floor(hy);
       const off = row % 2 ? 0.5 : 0;
       const fx = hx + off - Math.floor(hx + off), fy = hy - row;
@@ -138,15 +152,17 @@ function groundFill(kind, x, y, X0, Y0, X1, Y1) {
       return [0x2f6f88, GC.WATER];
     case 'sand':
       return [shade(0xdcc48a, 0.92 + h * 0.14), GC.SAND];
-    case 'gravel':
-      return [shade(0x9a8a74, 0.85 + h * 0.3), GC.GRAVEL];
+    case 'gravel': {
+      const st = hash2i(x >> 1, y >> 1, 21);
+      return [shade(st > 0.8 ? 0xb0a08a : st < 0.2 ? 0x7a6c5a : 0x9a8a74, 0.85 + h * 0.3), GC.GRAVEL];
+    }
     case 'wood':
-      return [shade(x % 3 === 0 ? 0x7a5236 : 0x9a6a44, 0.95 + h * 0.08), GC.WOOD];
+      return [shade(x % 6 === 0 ? 0x6a4630 : x % 6 === 1 ? 0xaa7a50 : 0x9a6a44, 0.95 + h * 0.08), GC.WOOD];
     case 'stairsX':
     case 'stairsY': {
       const t = kind === 'stairsX' ? (x - X0) / (X1 - X0) : (y - Y0) / (Y1 - Y0);
-      const step = Math.floor((kind === 'stairsX' ? x - X0 : y - Y0) / 3);
-      const edge = (kind === 'stairsX' ? x - X0 : y - Y0) % 3 === 0;
+      const step = Math.floor((kind === 'stairsX' ? x - X0 : y - Y0) / 6);
+      const edge = (kind === 'stairsX' ? x - X0 : y - Y0) % 6 === 0;
       let c = mixc(0x8a8680, 0x16161a, Math.min(1, t * 1.15));
       if (edge) c = shade(c, 1.25);
       void step;
@@ -293,25 +309,29 @@ function firehouse(C, fr, a0, W, D) {
   const front = C.atlas.alloc(tw, th);
   const p = front.p;
   brickFill(p, 0, 0, tw, th, PAL.brickRed, 77);
-  p.rect(0, 0, tw, 12, 0xe2d6ba);
-  p.text(Math.max(1, Math.floor((tw - 40) / 2)), 3, 'ENGINE 7', 0xc8302c, 255, 1);
+  p.rect(0, 0, tw, 24, 0xe2d6ba);
+  p.hline(0, 0, tw, 0xf2ead2); p.hline(0, 23, tw, 0xa89c80);
+  { const tx = textWidth('ENGINE 7', 2, true); p.text7(Math.max(2, Math.floor((tw - tx) / 2)), 5, 'ENGINE 7', 0xc8302c, 255, 2); }
   for (let f = 0; f < 2; f++) {
-    const fy = 12 + f * 24;
-    for (let b = 0; b < 3; b++) drawWindow(p, Math.round((tw / 3) * b + tw / 6) - 4, fy + 5, 8, 14, { frame: 0xf2efe6, lintel: 0xe2d6ba, sill: 0xe2d6ba, t: rng.next() }, rng);
+    const fy = 24 + f * 48;
+    for (let b = 0; b < 3; b++) drawWindow(p, Math.round((tw / 3) * b + tw / 6) - 8, fy + 10, 16, 28, { frame: 0xf2efe6, lintel: 0xe2d6ba, sill: 0xe2d6ba, t: rng.next(), wall: PAL.brickRed[0], keystone: true }, rng);
   }
-  const gy = 12 + 48;
+  const gy = 24 + 96;
   p.rect(0, gy, tw, th - gy, 0xe2d6ba);
-  const dw = tw - 20;
-  p.rect(4, gy + 4, dw, th - gy - 4, 0xc8302c);
-  for (let y = gy + 6; y < th; y += 3) p.hline(5, y, dw - 2, 0xa82420);
-  for (let x = 6; x < 4 + dw - 4; x += 8) p.rect(x, gy + 8, 5, 4, 0x40576d, winCode(0.1));
-  drawDoor(p, tw - 13, gy + 6, 8, th - gy - 6, { color: 0xc8302c, glass: true });
+  p.hline(0, gy, tw, 0xf2ead2);
+  const dw = tw - 40;
+  p.rect(8, gy + 8, dw, th - gy - 8, 0xc8302c);
+  p.frame(8, gy + 8, dw, th - gy - 8, 0x8a1a18);
+  for (let y = gy + 12; y < th; y += 5) { p.hline(10, y, dw - 4, 0xa82420); p.hline(10, y + 1, dw - 4, 0xd84a3c); }
+  for (let x = 14; x < 8 + dw - 16; x += 16) { p.rect(x, gy + 16, 10, 8, 0x40576d, winCode(0.1)); p.frame(x - 1, gy + 15, 12, 10, 0xf2efe6); }
+  p.text7(Math.floor(8 + dw / 2 - 3), gy + 30, '7', 0xf2c230, 255, 2);
+  drawDoor(p, tw - 26, gy + 12, 18, th - gy - 12, { color: 0xc8302c, glass: true });
   const back = S.brickRed;
   const aabb = fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back, left: back, right: back, top: { t: S.roofTar, world: true } });
   markHeight(C.world, ...aabb, CURB + H);
   C.addFlag(fr, a0 + W - 1, -0.05, CURB + 4.2, 'us');
-  const bay = fr.pt(a0 + (dw / 2 + 4) / T, -0.5);
-  C.world.firehouse = { x: bay[0], y: bay[1], n: fr.n, door: fr.pt(a0 + (dw / 2 + 4) / T, 1.5) };
+  const bay = fr.pt(a0 + (dw / 2 + 8) / T, -0.5);
+  C.world.firehouse = { x: bay[0], y: bay[1], n: fr.n, door: fr.pt(a0 + (dw / 2 + 8) / T, 1.5) };
   C.world.lamps.push({ x: bay[0], y: bay[1], z: 2.5, r: 2.4, color: [1, 0.9, 0.7], k: 0.6, kind: 'shop' });
 }
 
@@ -322,32 +342,51 @@ function theater(C, fr, a0, W, D) {
   const tw = Math.round(W * T), th = Math.round(H * T);
   const front = C.atlas.alloc(tw, th);
   const p = front.p;
-  stoneFill(p, 0, 0, tw, th, PAL.limestone, 66, 8, { blocks: 16 });
-  for (let x = 4; x < tw - 4; x += 12) {
-    p.rect(x, 10, 6, 56, 0xc8b890);
-    drawWindow(p, x + 1, 14, 4, 22, { frame: 0x2b2b30, t: rng.next() * 0.4, rail: false }, rng);
+  stoneFill(p, 0, 0, tw, th, PAL.limestone, 66, 16, { blocks: 32 });
+  // ornate frieze
+  p.rect(0, 0, tw, 8, 0xc8b890); p.hline(0, 8, tw, 0x9a8a68);
+  for (let x = 2; x < tw; x += 8) { p.rect(x, 2, 4, 4, 0xe8dcc0); p.set(x + 1, 3, 0xb8a880); }
+  for (let x = 8; x < tw - 8; x += 24) {
+    // pilaster with capital, tall arched window between
+    p.rect(x, 20, 12, 112, 0xc8b890);
+    p.vline(x + 1, 20, 112, 0xe0d4b4); p.vline(x + 10, 20, 112, 0xa89870);
+    p.rect(x - 2, 16, 16, 5, 0xe0d4b4);
+    drawWindow(p, x + 2, 28, 8, 44, { frame: 0x2b2b30, t: rng.next() * 0.4, rail: false, panes: '1/1' }, rng);
   }
-  const gy = th - 34;
-  p.rect(0, gy, tw, 34, 0x5a1f1f);
-  for (let x = 6; x < tw - 6; x += 14) { p.rect(x, gy + 12, 10, 22, 0xd8b04a); p.rect(x + 1, gy + 13, 8, 21, 0x40576d, winCode(0.02)); }
+  const gy = th - 68;
+  p.rect(0, gy, tw, 68, 0x5a1f1f);
+  p.hline(0, gy, tw, 0x8a3a2a);
+  for (let x = 12; x < tw - 24; x += 28) {
+    p.rect(x, gy + 24, 20, 44, 0xd8b04a);
+    p.rect(x + 2, gy + 26, 16, 42, 0x40576d, winCode(0.02));
+    p.vline(x + 10, gy + 26, 42, 0xd8b04a);
+    p.rect(x + 7, gy + 44, 2, 6, 0xf0d070); p.rect(x + 11, gy + 44, 2, 6, 0xf0d070);
+  }
+  // poster cases
+  for (const x of [2, tw - 10]) { p.rect(x, gy + 24, 8, 30, 0xd8b04a); p.rect(x + 1, gy + 25, 6, 28, 0xf2e6c0, winCode(0.02, true)); p.rect(x + 2, gy + 28, 4, 10, 0xc8302c, winCode(0.02, true)); }
   const aabb = fr.box(mb, a0, a0 + W, 0, D, CURB, CURB + H, { front, back: S.brickBrown, left: S.brickBrown, right: S.brickBrown, top: { t: S.roofTar, world: true } });
   markHeight(C.world, ...aabb, CURB + H);
   // marquee with chasing bulbs
   const mw = Math.round((W - 1) * T);
-  const marq = C.atlas.alloc(mw, 14);
+  const MH = 28;
+  const marq = C.atlas.alloc(mw, MH);
   const q = marq.p;
-  q.rect(0, 0, mw, 14, 0xf2efe6);
-  for (let x = 1; x < mw; x += 2) { q.set(x, 0, 0xffe27a, winCode(0.0, true)); q.set(x, 13, 0xffe27a, winCode(0.0, true)); }
-  q.text(Math.floor((mw - 39) / 2), 2, 'NOW SHOWING', 0x1b1b1b, winCode(0.0, true));
-  q.text(Math.floor((mw - 47) / 2), 8, 'PIXEL CITY 3', 0xc8302c, winCode(0.0, true));
+  q.rect(0, 0, mw, MH, 0xf2efe6);
+  q.rect(0, 0, mw, 3, 0x2a2a2e); q.rect(0, MH - 3, mw, 3, 0x2a2a2e);
+  const bulb = winCode(0.0, true);
+  for (let x = 1; x < mw; x += 3) { q.set(x, 1, 0xffe27a, bulb); q.set(x, MH - 2, 0xffe27a, bulb); }
+  const l1 = 'NOW SHOWING', l2 = 'PIXEL CITY 3';
+  q.text7(Math.floor((mw - textWidth(l1, 1, true)) / 2), 5, l1, 0x1b1b1b, bulb);
+  q.text7(Math.floor((mw - textWidth(l2, 1, true)) / 2), 15, l2, 0xc8302c, bulb);
   fr.box(mb, a0 + 0.5, a0 + W - 0.5, -1.4, 0, CURB + 2.2, CURB + 3.1, { front: marq, left: S.darkMetal, right: S.darkMetal, top: { t: S.darkMetal } });
   // vertical sign
-  const vt = C.atlas.alloc(16, 72);
-  vt.p.rect(0, 0, 16, 72, 0xc8302c);
-  vt.p.frame(0, 0, 16, 72, 0xffe27a, winCode(0.0, true));
-  'RIALTO'.split('').forEach((ch, i) => vt.p.text(2, 4 + i * 11, ch, 0xffffff, winCode(0.0, true), 2));
-  fr.sideQuad(mb, a0 + 1, -0.15, -1.3, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
-  fr.sideQuad(mb, a0 + 1.01, -1.3, -0.15, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
+  const vt = C.atlas.alloc(32, 144);
+  vt.p.rect(0, 0, 32, 144, 0xc8302c);
+  for (let y = 0; y < 144; y += 3) { vt.p.set(1, y, 0xffe27a, winCode(0.0, true)); vt.p.set(30, y, 0xffe27a, winCode(0.0, true)); }
+  vt.p.frame(3, 3, 26, 138, 0x8a1a18);
+  'RIALTO'.split('').forEach((ch, i) => vt.p.text7(9, 6 + i * 23, ch, 0xffffff, winCode(0.0, true), 3));
+  fr.sideQuad(mb, a0 + 1, -0.15, -1.15, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
+  fr.sideQuad(mb, a0 + 1.01, -1.15, -0.15, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
   const lp = fr.pt(a0 + W / 2, -1.5);
   C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 3.4, color: [1, 0.85, 0.5], k: 0.9, kind: 'marquee' });
   C.world.marquees.push({ x: lp[0], y: lp[1] });
@@ -427,23 +466,27 @@ function courtLines(C, x0, y0, x1, y1) {
   const g = C.world.ground.p;
   const X0 = Math.round(x0 * T), X1 = Math.round(x1 * T), Y0 = Math.round(y0 * T), Y1 = Math.round(y1 * T);
   const line = (x, y) => g.set(x, y, 0xf2f2ee, GC.COURT_LINE);
-  for (let x = X0; x < X1; x++) { line(x, Y0); line(x, Y0 + 1); line(x, Y1 - 1); line(x, Y1 - 2); }
-  for (let y = Y0; y < Y1; y++) { line(X0, y); line(X0 + 1, y); line(X1 - 1, y); line(X1 - 2, y); }
+  const k = T / 16;
+  for (let x = X0; x < X1; x++) for (let w = 0; w < 3; w++) { line(x, Y0 + w); line(x, Y1 - 1 - w); }
+  for (let y = Y0; y < Y1; y++) for (let w = 0; w < 3; w++) { line(X0 + w, y); line(X1 - 1 - w, y); }
   const mx = Math.round((X0 + X1) / 2), my = Math.round((Y0 + Y1) / 2);
-  for (let y = Y0; y < Y1; y++) { line(mx, y); line(mx - 1, y); }
-  g.ring(mx, my, 15, 15, 2, 0xf2f2ee, GC.COURT_LINE);
+  for (let y = Y0; y < Y1; y++) { line(mx, y); line(mx - 1, y); line(mx + 1, y); }
+  g.ring(mx, my, 15 * k, 15 * k, 3, 0xf2f2ee, GC.COURT_LINE);
   // three point arcs + key outlines
   for (const [ex, dir] of [[X0, 1], [X1, -1]]) {
-    const bx = ex + dir * 14;
-    for (let a = -Math.PI / 2; a <= Math.PI / 2; a += 0.01) {
-      const px = Math.round(bx + dir * Math.cos(a) * 58), py = Math.round(my + Math.sin(a) * 58);
-      if (py > Y0 + 6 && py < Y1 - 6) { line(px, py); line(px + dir, py); }
+    const bx = ex + dir * 14 * k;
+    const R = 58 * k;
+    for (let a = -Math.PI / 2; a <= Math.PI / 2; a += 0.004) {
+      const px = Math.round(bx + dir * Math.cos(a) * R), py = Math.round(my + Math.sin(a) * R);
+      if (py > Y0 + 6 * k && py < Y1 - 6 * k) { line(px, py); line(px + dir, py); line(px + 2 * dir, py); }
     }
-    for (const sy of [my - 54, my + 54]) for (let x = Math.min(ex, bx); x <= Math.max(ex, bx); x++) { line(x, sy); line(x, sy + 1); }
-    const kx = ex + dir * 48;
-    for (let y = my - 20; y <= my + 20; y++) { line(kx, y); line(kx + dir, y); }
-    for (let x = Math.min(ex, kx); x <= Math.max(ex, kx); x++) { line(x, my - 20); line(x, my + 20); }
-    g.ring(kx, my, 16, 16, 2, 0xf2f2ee, GC.COURT_LINE);
+    for (const sy of [my - 54 * k, my + 54 * k]) for (let x = Math.min(ex, bx); x <= Math.max(ex, bx); x++) { line(x, sy); line(x, sy + 1); line(x, sy + 2); }
+    const kx = ex + dir * 48 * k;
+    for (let y = my - 20 * k; y <= my + 20 * k; y++) { line(kx, y); line(kx + dir, y); line(kx + 2 * dir, y); }
+    for (let x = Math.min(ex, kx); x <= Math.max(ex, kx); x++) for (let w = 0; w < 3; w++) { line(x, my - 20 * k + w); line(x, my + 20 * k - w); }
+    g.ring(kx, my, 16 * k, 16 * k, 3, 0xf2f2ee, GC.COURT_LINE);
+    // lane hash marks
+    for (const d of [18, 26, 34]) for (const sy of [my - 20 * k - 4, my + 20 * k + 1]) for (let w = 0; w < 3; w++) for (let t = 0; t < 3; t++) line(ex + dir * (d * k + w), sy + t);
   }
 }
 
@@ -683,19 +726,38 @@ function buildCart(C, c) {
   const cx = c.x, cy = c.y;
   const x0 = cx - (along[0] * L + Math.abs(n[0]) * D) / 2, x1 = cx + (along[0] * L + Math.abs(n[0]) * D) / 2;
   const y0 = cy - (along[1] * L + Math.abs(n[1]) * D) / 2, y1 = cy + (along[1] * L + Math.abs(n[1]) * D) / 2;
-  const side = A.shared('cart_side_' + c.kind, 24, 16, (p) => {
+  const sideFor = (len) => A.shared(`cart_side_${c.kind}_${len}`, len, 24, (p) => {
     const steel = 0xc8ccd2;
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 24; x++) p.set(x, y, (x + y) % 5 === 0 ? 0xdde0e4 : steel);
-    if (c.kind === 'halal') { p.rect(0, 2, 24, 6, 0xc8302c); p.text(2, 3, 'HALAL', 0xf2c230, 255); }
-    else if (c.kind === 'pretzel') { p.rect(0, 2, 24, 6, 0x1f4fa0); p.text(2, 3, 'PRTZL', 0xf2c230, 255); }
-    else { p.rect(0, 2, 24, 6, 0xf2c230); p.text(2, 3, 'HOTDG', 0xc8302c, 255); }
-    p.rect(0, 15, 24, 1, 0x5a5d63);
+    for (let y = 0; y < 24; y++) for (let x = 0; x < len; x++) p.set(x, y, (x + y) % 7 === 0 ? 0xdde0e4 : x % 16 === 0 ? 0xa8acb2 : steel);
+    const [bg, fg, word] = c.kind === 'halal' ? [0xc8302c, 0xf2c230, 'HALAL'] : c.kind === 'pretzel' ? [0x1f4fa0, 0xf2c230, 'PRETZEL'] : [0xf2c230, 0xc8302c, 'HOT DOG'];
+    p.rect(0, 3, len, 11, bg);
+    p.hline(0, 3, len, shade(bg, 1.2));
+    p.hline(0, 13, len, shade(bg, 0.7));
+    const tw = textWidth(word, 1, true);
+    if (tw <= len - 1) p.text7(Math.floor((len - tw) / 2), 5, word, fg, 255);
+    else {
+      // icon instead of lettering on the short ends
+      const cx = len >> 1;
+      if (c.kind === 'hotdog') { p.ellipse(cx, 8, 7, 3, 0xd8a050); p.rect(cx - 7, 7, 14, 2, 0xb8502a); p.hline(cx - 5, 7, 10, 0xf2c230); }
+      else if (c.kind === 'pretzel') { p.ring(cx - 2, 8, 3.5, 3.5, 1.4, 0x8a4a1a); p.ring(cx + 2, 8, 3.5, 3.5, 1.4, 0x8a4a1a); p.set(cx - 2, 7, 0xf2f2ee); p.set(cx + 3, 9, 0xf2f2ee); }
+      else { p.ellipse(cx, 9, 7, 3, 0xf2f2ee); p.ellipse(cx - 2, 8, 3, 1.6, 0x9a5a2a); p.ellipse(cx + 3, 9, 2.5, 1.4, 0xf2e8b0); }
+    }
+    for (let k = 0; k * 14 + 4 < len - 8; k++) { p.rect(4 + k * 14, 16, 10, 5, [0xd89a50, 0xe8d8b0, 0x8a4a2a][k % 3]); p.frame(4 + k * 14, 16, 10, 5, 0xf2f2ee); }
+    p.rect(0, 22, len, 2, 0x5a5d63);
   });
-  const top = A.shared('cart_top', 16, 16, (p) => {
-    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, (x * 3 + y) % 7 === 0 ? 0x8a8e94 : 0xb4b8be);
-    p.rect(2, 2, 5, 5, 0x5a3a2a); p.rect(9, 3, 5, 4, 0xd8a050);
+  const longSide = sideFor(42), shortSide = sideFor(22);
+  const top = A.shared('cart_top', 32, 32, (p) => {
+    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x * 3 + y) % 9 === 0 ? 0x8a8e94 : 0xb4b8be);
+    p.frame(0, 0, 32, 32, 0x8a8e94);
+    p.rect(3, 3, 12, 11, 0x3a2a22);
+    for (let k = 0; k < 4; k++) p.rect(5 + k * 2, 5, 1, 7, 0xc87a3a);
+    p.rect(18, 4, 11, 9, 0xd8a050);
+    for (let k = 0; k < 3; k++) p.ellipse(21 + k * 3, 8, 1.2, 1.2, 0x9a5a20);
+    p.rect(4, 18, 24, 10, 0x9aa0a8);
+    p.frame(4, 18, 24, 10, 0x6a6e74);
   });
-  C.mb.box(x0, y0, CURB + 0.2, x1, y1, CURB + H, { px: side, nx: side, py: side, ny: side, pz: { t: top } });
+  const F = c.axis === 'x' ? { py: longSide, ny: longSide, px: shortSide, nx: shortSide } : { px: longSide, nx: longSide, py: shortSide, ny: shortSide };
+  C.mb.box(x0, y0, CURB + 0.2, x1, y1, CURB + H, { ...F, pz: { t: top } });
   for (const [wx, wy] of [[x0 + 0.1, y0 + 0.1], [x1 - 0.1, y1 - 0.1]]) C.mb.box(wx - 0.06, wy - 0.06, CURB, wx + 0.06, wy + 0.06, CURB + 0.25, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
   C.addSprite('cartUmbrella', cx, cy, CURB + H, { cart: c.kind });
   C.world.steam.push({ x: cx, y: cy, z: CURB + H + 0.1, kind: 'cart', rate: 0.6 });

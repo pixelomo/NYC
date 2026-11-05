@@ -161,6 +161,8 @@ flat in uvec4 vRect;
 flat in vec3 vNrm;
 flat in uvec4 vInfo;
 uniform sampler2DArray uAtlas;
+uniform highp sampler2D uGround;
+uniform float uGroundScale;
 uniform float uResLit;
 uniform float uOffLit;
 uniform float uLeaves;
@@ -185,10 +187,15 @@ vec3 windowColor(float h) {
 }
 
 void main() {
-  ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
-  vec4 tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
-  if (tex.a < 0.5 / 255.0) discard;
   uint mat = vInfo.y;
+  bool ground = (mat & 4u) != 0u;
+  vec4 tex;
+  if (ground) tex = texelFetch(uGround, ivec2(floor(vUV * uGroundScale)), 0);
+  else {
+    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+    tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
+  }
+  if (tex.a < 0.5 / 255.0) discard;
   vec3 n = normalize(vNrm);
   vec3 albedo = tex.rgb;
   float code = floor(tex.a * 255.0 + 0.5);
@@ -197,21 +204,20 @@ void main() {
   float refl = 0.0;
   float wetK = 0.0;
   float puddle = 0.0;
-  bool ground = (mat & 4u) != 0u;
   vec2 wp2 = vWorld.xy;
   // stable per-texel world coordinate for noise (texel grid)
-  vec2 tp = floor(vWorld.xy * 16.0) / 16.0;
+  vec2 tp = floor(vWorld.xy * 32.0) / 32.0;
 
   if (ground) {
     int g = int(code);
     float n1 = nz(tp * 0.11);
-    float n2 = hash12(floor(vWorld.xy * 8.0));
+    float n2 = hash12(floor(vWorld.xy * 16.0));
     float n3 = nz(tp * 0.035 + 0.3);
     // water
     if (g == 15) {
       if (uIce > 0.5) {
         albedo = mix(vec3(0.78, 0.88, 0.95), vec3(0.92, 0.96, 1.0), step(0.6, n1));
-        if (hash12(floor(vWorld.xy * 16.0)) < 0.04) albedo *= 0.85;
+        if (hash12(floor(vWorld.xy * 32.0)) < 0.04) albedo *= 0.85;
       } else {
         float w = nz(tp * 0.25 + vec2(uTime * 0.02, uTime * 0.013)) + nz(tp * 0.31 - vec2(uTime * 0.017, -uTime * 0.01));
         albedo = mix(vec3(0.16, 0.42, 0.55), vec3(0.28, 0.62, 0.72), smoothstep(0.7, 1.3, w));
@@ -223,15 +229,15 @@ void main() {
     if (uLeaves > 0.0 && (g == 6 || g == 8 || g == 9 || g == 11 || g == 17 || g == 22)) {
       float k = (g == 8 || g == 9) ? 1.0 : 0.55;
       if (n2 < uLeaves * 0.26 * k * smoothstep(0.35, 0.75, n3)) {
-        float h = hash12(floor(vWorld.xy * 8.0) + 7.0);
+        float h = hash12(floor(vWorld.xy * 16.0) + 7.0);
         albedo = h < 0.33 ? vec3(0.85, 0.42, 0.12) : h < 0.66 ? vec3(0.72, 0.22, 0.10) : vec3(0.88, 0.66, 0.18);
       }
     }
     // spring/summer flowers
     if (g == 10) {
-      float h = hash12(floor(vWorld.xy * 8.0) + 3.0);
-      if (uFlowers > 0.0 && h < 0.42 * uFlowers) {
-        float c = hash12(floor(vWorld.xy * 8.0) + 11.0);
+      float h = hash12(floor(vWorld.xy * 16.0) + 3.0);
+      if (uFlowers > 0.0 && h < 0.32 * uFlowers) {
+        float c = hash12(floor(vWorld.xy * 16.0) + 11.0);
         vec3 fc = uSeason < 0.5 ? (c < 0.4 ? vec3(0.95, 0.2, 0.25) : c < 0.75 ? vec3(1.0, 0.85, 0.2) : vec3(0.95, 0.55, 0.85))
                 : uSeason < 1.5 ? (c < 0.3 ? vec3(0.95, 0.35, 0.6) : c < 0.6 ? vec3(0.4, 0.5, 0.95) : vec3(1.0, 0.95, 0.9))
                 : (c < 0.5 ? vec3(0.95, 0.55, 0.15) : vec3(0.75, 0.2, 0.2));
@@ -277,7 +283,7 @@ void main() {
     // non-ground: snow on top-facing surfaces
     if ((mat & 1u) != 0u && n.z > 0.55 && uSnow > 0.001) {
       float n1 = nz(tp * 0.13 + vWorld.z * 0.07);
-      float n2 = hash12(floor(vWorld.xy * 8.0));
+      float n2 = hash12(floor(vWorld.xy * 16.0));
       if (n1 * 0.85 + n2 * 0.15 < uSnow * 1.3 - 0.05) {
         albedo = mix(vec3(0.86, 0.9, 0.98), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nz(tp * 0.05)));
         code = 255.0;
@@ -360,17 +366,20 @@ uniform uint uVis;
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out uint vLayer;
+flat out uint vMat;
 void main() {
   if (((uVis >> aInfo.z) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
-  vUV = aUV; vRect = aRect; vLayer = aInfo.x;
+  vUV = aUV; vRect = aRect; vLayer = aInfo.x; vMat = aInfo.y;
   gl_Position = uShadowVP * vec4(aPos, 1.0);
 }`, SHADOW_FS = HEAD + `
 in vec2 vUV;
 flat in uvec4 vRect;
 flat in uint vLayer;
+flat in uint vMat;
 uniform sampler2DArray uAtlas;
 out vec4 o;
 void main() {
+  if ((vMat & 4u) != 0u) { o = vec4(1.0); return; }
   ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
   if (texelFetch(uAtlas, ivec3(tc, int(vLayer)), 0).a < 0.5 / 255.0) discard;
   o = vec4(1.0);
@@ -625,9 +634,21 @@ void main() {
         }
       return makeTexture(gl, N, N, { internal: gl.R8, format: gl.RED, data: d, filter: gl.LINEAR, wrap: gl.REPEAT });
     }
-    setStatic(mesh, atlas) {
+    setStatic(mesh, atlas, groundPage) {
       let gl = this.gl;
       this.atlasTex = atlas.upload(gl);
+      let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), gp = groundPage, scale = 1;
+      if (gp.w > maxTex) {
+        let h = new Uint8Array((gp.w >> 1) * (gp.h >> 1) * 4);
+        for (let y = 0; y < gp.h >> 1; y++) for (let x = 0; x < gp.w >> 1; x++) {
+          let s = (y * 2 * gp.w + x * 2) * 4, d = (y * (gp.w >> 1) + x) * 4;
+          h[d] = gp.data[s], h[d + 1] = gp.data[s + 1], h[d + 2] = gp.data[s + 2], h[d + 3] = gp.data[s + 3];
+        }
+        gp = { w: gp.w >> 1, h: gp.h >> 1, data: h }, scale = 0.5;
+      }
+      this.groundTex = makeTexture(gl, gp.w, gp.h, { data: gp.data }), this.groundScale = scale;
+      for (let pg of atlas.pages) pg.data = null;
+      groundPage.data = null;
       let vao = gl.createVertexArray();
       gl.bindVertexArray(vao), makeBuffer(gl, mesh.pos), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 3, gl.FLOAT, !1, 0, 0), makeBuffer(gl, mesh.uv), gl.enableVertexAttribArray(1), gl.vertexAttribPointer(1, 2, gl.FLOAT, !1, 0, 0), makeBuffer(gl, mesh.rect), gl.enableVertexAttribArray(2), gl.vertexAttribIPointer(2, 4, gl.UNSIGNED_SHORT, 0, 0), makeBuffer(gl, mesh.nrm), gl.enableVertexAttribArray(3), gl.vertexAttribPointer(3, 4, gl.BYTE, !0, 0, 0), makeBuffer(gl, mesh.info), gl.enableVertexAttribArray(4), gl.vertexAttribIPointer(4, 4, gl.UNSIGNED_BYTE, 0, 0), makeBuffer(gl, mesh.idx, gl.ELEMENT_ARRAY_BUFFER), gl.bindVertexArray(null), this.staticVAO = vao, this.staticCount = mesh.indexCount, this.stats.tris = mesh.indexCount / 3;
     }
@@ -679,14 +700,14 @@ void main() {
         gl.useProgram(p2.program), gl.uniform3fv(p2.u.uTop, env.skyTop), gl.uniform3fv(p2.u.uBottom, env.skyBottom), gl.uniform1f(p2.u.uStars, env.stars), gl.uniform1f(p2.u.uTime, time), gl.uniform2f(p2.u.uBuf, bw, bh), gl.uniform1f(p2.u.uRotA, camera.angle), gl.uniform3fv(p2.u.uMoon, env.moon);
         {
           let c = camera.project(117 / 2, 117 / 2, -21), t = camera.project(camera.x, camera.y, 0), sx = bw / 2 + (c[0] - Math.floor(t[0])), sy = bh / 2 - (c[1] - Math.floor(t[1]));
-          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 117 * 16 * 0.62, 117 * 8 * 0.62);
+          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 117 * 32 * 0.62, 117 * (32 / 2) * 0.62);
         }
         gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
       gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT);
       {
         let p2 = this.progStatic, u2 = p2.u;
-        gl.useProgram(p2.program), this.setLit(p2, ctx), gl.uniform1ui(u2.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(u2.uAtlas, 0), gl.uniform1f(u2.uResLit, env.resLit), gl.uniform1f(u2.uOffLit, env.offLit), gl.uniform1f(u2.uLeaves, env.leaves), gl.uniform1f(u2.uSeason, env.season), gl.uniform1f(u2.uFlowers, env.flowers), gl.uniform3fv(u2.uSkyTop, env.skyTop), gl.uniform3fv(u2.uSkyHor, env.skyBottom), gl.uniform3fv(u2.uViewDir, camera.viewDir()), gl.uniform1f(u2.uIce, env.ice), gl.uniform1f(u2.uCrown, env.crown), gl.uniform3fv(u2.uCrownA, env.crownA), gl.uniform3fv(u2.uCrownB, env.crownB), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+        gl.useProgram(p2.program), this.setLit(p2, ctx), gl.uniform1ui(u2.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(u2.uAtlas, 0), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, this.groundTex), gl.uniform1i(u2.uGround, 4), gl.uniform1f(u2.uGroundScale, this.groundScale), gl.uniform1f(u2.uResLit, env.resLit), gl.uniform1f(u2.uOffLit, env.offLit), gl.uniform1f(u2.uLeaves, env.leaves), gl.uniform1f(u2.uSeason, env.season), gl.uniform1f(u2.uFlowers, env.flowers), gl.uniform3fv(u2.uSkyTop, env.skyTop), gl.uniform3fv(u2.uSkyHor, env.skyBottom), gl.uniform3fv(u2.uViewDir, camera.viewDir()), gl.uniform1f(u2.uIce, env.ice), gl.uniform1f(u2.uCrown, env.crown), gl.uniform3fv(u2.uCrownA, env.crownA), gl.uniform3fv(u2.uCrownB, env.crownB), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
       }
       for (let l of this.layers) l.draw && l.draw(ctx);
       for (let l of this.layers) l.drawLate && l.drawLate(ctx);
@@ -703,7 +724,7 @@ void main() {
   };
 
   // src/render/camera.js
-  var CX = 117 / 2, CY = 117 / 2, DEPTH_RANGE = 200, Camera = class {
+  var HX = 32, HY = 32 / 2, HZ = 32, CX = 117 / 2, CY = 117 / 2, DEPTH_RANGE = 200, Camera = class {
     constructor() {
       this.x = CX, this.y = CY, this.angle = 0, this.rot = 0, this.rotFrom = 0, this.rotT = 1, this.scale = 2, this.scaleFrom = 2, this.scaleTo = 2, this.scaleT = 1, this.follow = null, this.vx = 0, this.vy = 0;
     }
@@ -740,24 +761,24 @@ void main() {
     // world -> art pixels (relative to map centre). Returns [sx, sy, depth]
     project(x, y, z) {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), dx = x - CX, dy = y - CY, xr = c * dx - s * dy, yr = s * dx + c * dy;
-      return [(xr - yr) * 16, (xr + yr) * 8 - z * 16, -(xr + yr)];
+      return [(xr - yr) * HX, (xr + yr) * HY - z * HZ, -(xr + yr)];
     }
     // screen-space direction (art px) of a world direction
     screenDir(nx, ny) {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), xr = c * nx - s * ny, yr = s * nx + c * ny;
-      return [(xr - yr) * 16, (xr + yr) * 8];
+      return [(xr - yr) * HX, (xr + yr) * HY];
     }
     screenDirX(nx, ny) {
       return this.screenDir(nx, ny)[0];
     }
     // art-pixel screen delta -> world delta on the ground plane
     unprojectDelta(dsx, dsy) {
-      let a = dsx / 16, b = dsy / 8, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
+      let a = dsx / HX, b = dsy / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
       return [c * xr + s * yr, -s * xr + c * yr];
     }
     // screen pixel (CSS) -> world on plane z
     screenToWorld(px, py, viewW, viewH, z = 0) {
-      let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), sx = t[0] + (px - viewW / 2) / scaleCss, sy = t[1] + (py - viewH / 2) / scaleCss + z * 16, a = sx / 16, b = sy / 8, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
+      let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), sx = t[0] + (px - viewW / 2) / scaleCss, sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ, a = sx / HX, b = sy / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
       return [CX + c * xr + s * yr, CY - s * xr + c * yr];
     }
     worldToScreen(x, y, z, viewW, viewH) {
@@ -772,7 +793,7 @@ void main() {
     // Build view-projection for a buffer of bw x bh art pixels.
     matrices(bw, bh) {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), t = this.project(this.x, this.y, 0), tsx = Math.floor(t[0]), tsy = Math.floor(t[1]), fx = t[0] - tsx, fy = t[1] - tsy, D = DEPTH_RANGE, m = new Float32Array(16), kx = 2 / bw, ky = 2 / bh;
-      return m[0] = 16 * (c - s) * kx, m[4] = -16 * (s + c) * kx, m[8] = 0, m[12] = (16 * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx, m[1] = -8 * (c + s) * ky, m[5] = -8 * (c - s) * ky, m[9] = 16 * ky, m[13] = -(8 * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky, m[2] = -(c + s) / D, m[6] = -(c - s) / D, m[10] = 0, m[14] = ((c + s) * CX + (c - s) * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
+      return m[0] = HX * (c - s) * kx, m[4] = -HX * (s + c) * kx, m[8] = 0, m[12] = (HX * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx, m[1] = -HY * (c + s) * ky, m[5] = -HY * (c - s) * ky, m[9] = HZ * ky, m[13] = -(HY * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky, m[2] = -(c + s) / D, m[6] = -(c - s) / D, m[10] = 0, m[14] = ((c + s) * CX + (c - s) * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
     }
   };
 
@@ -849,9 +870,70 @@ void main() {
     "~": "000011110000000",
     "^": "010101000000000",
     _: "000000000000111"
+  }, G7 = {
+    A: "01110100011000111111100011000110001",
+    B: "11110100011000111110100011000111110",
+    C: "01110100011000010000100001000101110",
+    D: "11110100011000110001100011000111110",
+    E: "11111100001000011110100001000011111",
+    F: "11111100001000011110100001000010000",
+    G: "01110100011000010111100011000101111",
+    H: "10001100011000111111100011000110001",
+    I: "01110001000010000100001000010001110",
+    J: "00111000100001000010000101001001100",
+    K: "10001100101010011000101001001010001",
+    L: "10000100001000010000100001000011111",
+    M: "10001110111010110101100011000110001",
+    N: "10001100011100110101100111000110001",
+    O: "01110100011000110001100011000101110",
+    P: "11110100011000111110100001000010000",
+    Q: "01110100011000110001101011001001101",
+    R: "11110100011000111110101001001010001",
+    S: "01111100001000001110000010000111110",
+    T: "11111001000010000100001000010000100",
+    U: "10001100011000110001100011000101110",
+    V: "10001100011000110001100010101000100",
+    W: "10001100011000110101101011010101010",
+    X: "10001100010101000100010101000110001",
+    Y: "10001100010101000100001000010000100",
+    Z: "11111000010001000100010001000011111",
+    0: "01110100011001110101110011000101110",
+    1: "00100011000010000100001000010001110",
+    2: "01110100010000100010001000100011111",
+    3: "11111000100010000010000011000101110",
+    4: "00010001100101010010111110001000010",
+    5: "11111100001111000001000011000101110",
+    6: "00110010001000011110100011000101110",
+    7: "11111000010001000100010000100001000",
+    8: "01110100011000101110100011000101110",
+    9: "01110100011000101111000010001001100",
+    " ": "00000000000000000000000000000000000",
+    "-": "00000000000000011111000000000000000",
+    ".": "00000000000000000000000000110001100",
+    "!": "00100001000010000100001000000000100",
+    "'": "00100001000100000000000000000000000",
+    $: "00100011111010001110001011111000100",
+    "&": "01100100101010001000101011001001101",
+    "@": "00000010101111111111011100010000000",
+    "#": "01010010101111101010111110101001010",
+    "%": "11000110010001000100010001001100011",
+    "/": "00001000100001000100010000100010000",
+    ":": "00000011000110000000011000110000000",
+    ",": "00000000000000000000011000010001000",
+    "+": "00000001000010011111001000010000000",
+    "?": "01110100010000100010001000000000100",
+    "*": "00000001001010101110101010010000000",
+    "(": "00010001000100001000010000010000010",
+    ")": "01000001000001000010000100010001000",
+    '"': "01010010100000000000000000000000000",
+    "=": "00000000001111100000111110000000000",
+    "~": "00000000000100010101000100000000000",
+    "<": "00010001000100010000010000010000010",
+    ">": "01000001000001000001000100010001000",
+    _: "00000000000000000000000000000011111"
   };
-  function textWidth(str, scale = 1) {
-    return str.length ? (str.length * 4 - 1) * scale : 0;
+  function textWidth(str, scale = 1, big = !1) {
+    return str.length ? big ? (str.length * 6 - 1) * scale : (str.length * 4 - 1) * scale : 0;
   }
   var Painter = class _Painter {
     constructor(page, ox = 0, oy = 0, w = page.w, h = page.h) {
@@ -967,6 +1049,18 @@ void main() {
         let t = h > 1 ? yy / (h - 1) : 0, c = rgb(R(c0) + (R(c1) - R(c0)) * t, G(c0) + (G(c1) - G(c0)) * t, B(c0) + (B(c1) - B(c0)) * t);
         this.rect(x, y + yy, w, 1, c, a);
       }
+    }
+    // 5x7 font text; returns width
+    text7(x, y, str, c, a = 255, scale = 1) {
+      str = String(str).toUpperCase();
+      let cx = x;
+      for (let ch of str) {
+        let g = G7[ch] || G7[" "];
+        for (let i = 0; i < 35; i++)
+          g[i] === "1" && this.rect(cx + i % 5 * scale, y + Math.floor(i / 5) * scale, scale, scale, c, a);
+        cx += 6 * scale;
+      }
+      return cx - x - scale;
     }
     text(x, y, str, c, a = 255, scale = 1) {
       str = String(str).toUpperCase();
@@ -1161,9 +1255,9 @@ void main() {
     }
     // Axis-aligned box. faces: {px,nx,py,ny,pz} -> face spec (region or {t, mat, group, u0, v0})
     box(x0, y0, z0, x1, y1, z1, faces, opt = {}) {
-      let g = opt.group ?? this.defaultGroup, seed = opt.seed ?? 0, sideMat = opt.mat ?? 0, topMat = opt.topMat ?? MAT.SNOW | MAT.WET, H = (z1 - z0) * 16, f = (spec) => spec && spec.t ? spec : spec ? { t: spec } : null, s;
+      let g = opt.group ?? this.defaultGroup, seed = opt.seed ?? 0, sideMat = opt.mat ?? 0, topMat = opt.topMat ?? MAT.SNOW | MAT.WET, H = (z1 - z0) * 32, f = (spec) => spec && spec.t ? spec : spec ? { t: spec } : null, s;
       if (s = f(faces.py)) {
-        let W = (x1 - x0) * 16, u0 = s.u0 || 0, v0 = s.v0 || 0;
+        let W = (x1 - x0) * 32, u0 = s.u0 || 0, v0 = s.v0 || 0;
         this.quad(
           [x0, y1, z1],
           [x1, y1, z1],
@@ -1178,7 +1272,7 @@ void main() {
         );
       }
       if (s = f(faces.ny)) {
-        let W = (x1 - x0) * 16, u0 = s.u0 || 0, v0 = s.v0 || 0;
+        let W = (x1 - x0) * 32, u0 = s.u0 || 0, v0 = s.v0 || 0;
         this.quad(
           [x1, y0, z1],
           [x0, y0, z1],
@@ -1193,7 +1287,7 @@ void main() {
         );
       }
       if (s = f(faces.px)) {
-        let W = (y1 - y0) * 16, u0 = s.u0 || 0, v0 = s.v0 || 0;
+        let W = (y1 - y0) * 32, u0 = s.u0 || 0, v0 = s.v0 || 0;
         this.quad(
           [x1, y1, z1],
           [x1, y0, z1],
@@ -1208,7 +1302,7 @@ void main() {
         );
       }
       if (s = f(faces.nx)) {
-        let W = (y1 - y0) * 16, u0 = s.u0 || 0, v0 = s.v0 || 0;
+        let W = (y1 - y0) * 32, u0 = s.u0 || 0, v0 = s.v0 || 0;
         this.quad(
           [x0, y0, z1],
           [x0, y1, z1],
@@ -1223,7 +1317,7 @@ void main() {
         );
       }
       if (s = f(faces.pz)) {
-        let W = (x1 - x0) * 16, D = (y1 - y0) * 16, u0 = s.u0 ?? (s.world ? x0 * 16 : 0), v0 = s.v0 ?? (s.world ? y0 * 16 : 0);
+        let W = (x1 - x0) * 32, D = (y1 - y0) * 32, u0 = s.u0 ?? (s.world ? x0 * 32 : 0), v0 = s.v0 ?? (s.world ? y0 * 32 : 0);
         this.quad(
           [x0, y0, z1],
           [x1, y0, z1],
@@ -1238,7 +1332,7 @@ void main() {
         );
       }
       if (s = f(faces.nz)) {
-        let W = (x1 - x0) * 16, D = (y1 - y0) * 16;
+        let W = (x1 - x0) * 32, D = (y1 - y0) * 32;
         this.quad(
           [x0, y1, z0],
           [x1, y1, z0],
@@ -1259,7 +1353,7 @@ void main() {
     }
     // Vertical quad between (xa,ya) and (xb,yb), from z0 to z1. Texture u runs a->b.
     vquad(xa, ya, xb, yb, z0, z1, tex, opt = {}) {
-      let len = Math.hypot(xb - xa, yb - ya) * 16, H = (z1 - z0) * 16, u0 = opt.u0 || 0, v0 = opt.v0 || 0, nx = yb - ya, ny = -(xb - xa), l = Math.hypot(nx, ny) || 1, ux = (xb - xa) / (l || 1), n = [-((yb - ya) / (l || 1)), ux, 0];
+      let len = Math.hypot(xb - xa, yb - ya) * 32, H = (z1 - z0) * 32, u0 = opt.u0 || 0, v0 = opt.v0 || 0, nx = yb - ya, ny = -(xb - xa), l = Math.hypot(nx, ny) || 1, ux = (xb - xa) / (l || 1), n = [-((yb - ya) / (l || 1)), ux, 0];
       this.quad(
         [xa, ya, z1],
         [xb, yb, z1],
@@ -1275,7 +1369,7 @@ void main() {
     }
     // Horizontal quad (decal) at height z
     hquad(x0, y0, x1, y1, z, tex, opt = {}) {
-      let W = (x1 - x0) * 16, D = (y1 - y0) * 16, u0 = opt.u0 ?? 0, v0 = opt.v0 ?? 0;
+      let W = (x1 - x0) * 32, D = (y1 - y0) * 32, u0 = opt.u0 ?? 0, v0 = opt.v0 ?? 0;
       this.quad(
         [x0, y0, z],
         [x1, y0, z],
@@ -1291,7 +1385,7 @@ void main() {
     }
     // Sloped quad from a low edge to a high edge (awnings, roofs). edge a: (xa0,ya0,za)->(xa1,ya1,za), edge b at zb
     slope(a0, a1, b0, b1, tex, opt = {}) {
-      let W = Math.hypot(a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) * 16, H = Math.hypot(b0[0] - a0[0], b0[1] - a0[1], b0[2] - a0[2]) * 16, u0 = opt.u0 || 0, v0 = opt.v0 || 0;
+      let W = Math.hypot(a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]) * 32, H = Math.hypot(b0[0] - a0[0], b0[1] - a0[1], b0[2] - a0[2]) * 32, u0 = opt.u0 || 0, v0 = opt.v0 || 0;
       this.quad(
         b0,
         b1,
@@ -1311,18 +1405,18 @@ void main() {
       if (axis === "x") {
         let ym = (y0 + y1) / 2;
         this.slope([x1, y0, z0], [x0, y0, z0], [x1, ym, zr], [x0, ym, zr], roofTex, opt), this.slope([x0, y1, z0], [x1, y1, z0], [x0, ym, zr], [x1, ym, zr], roofTex, opt);
-        let D = (y1 - y0) * 16, Hh = (zr - z0) * 16;
+        let D = (y1 - y0) * 32, Hh = (zr - z0) * 32;
         this.tri([x0, y0, z0], [x0, ym, zr], [x0, y1, z0], [[0, Hh], [D / 2, 0], [D, Hh]], endTex, [-1, 0, 0], 0, g), this.tri([x1, y1, z0], [x1, ym, zr], [x1, y0, z0], [[0, Hh], [D / 2, 0], [D, Hh]], endTex, [1, 0, 0], 0, g);
       } else {
         let xm = (x0 + x1) / 2;
         this.slope([x0, y0, z0], [x0, y1, z0], [xm, y0, zr], [xm, y1, zr], roofTex, opt), this.slope([x1, y1, z0], [x1, y0, z0], [xm, y1, zr], [xm, y0, zr], roofTex, opt);
-        let W = (x1 - x0) * 16, Hh = (zr - z0) * 16;
+        let W = (x1 - x0) * 32, Hh = (zr - z0) * 32;
         this.tri([x1, y0, z0], [xm, y0, zr], [x0, y0, z0], [[0, Hh], [W / 2, 0], [W, Hh]], endTex, [0, -1, 0], 0, g), this.tri([x0, y1, z0], [xm, y1, zr], [x1, y1, z0], [[0, Hh], [W / 2, 0], [W, Hh]], endTex, [0, 1, 0], 0, g);
       }
     }
     // N-sided cylinder (water towers, columns). Side texture wraps around.
     cylinder(cx, cy, z0, z1, r, sides, tex, capTex, opt = {}) {
-      let H = (z1 - z0) * 16, circ = 2 * Math.PI * r * 16, g = opt.group ?? this.defaultGroup, off = opt.angle ?? Math.PI / sides;
+      let H = (z1 - z0) * 32, circ = 2 * Math.PI * r * 32, g = opt.group ?? this.defaultGroup, off = opt.angle ?? Math.PI / sides;
       for (let i = 0; i < sides; i++) {
         let a0 = off + i / sides * Math.PI * 2, a1 = off + (i + 1) / sides * Math.PI * 2, p0x = cx + Math.cos(a0) * r, p0y = cy + Math.sin(a0) * r, p1x = cx + Math.cos(a1) * r, p1y = cy + Math.sin(a1) * r, am = (a0 + a1) / 2, n = [Math.cos(am), Math.sin(am), 0], u0 = i / sides * circ, u1 = (i + 1) / sides * circ;
         this.quad(
@@ -1345,7 +1439,7 @@ void main() {
             [pts[0][0], pts[0][1], z1],
             [pts[1][0], pts[1][1], z1],
             [pts[2][0], pts[2][1], z1],
-            pts.map((p) => [(p[0] - cx + r) * 16, (p[1] - cy + r) * 16]),
+            pts.map((p) => [(p[0] - cx + r) * 32, (p[1] - cy + r) * 32]),
             capTex,
             [0, 0, 1],
             opt.capMat ?? MAT.SNOW | MAT.WET,
@@ -1354,7 +1448,7 @@ void main() {
         }
     }
     cone(cx, cy, z0, z1, r, sides, tex, opt = {}) {
-      let g = opt.group ?? this.defaultGroup, off = opt.angle ?? Math.PI / sides, H = Math.hypot(z1 - z0, r) * 16, circ = 2 * Math.PI * r * 16;
+      let g = opt.group ?? this.defaultGroup, off = opt.angle ?? Math.PI / sides, H = Math.hypot(z1 - z0, r) * 32, circ = 2 * Math.PI * r * 32;
       for (let i = 0; i < sides; i++) {
         let a0 = off + i / sides * Math.PI * 2, a1 = off + (i + 1) / sides * Math.PI * 2, am = (a0 + a1) / 2, slope = r / (z1 - z0), n = [Math.cos(am), Math.sin(am), slope], l = Math.hypot(n[0], n[1], n[2]), u0 = i / sides * circ, u1 = (i + 1) / sides * circ;
         this.tri(
@@ -1371,7 +1465,7 @@ void main() {
     }
     // Square pyramid
     pyramid(x0, y0, x1, y1, z0, z1, tex, opt = {}) {
-      let g = opt.group ?? this.defaultGroup, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, W = (x1 - x0) * 16, Hs = Math.hypot(z1 - z0, (y1 - y0) / 2) * 16, top = [cx, cy, z1], mat = opt.mat ?? MAT.SNOW;
+      let g = opt.group ?? this.defaultGroup, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, W = (x1 - x0) * 32, Hs = Math.hypot(z1 - z0, (y1 - y0) / 2) * 32, top = [cx, cy, z1], mat = opt.mat ?? MAT.SNOW;
       this.tri([x0, y1, z0], top, [x1, y1, z0], [[0, Hs], [W / 2, 0], [W, Hs]], tex, null, mat, g), this.tri([x1, y0, z0], top, [x0, y0, z0], [[0, Hs], [W / 2, 0], [W, Hs]], tex, null, mat, g), this.tri([x1, y1, z0], top, [x1, y0, z0], [[0, Hs], [W / 2, 0], [W, Hs]], tex, null, mat, g), this.tri([x0, y0, z0], top, [x0, y1, z0], [[0, Hs], [W / 2, 0], [W, Hs]], tex, null, mat, g);
     }
     finish() {
@@ -1441,58 +1535,85 @@ void main() {
     return x < 117 && out.push([x, 117]), out;
   }
   function paintGround(region3, rng) {
-    let p = region3.p, N = 117 * 16;
-    for (let y = 0; y < N; y++)
-      for (let x = 0; x < N; x++) {
-        let h = hash2i(x, y, 11), big = hash2i(x >> 5, y >> 5, 12), c = COL.asphalt, f = 0.94 + h * 0.1 + (big - 0.5) * 0.04;
-        p.set(x, y, shade(c, f), GC.ASPHALT);
+    let p = region3.p, N = 117 * 32, d = region3.page.data, cells = Math.ceil(N / 64), big = new Float32Array(cells * cells);
+    for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cells, i / cells | 0, 12) - 0.5;
+    let ar = COL.asphalt >> 16 & 255, ag = COL.asphalt >> 8 & 255, ab = COL.asphalt & 255;
+    for (let y = 0; y < N; y++) {
+      let row = (y >> 6) * cells, i = y * N * 4;
+      for (let x = 0; x < N; x++, i += 4) {
+        let h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11 | 0;
+        h = Math.imul(h ^ h >>> 13, 1274126177), h ^= h >>> 16;
+        let r = (h >>> 0) / 4294967296, f = 0.93 + r * 0.11 + big[row + (x >> 6)] * 0.06;
+        r > 0.992 ? f += 0.16 : r < 6e-3 && (f -= 0.12), d[i] = Math.min(255, ar * f), d[i + 1] = Math.min(255, ag * f), d[i + 2] = Math.min(255, ab * f), d[i + 3] = GC.ASPHALT;
       }
-    for (let i = 0; i < 160; i++) {
-      let w = rng.int(12, 70), h = rng.int(10, 40), x = rng.int(0, N - w), y = rng.int(0, N - h);
+    }
+    for (let i = 0; i < 170; i++) {
+      let w = rng.int(24, 140), h = rng.int(20, 80), x = rng.int(0, N - w), y = rng.int(0, N - h);
       for (let yy = 0; yy < h; yy++)
         for (let xx = 0; xx < w; xx++) {
           if (p.getA(x + xx, y + yy) !== GC.ASPHALT) continue;
-          let hh = hash2i(x + xx, y + yy, 19);
-          p.set(x + xx, y + yy, shade(COL.asphaltPatch, 0.95 + hh * 0.1), GC.ASPHALT);
+          let edge = xx === 0 || yy === 0 || xx === w - 1 || yy === h - 1, hh = hash2i(x + xx, y + yy, 19);
+          p.set(x + xx, y + yy, edge ? 3092792 : shade(COL.asphaltPatch, 0.95 + hh * 0.1), GC.ASPHALT);
         }
     }
-    for (let i = 0; i < 240; i++) {
-      let x = rng.int(0, N), y = rng.int(0, N), len = rng.int(6, 30);
+    for (let i = 0; i < 420; i++) {
+      let x = rng.int(0, N), y = rng.int(0, N), len = rng.int(10, 60), dx = rng.int(-1, 1), dy = rng.chance(0.5) ? 1 : -1;
       for (let k = 0; k < len; k++)
-        p.set(x, y, 3421757, GC.ASPHALT), x += rng.int(-1, 1), y += rng.int(-1, 1) || 1;
+        if (p.set(x, y, 3158586, GC.ASPHALT), rng.chance(0.3) && (dx = rng.int(-1, 1)), x += dx, y += dy, rng.chance(0.06)) {
+          let bx = x, by = y;
+          for (let j = 0; j < 6; j++)
+            bx += rng.int(-1, 1), by += 1, p.set(bx, by, 3421757, GC.ASPHALT);
+        }
     }
-    for (let i = 0; i < 200; i++) {
-      let x = rng.int(0, N), y = rng.int(0, N);
-      p.ellipse(x, y, rng.range(2, 5), rng.range(2, 4), COL.asphaltDark, GC.ASPHALT);
+    for (let i = 0; i < 260; i++) {
+      let x = rng.int(0, N), y = rng.int(0, N), rx = rng.range(4, 10), ry = rng.range(3, 8);
+      p.ellipse(x, y, rx, ry, 4277325, GC.ASPHALT), p.ellipse(x + 1, y, rx * 0.6, ry * 0.6, COL.asphaltDark, GC.ASPHALT);
     }
     for (let k = 0; k <= 4; k++) {
-      let rs = roadStart(k) * 16, re = roadEnd(k) * 16, rc = roadCenter(k) * 16, pw = Math.round(1.1 * 16);
+      let rs = roadStart(k) * 32, re = roadEnd(k) * 32, pw = Math.round(1.1 * 32);
       markBand(p, 0, rs, N, pw, GC.PARKING), markBand(p, 0, re - pw, N, pw, GC.PARKING), markBand(p, rs, 0, pw, N, GC.PARKING), markBand(p, re - pw, 0, pw, N, GC.PARKING);
     }
+    let paintLine = (x, y, w, h, c, code) => {
+      for (let yy = y; yy < y + h; yy++)
+        for (let xx = x; xx < x + w; xx++) {
+          let worn = hash2i(xx >> 2, yy >> 2, 77) < 0.08;
+          p.set(xx, yy, worn ? mixc(c, 5592668, 0.55) : shade(c, 0.94 + hash2i(xx, yy, 78) * 0.1), code);
+        }
+    };
     for (let k = 0; k <= 4; k++) {
-      let rc = Math.round(roadCenter(k) * 16);
-      for (let i = 0; i < 5; i++) {
-        let a = (i * 27 + 2 + 5 + 2) * 16 + 8, b = (i + 1) * 27 * 16 - 8;
-        i !== 4 && (p.rect(a, rc - 3, b - a, 2, COL.yellow, GC.PAINT_Y), p.rect(a, rc + 1, b - a, 2, COL.yellow, GC.PAINT_Y), p.rect(rc - 3, a, 2, b - a, COL.yellow, GC.PAINT_Y), p.rect(rc + 1, a, 2, b - a, COL.yellow, GC.PAINT_Y));
+      let rc = Math.round(roadCenter(k) * 32);
+      for (let i = 0; i < 4; i++) {
+        let a = (i * 27 + 2 + 5 + 2) * 32 + 16, b = (i + 1) * 27 * 32 - 16;
+        paintLine(a, rc - 5, b - a, 3, COL.yellow, GC.PAINT_Y), paintLine(a, rc + 2, b - a, 3, COL.yellow, GC.PAINT_Y), paintLine(rc - 5, a, 3, b - a, COL.yellow, GC.PAINT_Y), paintLine(rc + 2, a, 3, b - a, COL.yellow, GC.PAINT_Y);
       }
     }
     for (let i = 0; i <= 4; i++)
       for (let j = 0; j <= 4; j++) {
-        let x0 = roadStart(i) * 16, x1 = roadEnd(i) * 16, y0 = roadStart(j) * 16, y1 = roadEnd(j) * 16, sx0 = i * 27 * 16, sx1 = (i * 27 + 2 * 2 + 5) * 16, sy0 = j * 27 * 16, sy1 = (j * 27 + 2 * 2 + 5) * 16;
-        zebra(p, x0, sy0 + 3, x1 - x0, y0 - sy0 - 6, "v"), zebra(p, x0, y1 + 3, x1 - x0, sy1 - y1 - 6, "v"), zebra(p, sx0 + 3, y0, x0 - sx0 - 6, y1 - y0, "h"), zebra(p, x1 + 3, y0, sx1 - x1 - 6, y1 - y0, "h");
-        let rcx = roadCenter(i) * 16, rcy = roadCenter(j) * 16;
-        j > 0 && p.rect(x0 + 2, sy0 - 4, rcx - x0 - 4, 3, COL.white, GC.PAINT_W), j < 4 && p.rect(rcx + 2, sy1 + 1, x1 - rcx - 4, 3, COL.white, GC.PAINT_W), i > 0 && p.rect(sx0 - 4, rcy + 2, 3, y1 - rcy - 4, COL.white, GC.PAINT_W), i < 4 && p.rect(sx1 + 1, y0 + 2, 3, rcy - y0 - 4, COL.white, GC.PAINT_W);
+        let x0 = roadStart(i) * 32, x1 = roadEnd(i) * 32, y0 = roadStart(j) * 32, y1 = roadEnd(j) * 32, sx0 = i * 27 * 32, sx1 = (i * 27 + 2 * 2 + 5) * 32, sy0 = j * 27 * 32, sy1 = (j * 27 + 2 * 2 + 5) * 32;
+        zebra(p, x0, sy0 + 6, x1 - x0, y0 - sy0 - 12, "v"), zebra(p, x0, y1 + 6, x1 - x0, sy1 - y1 - 12, "v"), zebra(p, sx0 + 6, y0, x0 - sx0 - 12, y1 - y0, "h"), zebra(p, x1 + 6, y0, sx1 - x1 - 12, y1 - y0, "h");
+        let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32;
+        j > 0 && paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W), j < 4 && paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W), i > 0 && paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W), i < 4 && paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W);
       }
     let iv = raisedIntervals();
     for (let [ax, bx] of iv)
-      for (let [ay, by] of iv) paintSidewalkRect(p, ax * 16, ay * 16, (bx - ax) * 16, (by - ay) * 16, rng);
+      for (let [ay, by] of iv) paintSidewalkRect(p, ax * 32, ay * 32, (bx - ax) * 32, (by - ay) * 32, rng);
     let manholes = [];
     for (let k = 0; k <= 4; k++)
       for (let s = 0; s < 4; s++) {
         let along = s * 27 + 9 + rng.range(3, 15), off = roadCenter(k) + rng.pick([-0.7, 0.7, 0]);
         for (let axis of ["x", "y"]) {
           let wx = axis === "x" ? along : off, wy = axis === "x" ? off : along;
-          manhole(p, wx * 16, wy * 16), manholes.push({ x: wx, y: wy, axis });
+          manhole(p, wx * 32, wy * 32, rng), manholes.push({ x: wx, y: wy, axis });
+        }
+      }
+    for (let i = 0; i <= 4; i++)
+      for (let j = 0; j <= 4; j++) {
+        let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32, h = 5 / 2 * 32;
+        for (let [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, !0], [rcx + h - 14, rcy + h + 58, !0], [rcx - h - 70, rcy + h - 14, !1], [rcx + h + 58, rcy - h + 2, !1]]) {
+          let w = vert ? 12 : 22, hh = vert ? 22 : 12;
+          p.rect(gx, gy, w, hh, 2500395, GC.METAL);
+          for (let t = 2; t < (vert ? hh : w) - 1; t += 3)
+            vert ? p.rect(gx + 2, gy + t, w - 4, 1, 5000530, GC.METAL) : p.rect(gx + t, gy + 2, 1, hh - 4, 5000530, GC.METAL);
         }
       }
     return { manholes };
@@ -1503,34 +1624,43 @@ void main() {
         p.getA(xx, yy) === GC.ASPHALT && p.setA(xx, yy, code);
   }
   function zebra(p, x, y, w, h, dir) {
+    let put = (xx, yy) => {
+      let worn = hash2i(xx >> 1, yy >> 1, 5) < 0.07 || hash2i(xx >> 3, yy >> 3, 6) < 0.05;
+      p.set(xx, yy, worn ? 11053228 : shade(COL.white, 0.95 + hash2i(xx, yy, 7) * 0.06), GC.CROSSWALK);
+    };
     if (dir === "v")
-      for (let xx = 4; xx < w - 3; xx += 8) p.rect(x + xx, y, 4, h, COL.white, GC.CROSSWALK);
+      for (let xx = 8; xx < w - 7; xx += 16) for (let yy = 0; yy < h; yy++) for (let k = 0; k < 8; k++) put(x + xx + k, y + yy);
     else
-      for (let yy = 4; yy < h - 3; yy += 8) p.rect(x, y + yy, w, 4, COL.white, GC.CROSSWALK);
-    for (let i = 0; i < w * h / 40; i++) {
-      let xx = x + Math.floor(hash2i(i, x, 5) * w), yy = y + Math.floor(hash2i(i, y, 6) * h);
-      p.getA(xx, yy) === GC.CROSSWALK && p.set(xx, yy, 13224396, GC.CROSSWALK);
-    }
+      for (let yy = 8; yy < h - 7; yy += 16) for (let xx = 0; xx < w; xx++) for (let k = 0; k < 8; k++) put(x + xx, y + yy + k);
   }
   function paintSidewalkRect(p, x, y, w, h, rng) {
     for (let yy = 0; yy < h; yy++)
       for (let xx = 0; xx < w; xx++) {
-        let gx = x + xx, gy = y + yy, hh = hash2i(gx, gy, 31), c = shade(COL.sidewalk, 0.96 + hh * 0.07);
-        (gx % 12 === 0 || gy % 12 === 0) && (c = COL.sidewalkDark);
-        let slab = hash2i(Math.floor(gx / 12), Math.floor(gy / 12), 33);
-        slab < 0.12 ? c = shade(c, 0.93) : slab > 0.94 && (c = mixc(c, 14275264, 0.4)), p.set(gx, gy, c, GC.SIDEWALK);
+        let gx = x + xx, gy = y + yy, hh = hash2i(gx, gy, 31), slab = hash2i(Math.floor(gx / 24), Math.floor(gy / 24), 33), c = shade(COL.sidewalk, 0.955 + hh * 0.07);
+        slab < 0.12 ? c = shade(c, 0.93) : slab > 0.94 ? c = mixc(c, 14275264, 0.4) : slab > 0.9 && (c = mixc(c, 12104874, 0.35));
+        let lx = gx % 24, ly = gy % 24;
+        lx === 0 || ly === 0 ? c = COL.sidewalkDark : lx === 1 || ly === 1 ? c = shade(c, 1.05) : (lx === 23 || ly === 23) && (c = shade(c, 0.95)), hh > 0.995 && (c = shade(c, 0.85)), p.set(gx, gy, c, GC.SIDEWALK);
       }
-    p.rect(x, y, w, 1, COL.curb, GC.CURB), p.rect(x, y + h - 1, w, 1, COL.curb, GC.CURB), p.rect(x, y, 1, h, COL.curb, GC.CURB), p.rect(x + w - 1, y, 1, h, COL.curb, GC.CURB);
-    let n = Math.floor(w * h / 260);
+    let nc = Math.floor(w * h / 2400);
+    for (let i = 0; i < nc; i++) {
+      let cx = x + rng.int(4, w - 5), cy = y + rng.int(4, h - 5);
+      for (let k = 0; k < rng.int(5, 14); k++)
+        p.set(cx, cy, 10262927, GC.SIDEWALK), cx += rng.int(-1, 1), cy += rng.chance(0.5) ? 1 : 0;
+    }
+    for (let [rx, ry, rw, rh] of [[x, y, w, 2], [x, y + h - 2, w, 2], [x, y, 2, h], [x + w - 2, y, 2, h]]) p.rect(rx, ry, rw, rh, COL.curb, GC.CURB);
+    for (let [rx, ry, rw, rh] of [[x + 2, y + 2, w - 4, 1], [x + 2, y + h - 3, w - 4, 1], [x + 2, y + 2, 1, h - 4], [x + w - 3, y + 2, 1, h - 4]]) p.rect(rx, ry, rw, rh, 11841961, GC.CURB);
+    let n = Math.floor(w * h / 900);
     for (let i = 0; i < n; i++) {
-      let gx = x + rng.int(2, w - 3), gy = y + rng.int(2, h - 3);
-      p.rect(gx, gy, 2, 2, rng.chance(0.5) ? 10131343 : 9210242, GC.SIDEWALK);
+      let gx = x + rng.int(4, w - 6), gy = y + rng.int(4, h - 6), c = rng.chance(0.5) ? 10131343 : 9210242;
+      p.rect(gx, gy, 2, 2, c, GC.SIDEWALK), rng.chance(0.4) && p.set(gx + 2, gy + 1, c, GC.SIDEWALK);
     }
   }
-  function manhole(p, cx, cy) {
-    p.ellipse(cx, cy, 7, 7, 3815734, GC.METAL), p.ellipse(cx, cy, 6, 6, COL.metal, GC.METAL);
-    for (let i = -4; i <= 4; i += 2) p.rect(cx - 5, cy + i, 10, 1, 4868422, GC.METAL);
-    p.ring(cx, cy, 6, 6, 1, 6973798, GC.METAL);
+  function manhole(p, cx, cy, rng) {
+    p.ellipse(cx, cy, 14, 14, 3026219, GC.METAL), p.ellipse(cx, cy, 12.5, 12.5, COL.metal, GC.METAL);
+    for (let yy = -11; yy <= 11; yy++)
+      for (let xx = -11; xx <= 11; xx++)
+        xx * xx + yy * yy > 110 || ((xx + 40) % 4 === 0 || (yy + 40) % 4 === 0) && p.set(cx + xx, cy + yy, 4868422, GC.METAL);
+    p.ring(cx, cy, 12.5, 12.5, 1.2, 7763311, GC.METAL), p.ring(cx, cy, 6, 6, 1, 6973796, GC.METAL), p.rect(cx - 2, cy - 1, 4, 2, 3026219, GC.METAL);
   }
   function buildGroundGeometry(mb, ground, tex) {
     let g = { t: ground, world: !0, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
@@ -1539,7 +1669,7 @@ void main() {
     for (let [ax, bx] of iv)
       for (let [ay, by] of iv)
         mb.box(ax, ay, 0, bx, by, 0.125, {
-          pz: { t: ground, u0: ax * 16, v0: ay * 16, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
+          pz: { t: ground, u0: ax * 32, v0: ay * 32, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
           px: tex.curb,
           nx: tex.curb,
           py: tex.curb,
@@ -1548,40 +1678,49 @@ void main() {
   }
   var TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: 114, station: [14, 34] };
   function buildSlabSides(mb, atlas, tex) {
-    let T16 = 16, { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL, WH = Math.round((tz1 - tz0) * T16), wall = atlas.shared("tunnel_wall", 64, WH, (p) => {
-      let H = p.h;
-      for (let y = 0; y < H; y++) for (let x = 0; x < 64; x++) {
-        let c = x % 8 === 0 || y % 6 === 0 ? 4078134 : hash2i(x >> 3, Math.floor(y / 6), 3) < 0.15 ? 6972506 : 5920076;
-        y < 30 && (c = shade(c, 0.55 + y / 70)), y > H - 5 && (c = 3420204), p.set(x, y, c);
-      }
-      for (let x = 6; x < 64; x += 32) for (let y = 0; y < H - 4; y++)
-        p.set(x, y, 2303530), p.set(x + 1, y, 3159098);
-      for (let y = 44; y < H - 6; y += 3) p.set(40, y, 8010282);
-      for (let x of [20, 52]) p.rect(x, 40, 4, 2, 16769696, 128);
-    }), station = atlas.shared("station_wall", 128, WH, (p) => {
+    let T16 = 32, { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL, WH = Math.round((tz1 - tz0) * T16), wall = atlas.shared("tunnel_wall", 128, WH, (p) => {
       let H = p.h;
       for (let y = 0; y < H; y++) for (let x = 0; x < 128; x++) {
-        let c = x % 4 === 0 || y % 4 === 0 ? 13157560 : 15394522;
-        y < 30 && (c = shade(c, 0.5 + y / 60)), p.set(x, y, c);
+        let bx = x >> 4, by = Math.floor(y / 12), c = x % 16 === 0 || y % 12 === 0 ? 3814962 : hash2i(bx, by, 3) < 0.15 ? 6972506 : 5920076;
+        c = shade(c, 0.93 + hash2i(x, y, 4) * 0.12), y < 60 && (c = shade(c, 0.5 + y / 120)), y > H - 10 && (c = y === H - 10 ? 4867650 : 3420204), p.set(x, y, c);
       }
+      for (let cx of [12, 76]) for (let y = 0; y < H - 10; y++)
+        p.set(cx, y, 1974565), p.set(cx + 1, y, 2764339), p.set(cx + 2, y, 3817544), p.set(cx + 3, y, 2764339);
       for (let x = 0; x < 128; x++)
-        p.set(x, 36, 2779722), p.set(x, 37, 2779722), p.set(x, 38, 13148224);
-      for (let ox of [8, 72])
-        p.rect(ox, 41, 46, 11, 2779722), p.frame(ox, 41, 46, 11, 13148224), p.text(ox + 5, 44, "23 ST", 15921126);
-      for (let x of [62, 124]) p.rect(x - 2, 30, 6, 2, 16774872, 128);
-    }), track = atlas.shared("track", 32, Math.round(TD * T16), (p) => {
+        p.set(x, 66 + Math.round(Math.sin(x * 0.05) * 1.5), 1973792), p.set(x, 70, 2763308);
+      for (let y = 88; y < H - 12; y += 2) p.set(80 + y % 3, y, 8010282);
+      for (let lx of [40, 104])
+        p.rect(lx - 1, 79, 10, 6, 2763308), p.rect(lx, 80, 8, 4, 16769696, 128), p.set(lx + 3, 80, 2763308);
+    }), station = atlas.shared("station_wall", 256, WH, (p) => {
       let H = p.h;
-      for (let y = 0; y < H; y++) for (let x = 0; x < 32; x++) p.set(x, y, hash2i(x, y, 8) < 0.3 ? 4867136 : 5919820);
-      for (let x = 0; x < 32; x += 4) for (let y = 6; y < H - 6; y++) p.set(x, y, 5914154);
-      for (let x = 0; x < 32; x++)
-        p.set(x, 12, 12106946), p.set(x, 13, 6975092), p.set(x, H - 14, 12106946), p.set(x, H - 13, 6975092);
-      for (let x = 0; x < 32; x++) p.set(x, H - 6, 15909424);
-    }), platformTop = atlas.shared("platform_top", 32, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 || y % 8 === 0 ? 10131084 : 11841702);
-      for (let x = 0; x < 32; x++)
-        p.set(x, 0, 15909424), p.set(x, 1, 15909424);
-    }), concrete = atlas.shared("tunnel_conc", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(6973024, 0.9 + hash2i(x, y, 2) * 0.2));
+      for (let y = 0; y < H; y++) for (let x = 0; x < 256; x++) {
+        let c = x % 8 === 0 || y % 8 === 0 ? 12894388 : shade(15394522, 0.97 + hash2i(x >> 3, y >> 3, 9) * 0.05);
+        y < 60 && (c = shade(c, 0.5 + y / 120)), p.set(x, y, c);
+      }
+      for (let x = 0; x < 256; x++) {
+        for (let y = 72; y < 76; y++) p.set(x, y, 2779722);
+        p.set(x, 76, 13148224), p.set(x, 77, 13148224), x % 8 < 4 && (p.set(x, 73, 4164196), p.set(x, 74, 4164196));
+      }
+      for (let ox of [20, 148])
+        p.rect(ox, 82, 88, 18, 2779722), p.frame(ox, 82, 88, 18, 13148224), p.frame(ox + 2, 84, 84, 14, 4164196), p.text7(ox + 30, 88, "23 ST", 15921126);
+      for (let lx of [122, 250]) p.rect(lx - 4, 60, 12, 3, 16774872, 128);
+    }), track = atlas.shared("track", 64, Math.round(TD * T16), (p) => {
+      let H = p.h;
+      for (let y = 0; y < H; y++) for (let x = 0; x < 64; x++) {
+        let r = hash2i(x, y, 8);
+        p.set(x, y, r < 0.25 ? 4867136 : r > 0.92 ? 7235422 : 5919820);
+      }
+      for (let x = 0; x < 64; x += 8) for (let y = 12; y < H - 12; y++)
+        p.set(x, y, 5914154), p.set(x + 1, y, 6965810), p.set(x + 2, y, 4862498);
+      for (let ry of [24, H - 28]) for (let x = 0; x < 64; x++)
+        p.set(x, ry, 14212322), p.set(x, ry + 1, 10133672), p.set(x, ry + 2, 5922406);
+      for (let x = 0; x < 64; x++)
+        p.set(x, H - 12, 15909424), p.set(x, H - 11, 14198816), p.set(x, H - 10, 6969888);
+    }), platformTop = atlas.shared("platform_top", 64, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) p.set(x, y, x % 16 === 0 || y % 16 === 0 ? 10131084 : shade(11841702, 0.96 + hash2i(x, y, 5) * 0.08));
+      for (let x = 0; x < 64; x++) for (let y = 0; y < 4; y++) p.set(x, y, (x + y) % 4 < 2 ? 15909424 : 14198816);
+    }), concrete = atlas.shared("tunnel_conc", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(6973024, 0.9 + hash2i(x, y, 2) * 0.2));
     }), soil = tex.soil, sides = [
       // [normal, point(a,d)->[x,y]]  a runs left->right as seen from outside; d goes into the slab
       { key: "py", n: [0, 1], pt: (a, d) => [a, 117 - d] },
@@ -1660,45 +1799,57 @@ void main() {
   // src/world/textures.js
   function makeBaseTextures(atlas) {
     let tex = {};
-    tex.curb = atlas.shared("curb", 32, 2, (p) => {
-      p.rect(0, 0, 32, 1, 13815752), p.rect(0, 1, 32, 1, 10328723);
-      for (let x = 0; x < 32; x += 8) p.set(x, 1, 8815484);
+    tex.curb = atlas.shared("curb", 64, 4, (p) => {
+      for (let x = 0; x < 64; x++)
+        p.set(x, 0, 14868440), p.set(x, 1, shade(13157822, 0.97 + hash2i(x, 1, 3) * 0.06)), p.set(x, 2, shade(11578790, 0.97 + hash2i(x, 2, 3) * 0.06)), p.set(x, 3, 9078655);
+      for (let x = 0; x < 64; x += 16)
+        p.set(x, 1, 9078655), p.set(x, 2, 9078655);
     });
-    let H = 7 * 16;
-    return tex.soil = atlas.shared("soil", 256, H, (p) => {
+    let H = 7 * 32, W = 512;
+    return tex.soil = atlas.shared("soil", W, H, (p) => {
       let rng = new RNG(99);
       for (let y = 0; y < H; y++)
-        for (let x = 0; x < 256; x++) {
-          let h = hash2i(x, y, 3), c, wav = Math.sin(x * 0.07) * 2 + Math.sin(x * 0.023 + 1) * 3;
-          if (y < 3) c = y === 0 ? 6974578 : 5592924;
-          else if (y < 18 + wav) c = shade(7031603, 0.88 + h * 0.2);
-          else if (y < 46 + wav) c = shade(9333576, 0.9 + h * 0.18);
-          else {
-            let band2 = Math.sin((x + y * 2.2) * 0.09) * 0.5 + 0.5;
-            c = shade(mixc(6121072, 8094604, band2), 0.85 + h * 0.25), h > 0.985 && (c = 13226714);
+        for (let x = 0; x < W; x++) {
+          let h = hash2i(x, y, 3), c, wav = Math.sin(x * 0.035) * 4 + Math.sin(x * 0.0115 + 1) * 6;
+          if (y < 3) c = y === 0 ? 8027266 : 6053475;
+          else if (y < 6) c = 9077880;
+          else if (y < 36 + wav) c = shade(7031603, 0.86 + h * 0.22);
+          else if (y < 92 + wav) {
+            let band2 = Math.sin(y * 0.4 + x * 0.02) * 0.5 + 0.5;
+            c = shade(mixc(9333576, 10122832, band2 * 0.5), 0.88 + h * 0.2);
+          } else {
+            let fol = Math.sin((x + y * 2.2) * 0.045 + Math.sin(x * 0.01) * 2) * 0.5 + 0.5;
+            c = shade(mixc(5923693, 8094604, fol), 0.84 + h * 0.24), h > 0.988 && (c = 13687008);
           }
           p.set(x, y, c);
         }
-      for (let i = 0; i < 140; i++) {
-        let x = rng.int(0, 255), y = rng.int(5, 44);
-        p.rect(x, y, rng.int(1, 3), rng.int(1, 2), shade(10127992, rng.range(0.8, 1.2)));
+      for (let i = 0; i < 320; i++) {
+        let x = rng.int(0, W - 1), y = rng.int(8, 88), w = rng.int(2, 5), hh = rng.int(1, 3), c = shade(10127992, rng.range(0.75, 1.2));
+        p.rect(x, y, w, hh, c), p.hline(x, y, w, shade(c, 1.2));
       }
-      for (let i = 0; i < 18; i++) {
-        let x = rng.int(0, 255), y = rng.int(50, H - 4);
-        for (let k = 0; k < 18; k++)
-          p.set(x, y, 4409938), x += rng.int(-1, 1), y += 1;
+      for (let i = 0; i < 24; i++) {
+        let x = rng.int(0, W - 1), y = 6;
+        for (let k = 0; k < rng.int(10, 26); k++)
+          p.set(x, y, 4863012), x += rng.int(-1, 1), y += 1;
+      }
+      for (let i = 0; i < 36; i++) {
+        let x = rng.int(0, W - 1), y = rng.int(100, H - 6);
+        for (let k = 0; k < 32; k++)
+          p.set(x, y, 4080972), p.set(x + 1, y, 7239296), x += rng.int(-1, 1), y += 1;
       }
       let pipes = [
-        [30, 26, 5, 9146262, 5922406],
-        [74, 32, 4, 14144200, 10262154],
-        [120, 24, 3, 13666862, 9329692],
-        [168, 34, 6, 5992326, 4016988],
-        [214, 28, 4, 14144200, 10262154],
-        [240, 38, 3, 8027524, 5593182]
+        [60, 48, 10, 9146262, 5922406],
+        [148, 60, 8, 14144200, 10262154],
+        [240, 46, 6, 13666862, 9329692],
+        [336, 66, 12, 5992326, 4016988],
+        [428, 52, 8, 14144200, 10262154],
+        [480, 74, 6, 8027524, 5593182]
       ];
       for (let [cx, cy, r, c1, c2] of pipes)
-        p.ellipse(cx, cy, r + 1, r + 1, 3811872), p.ellipse(cx, cy, r, r, c2), p.ellipse(cx - 1, cy - 1, r - 1, r - 1, c1);
-      p.rect(0, H - 1, 256, 1, 3093562);
+        p.ellipse(cx, cy, r + 2, r + 2, 3811872), p.ellipse(cx, cy, r, r, c2), p.ellipse(cx - 1, cy - 1, r - 2, r - 2, c1), p.ellipse(cx - r * 0.35, cy - r * 0.35, r * 0.3, r * 0.3, shade(c1, 1.2)), p.ring(cx, cy, r, r, 1, shade(c2, 0.8));
+      p.rect(180, 70, 30, 20, 10131084);
+      for (let k = 0; k < 3; k++) for (let j = 0; j < 2; j++) p.ellipse(186 + k * 9, 76 + j * 8, 3, 3, 2763308);
+      p.rect(0, H - 2, W, 2, 2764597);
     }), tex;
   }
 
@@ -1717,112 +1868,172 @@ void main() {
     curtains: [14241615, 15254090, 15921126, 5939416, 8372330, 15044533, 11565782, 15768138, 15524552, 14209216],
     awning: [13119532, 3115590, 2051994, 1776411, 14721056, 9054826, 1011562],
     neon: [16732010, 5231359, 16767055, 8257386, 16743136, 16777215, 16751162]
-  }, glassDay = 3493995, glassHi = 8365508;
+  }, glassDay = 3493995, glassHi = 8826571;
   function brickFill(p, x, y, w, h, pal, seed = 1, opt = {}) {
-    let base = pal[0], mortar = mixc(base, 14076344, 0.22);
+    let base = pal[0], mortar = mixc(base, 14208188, 0.42), mortarD = shade(mortar, 0.9);
     for (let yy = 0; yy < h; yy++) {
-      let gy = y + yy + (opt.oy || 0), row = gy >> 1, isMortar = (gy & 1) === 1;
+      let gy = y + yy + (opt.oy || 0) + p.oy, course = Math.floor(gy / 3), ry = gy % 3;
       for (let xx = 0; xx < w; xx++) {
-        let gx = x + xx + (opt.ox || 0);
-        if (isMortar) {
-          let hh = hash2i(gx, gy, seed);
-          p.set(x + xx, y + yy, shade(mortar, 0.95 + hh * 0.08));
-        } else {
-          let cell = Math.floor((gx + (row & 1) * 2) / 4), hc = hash2i(cell, row, seed + 7), c = pal[Math.floor(hc * pal.length)];
-          hc > 0.965 ? c = shade(c, 0.78) : hc < 0.03 && (c = shade(c, 1.15)), p.set(x + xx, y + yy, shade(c, 0.97 + hash2i(gx, gy, seed + 1) * 0.06));
+        let gx = x + xx + (opt.ox || 0) + p.ox;
+        if (ry === 2) {
+          p.set(x + xx, y + yy, hash2i(gx, gy, seed) < 0.5 ? mortar : mortarD);
+          continue;
         }
+        let bx = gx + (course & 1) * 4;
+        if (bx % 8 === 7) {
+          p.set(x + xx, y + yy, mortar);
+          continue;
+        }
+        let cell = Math.floor(bx / 8), hc = hash2i(cell, course, seed + 7), c = pal[Math.floor(hc * pal.length)];
+        hc > 0.955 ? c = shade(c, 0.74) : hc < 0.035 && (c = shade(c, 1.16)), c = shade(c, (ry === 0 ? 1.05 : 0.97) * (0.97 + hash2i(gx, gy, seed + 1) * 0.06)), p.set(x + xx, y + yy, c);
       }
     }
   }
-  function stoneFill(p, x, y, w, h, pal, seed = 1, course = 6, opt = {}) {
+  function stoneFill(p, x, y, w, h, pal, seed = 1, course = 12, opt = {}) {
+    let bl = opt.blocks || 0;
     for (let yy = 0; yy < h; yy++) {
-      let gy = y + yy + (opt.oy || 0);
+      let gy = y + yy + (opt.oy || 0), ci = course ? Math.floor(gy / course) : 0, ly = course ? gy % course : 1;
       for (let xx = 0; xx < w; xx++) {
-        let gx = x + xx, hh = hash2i(gx, gy, seed), c = shade(pal[0], 0.96 + hh * 0.07);
-        course && gy % course === course - 1 ? c = shade(pal[0], 0.86) : opt.blocks && course && (gx + Math.floor(gy / course) * 7) % opt.blocks === 0 && (c = shade(pal[0], 0.9)), p.set(x + xx, y + yy, c);
+        let gx = x + xx, hh = hash2i(gx + p.ox, gy + p.oy, seed), bi = bl ? Math.floor((gx + ci * 13) / bl) : 0, lx = bl ? (gx + ci * 13) % bl : 1, tone = hash2i(bi, ci, seed + 3), c = shade(pal[0], 0.95 + hh * 0.07 + (tone - 0.5) * 0.06);
+        course && ly === course - 1 ? c = shade(pal[0], 0.8) : course && ly === 0 ? c = shade(pal[0], 1.08) : bl && lx === 0 ? c = shade(pal[0], 0.86) : bl && lx === 1 && (c = shade(pal[0], 1.05)), p.set(x + xx, y + yy, c);
       }
     }
   }
   function smoothFill(p, x, y, w, h, c, seed = 1, amt = 0.05) {
     for (let yy = 0; yy < h; yy++)
       for (let xx = 0; xx < w; xx++) {
-        let hh = hash2i(x + xx, y + yy, seed);
+        let hh = hash2i(x + xx + p.ox, y + yy + p.oy, seed);
         p.set(x + xx, y + yy, shade(c, 1 - amt + hh * amt * 2));
       }
   }
-  function rustication(p, x, y, w, h, c, step = 3) {
-    for (let yy = 0; yy < h; yy++)
+  function rustication(p, x, y, w, h, c, step = 6) {
+    for (let yy = 0; yy < h; yy++) {
+      let ly = yy % step;
       for (let xx = 0; xx < w; xx++) {
-        let hh = hash2i(x + xx, y + yy, 77), col = shade(c, 0.95 + hh * 0.08);
-        yy % step === step - 1 ? col = shade(c, 0.7) : yy % step === 0 && (col = shade(c, 1.08)), p.set(x + xx, y + yy, col);
+        let hh = hash2i(x + xx + p.ox, y + yy + p.oy, 77), col = shade(c, 0.95 + hh * 0.08);
+        ly === step - 1 ? col = shade(c, 0.62) : ly === step - 2 ? col = shade(c, 0.82) : ly === 0 && (col = shade(c, 1.1)), p.set(x + xx, y + yy, col);
       }
+    }
   }
   function drawWindow(p, x, y, w, h, o = {}, rng) {
-    let frame = o.frame ?? 15921126, t = o.t ?? 0.5;
+    let frame = o.frame ?? 15921126, frameD = shade(frame, 0.78), t = o.t ?? 0.5;
     if (o.lintel != null) {
-      let lw = w + 2;
-      p.rect(x - 1, y - 2, lw, 2, o.lintel), p.hline(x - 1, y - 1, lw, shade(o.lintel, 0.8)), o.keystone && p.rect(x + (w >> 1) - 1, y - 3, 2, 3, shade(o.lintel, 1.08));
+      let L = o.lintel;
+      if (p.rect(x - 2, y - 5, w + 4, 5, L), p.hline(x - 2, y - 5, w + 4, shade(L, 1.12)), p.hline(x - 2, y - 1, w + 4, shade(L, 0.72)), p.vline(x - 2, y - 5, 5, shade(L, 1.05)), o.keystone) {
+        let kx = x + (w >> 1) - 2;
+        p.rect(kx, y - 7, 4, 7, shade(L, 1.06)), p.vline(kx + 3, y - 7, 7, shade(L, 0.8)), p.hline(kx, y - 7, 4, shade(L, 1.18));
+      }
     }
-    o.arch, p.rect(x, y, w, h, frame);
-    let gx = x + 1, gy = y + 1, gw = w - 2, gh = h - 2, glass = o.glass ?? glassDay, code = winCode(t);
+    o.wall != null && p.hline(x, y - 1, w, shade(o.wall, 0.55)), p.rect(x, y, w, h, frame), p.vline(x, y, h, shade(frame, 1.06)), p.vline(x + w - 1, y, h, frameD), p.hline(x, y + h - 1, w, frameD);
+    let gx = x + 2, gy = y + 2, gw = w - 4, gh = h - 4, glass = o.glass ?? glassDay, code = winCode(t);
     for (let yy = 0; yy < gh; yy++)
       for (let xx = 0; xx < gw; xx++) {
-        let c = shade(glass, 1.12 - yy / gh * 0.25);
-        (xx + yy) % 7 === 2 && yy < gh * 0.6 && xx < gw - 1 && (c = mixc(c, glassHi, 0.7)), p.set(gx + xx, gy + yy, c, code);
+        let c = shade(glass, 1.16 - yy / gh * 0.32), d = xx + yy;
+        (d % 14 === 3 || d % 14 === 4) && yy < gh * 0.55 ? c = mixc(c, glassHi, 0.65) : d % 14 === 5 && yy < gh * 0.4 && (c = mixc(c, glassHi, 0.3)), p.set(gx + xx, gy + yy, c, code);
       }
-    if (o.arch && (p.set(x, y, o.wall ?? frame), p.set(x + w - 1, y, o.wall ?? frame)), o.curtain != null) {
-      let cc = winCode(t, !0), cw = Math.max(1, Math.floor(gw / 3));
-      for (let yy = 0; yy < gh; yy++)
-        for (let xx = 0; xx < cw; xx++) {
-          let c = shade(o.curtain, xx === cw - 1 ? 0.85 : 1);
+    if (o.curtain != null) {
+      let cc = winCode(t, !0), cw = Math.max(2, Math.floor(gw / 3));
+      for (let yy = 0; yy < gh; yy++) {
+        let sway = yy > gh * 0.6 ? 1 : 0;
+        for (let xx = 0; xx < cw + sway; xx++) {
+          let fold = xx % 3 === 1 ? 0.85 : xx === cw + sway - 1 ? 0.78 : 1, c = shade(o.curtain, fold);
           p.set(gx + xx, gy + yy, c, cc), p.set(gx + gw - 1 - xx, gy + yy, c, cc);
         }
-      if (o.valance) for (let xx = 0; xx < gw; xx++) p.set(gx + xx, gy, o.curtain, cc);
+      }
+      for (let xx = 0; xx < gw; xx++) p.set(gx + xx, gy, shade(o.curtain, 0.9), cc);
     }
     if (o.blinds) {
-      let cc = winCode(t, !0), bh = Math.floor(gh * (0.3 + (rng ? rng.next() * 0.5 : 0.3)));
+      let cc = winCode(t, !0), bh = Math.floor(gh * (0.25 + (rng ? rng.next() * 0.55 : 0.3)));
       for (let yy = 0; yy < bh; yy++)
-        for (let xx = 0; xx < gw; xx++) p.set(gx + xx, gy + yy, yy % 2 ? 14209730 : 15657176, cc);
+        for (let xx = 0; xx < gw; xx++) p.set(gx + xx, gy + yy, yy % 3 === 2 ? 12367526 : yy % 3 === 0 ? 15920348 : 14867660, cc);
+      p.hline(gx, gy + bh, gw, 9077880);
     }
-    if (o.rail !== !1 && h >= 9) {
+    let panes = o.panes ?? (w >= 14 ? "2/2" : "1/1");
+    if (o.rail !== !1 && h >= 18) {
       let my = y + Math.floor(h / 2);
-      p.hline(x, my, w, frame);
+      p.rect(x, my - 1, w, 2, frame), p.hline(x, my + 1, w, frameD);
     }
-    if (o.panes && gw >= 5 && p.vline(x + Math.floor(w / 2), y, h, frame), o.plant) {
-      let py = y + h - 3;
-      p.rect(gx, py, gw, 2, 4164149), p.set(gx + 1, py - 1, 5811267), p.set(gx + gw - 2, py - 1, 5811267), o.plant === "flower" && (p.set(gx + 1, py - 1, 15223391), p.set(gx + gw - 2, py - 2, 15909424));
+    if (panes === "2/2" && gw >= 8 && p.vline(x + Math.floor(w / 2), y + 1, h - 2, frame), panes === "6/6" && gw >= 10) {
+      for (let k = 1; k < 3; k++) p.vline(gx + Math.round(gw * k / 3), gy, gh, frame);
+      for (let fy of [gy + Math.round(gh / 4), gy + Math.round(gh * 3 / 4)]) p.hline(gx, fy, gw, frame);
+    }
+    if (o.arch) {
+      let wallC = o.wall ?? frame;
+      p.set(x, y, wallC), p.set(x + 1, y, wallC), p.set(x, y + 1, wallC), p.set(x + w - 1, y, wallC), p.set(x + w - 2, y, wallC), p.set(x + w - 1, y + 1, wallC);
+    }
+    if (o.plant) {
+      let py = y + h - 7;
+      for (let xx = 0; xx < gw; xx++)
+        p.set(gx + xx, py + 3, 7031346), p.set(gx + xx, py + 2, 4164149), hash2i(xx + x, py, 3) < 0.6 && p.set(gx + xx, py + 1, 5811267), hash2i(xx + x, py, 4) < 0.3 && p.set(gx + xx, py, 7127120);
+      if (o.plant === "flower") for (let k = 1; k < gw; k += 3) p.set(gx + k, py, [15223391, 15909424, 15044533][k % 3]);
     }
     if (o.cat) {
-      let cx = gx + 1, cy = y + h - 4, cc = o.cat;
-      p.rect(cx, cy, 3, 2, cc), p.set(cx, cy - 1, cc), p.set(cx + 2, cy - 1, cc);
+      let cx = gx + 2, cy = y + h - 9, cc = o.cat;
+      p.rect(cx, cy + 2, 6, 4, cc), p.rect(cx + 1, cy, 4, 3, cc), p.set(cx + 1, cy - 1, cc), p.set(cx + 4, cy - 1, cc), p.set(cx + 2, cy + 1, 15913024), p.set(cx + 4, cy + 1, 15913024), p.set(cx + 6, cy + 4, cc), p.set(cx + 7, cy + 3, cc);
     }
-    o.sill != null && p.rect(x - 1, y + h, w + 2, 1, o.sill);
+    if (o.sill != null) {
+      let S2 = o.sill;
+      p.rect(x - 2, y + h, w + 4, 3, S2), p.hline(x - 2, y + h, w + 4, shade(S2, 1.15)), p.hline(x - 2, y + h + 2, w + 4, shade(S2, 0.7)), o.wall != null && p.hline(x - 1, y + h + 3, w + 2, shade(o.wall, 0.6));
+    }
   }
   function drawDoor(p, x, y, w, h, o = {}) {
     let c = o.color ?? 6044458, frame = o.frame ?? shade(c, 0.7);
-    p.rect(x, y, w, h, frame), p.rect(x + 1, y + 1, w - 2, h - 1, c), o.transom !== !1 && (p.rect(x + 1, y + 1, w - 2, 3, glassDay, winCode(o.t ?? 0.15)), p.hline(x + 1, y + 4, w - 2, frame));
-    let py = y + (o.transom !== !1 ? 6 : 2);
-    if (o.glass)
-      p.rect(x + 2, py, w - 4, Math.floor((h - (py - y)) * 0.55), glassDay, winCode(o.t ?? 0.15));
-    else
-      for (let yy = py; yy < y + h - 2; yy += 4)
-        p.frame(x + 2, yy, Math.max(1, Math.floor((w - 4) / 2)), 3, shade(c, 0.82)), p.frame(x + 2 + Math.ceil((w - 4) / 2), yy, Math.max(1, Math.floor((w - 4) / 2)), 3, shade(c, 0.82));
-    if (p.set(x + w - 3, y + Math.floor(h * 0.6), 15123274), o.number != null && p.text(x + 1, y - 6, String(o.number), 15123274), o.wreath) {
-      let cx = x + (w >> 1), cy = py + 3;
-      p.ring(cx, cy, 3, 3, 1, 3111482), p.set(cx, cy + 2, 14168108);
+    p.rect(x, y, w, h, frame), p.rect(x + 2, y + 2, w - 4, h - 2, c);
+    let py = y + 2;
+    if (o.transom !== !1) {
+      for (let yy = 0; yy < 7; yy++) for (let xx = 0; xx < w - 4; xx++) p.set(x + 2 + xx, y + 2 + yy, shade(glassDay, 1.15 - yy * 0.04), winCode(o.t ?? 0.15));
+      let cx = x + w / 2, cy = y + 2 + 7;
+      for (let k = 1; k < 4; k++) {
+        let a = Math.PI * (k / 4);
+        for (let r = 2; r < 7; r++) p.set(Math.round(cx - Math.cos(a) * r * 1.4), Math.round(cy - Math.sin(a) * r), frame);
+      }
+      p.hline(x + 2, y + 2 + 7, w - 4, frame), py = y + 2 + 7 + 2;
+    }
+    let lw = w - 4;
+    if (o.glass) {
+      let gh = Math.floor((h - (py - y)) * 0.5);
+      p.rect(x + 4, py + 1, lw - 4, gh, shade(glassDay, 1.1), winCode(o.t ?? 0.15)), p.hline(x + 4, py + 2, lw - 4, glassHi, winCode(o.t ?? 0.15)), py += gh + 3;
+    }
+    let half = Math.floor((lw - 2) / 2);
+    for (let yy = py; yy < y + h - 4; yy += 9)
+      for (let px of [x + 3, x + 3 + half + 1]) {
+        let ph = Math.min(7, y + h - 4 - yy);
+        ph < 3 || (p.rect(px, yy, half - 1, ph, shade(c, 0.88)), p.hline(px, yy, half - 1, shade(c, 0.7)), p.vline(px, yy, ph, shade(c, 0.7)), p.hline(px, yy + ph - 1, half - 1, shade(c, 1.15)), p.vline(px + half - 2, yy, ph, shade(c, 1.15)));
+      }
+    if (p.rect(x + w - 5, y + Math.floor(h * 0.58), 2, 2, 15123274), p.set(x + w - 5, y + Math.floor(h * 0.58), 16773280), p.rect(x + 2, y + h - 3, w - 4, 2, 12098128), o.number != null) {
+      let s = String(o.number), tw = textWidth(s, 1, !0);
+      p.text7(x + Math.floor((w - tw) / 2), y - 9, s, 15123274);
+    }
+    if (o.wreath) {
+      let cx = x + (w >> 1), cy = py + 6;
+      p.ring(cx, cy, 5, 5, 2, 3111482), p.set(cx - 2, cy - 4, 14168108), p.set(cx + 3, cy + 2, 14168108), p.rect(cx - 1, cy + 4, 3, 3, 14168108);
     }
   }
   function corniceBand(p, x, y, w, h, c) {
-    p.rect(x, y, w, h, c), p.hline(x, y, w, shade(c, 1.15)), p.hline(x, y + h - 1, w, shade(c, 0.7));
-    for (let xx = 1; xx < w - 1; xx += 3) p.rect(x + xx, y + h - 3, 2, 2, shade(c, 0.82));
-    for (let xx = 2; xx < w - 2; xx += Math.max(8, Math.floor(w / 6)))
-      p.rect(x + xx, y + 1, 2, h - 2, shade(c, 0.9)), p.set(x + xx, y + h - 2, shade(c, 0.6));
+    let hi = shade(c, 1.2), lo = shade(c, 0.66), mid = shade(c, 0.86);
+    if (p.rect(x, y, w, h, c), p.hline(x, y, w, hi), h > 4 && p.hline(x, y + 1, w, shade(c, 1.08)), h > 6 && p.hline(x, y + 3, w, lo), h >= 10) {
+      let dy = y + h - 5;
+      for (let xx = 1; xx < w - 1; xx += 4)
+        p.rect(x + xx, dy, 2, 3, mid), p.set(x + xx, dy + 2, lo);
+    }
+    if (p.hline(x, y + h - 2, w, shade(c, 0.78)), p.hline(x, y + h - 1, w, lo), h >= 10) {
+      let step = Math.max(16, Math.floor(w / 6));
+      for (let xx = 4; xx < w - 4; xx += step)
+        p.rect(x + xx, y + 4, 4, h - 6, mid), p.vline(x + xx, y + 4, h - 6, hi), p.vline(x + xx + 3, y + 4, h - 6, lo), p.set(x + xx + 1, y + h - 4, lo), p.set(x + xx + 2, y + h - 3, lo);
+    }
   }
   function signBoard(p, x, y, w, h, text, o = {}) {
     let bg = o.bg ?? 1776411, fg = o.fg ?? 16767055, lit = o.lit ?? !0;
-    p.rect(x, y, w, h, bg), o.border && p.frame(x, y, w, h, o.border);
-    let scale = o.scale ?? (h >= 12 && textWidth(text, 2) <= w - 4 ? 2 : 1), tw = textWidth(text, scale), tx = x + Math.floor((w - tw) / 2), ty = y + Math.floor((h - 5 * scale) / 2);
-    p.text(tx, ty, text, fg, lit ? winCode(o.t ?? 0.02, !0) : 255, scale);
+    p.rect(x, y, w, h, bg), p.hline(x, y, w, shade(bg, 1.35)), p.hline(x, y + h - 1, w, shade(bg, 0.6)), o.border && p.frame(x, y, w, h, o.border);
+    let a = lit ? winCode(o.t ?? 0.02, !0) : 255, scale = o.scale ?? (h >= 18 && textWidth(text, 2, !0) <= w - 6 ? 2 : 1);
+    if (textWidth(text, scale, !0) <= w - 4 && h >= 7 * scale + 2) {
+      let tw = textWidth(text, scale, !0), tx = x + Math.floor((w - tw) / 2), ty = y + Math.floor((h - 7 * scale) / 2);
+      o.shadow !== !1 && p.text7(tx + scale, ty + scale, text, shade(bg, 0.55), a, scale), p.text7(tx, ty, text, fg, a, scale);
+    } else {
+      scale = h >= 12 && textWidth(text, 2) <= w - 4 ? 2 : 1;
+      let tw = textWidth(text, scale), tx = x + Math.floor((w - tw) / 2), ty = y + Math.floor((h - 5 * scale) / 2);
+      p.text(tx, ty, text, fg, a, scale);
+    }
   }
   var SHOPS = {
     bodega: { name: ["DELI", "GROCERY", "BODEGA", "DELI & GROCERY", "MINI MART"], bg: 15909424, fg: 13119532, awn: 13119532, goods: "snacks" },
@@ -1842,177 +2053,248 @@ void main() {
     diner: { name: ["DINER", "EAT", "LUNCHEONETTE"], bg: 1011562, fg: 16732010, awn: 13119532, goods: "diner" }
   };
   function goods(p, x, y, w, h, kind, rng, t) {
-    let cc = winCode(t, !0), put = (xx, yy, c) => p.set(x + xx, y + yy, c, cc), colors = [14241615, 15254090, 5939416, 8372330, 15044533, 15768138, 16777215, 11565782];
+    let cc = winCode(t, !0), put = (xx, yy, c) => {
+      xx >= 0 && yy >= 0 && xx < w && yy < h && p.set(x + xx, y + yy, c, cc);
+    }, box = (xx, yy, bw, bh, c) => {
+      for (let j = 0; j < bh; j++) for (let i = 0; i < bw; i++) put(xx + i, yy + j, i === 0 ? shade(c, 1.15) : j === bh - 1 ? shade(c, 0.75) : c);
+    }, colors = [14241615, 15254090, 5939416, 8372330, 15044533, 15768138, 16777215, 11565782, 4885082];
     if (kind === "washers") {
-      for (let xx = 0; xx + 4 <= w; xx += 5) {
-        for (let yy = h - 6; yy < h; yy++) for (let k = 0; k < 4; k++) put(xx + k, yy, 15263978);
-        put(xx + 1, h - 4, 4872816), put(xx + 2, h - 4, 4872816), put(xx + 1, h - 3, 4872816), put(xx + 2, h - 3, 6982320);
+      for (let xx = 1; xx + 9 <= w; xx += 11) {
+        box(xx, h - 13, 9, 12, 15263978);
+        for (let j = 0; j < 5; j++) for (let i = 0; i < 5; i++) (i - 2) ** 2 + (j - 2) ** 2 <= 5 && put(xx + 2 + i, h - 10 + j, j < 2 ? 9089240 : 4872816);
+        put(xx + 7, h - 12, 2763308);
       }
+      for (let xx = 0; xx < w; xx += 3) put(xx, 2, 15921126);
       return;
     }
     if (kind === "pizza" || kind === "food" || kind === "diner" || kind === "cafe" || kind === "bagels") {
-      for (let xx = 0; xx < w; xx++) put(xx, h - 3, kind === "cafe" ? 7031346 : 13157564);
-      for (let xx = 0; xx < w; xx++) put(xx, h - 2, 9078400);
-      for (let xx = 1; xx < w - 1; xx += 4) put(xx, 1, 15921126), put(xx + 1, 1, 15921126);
-      if (kind === "pizza") {
-        for (let k = 0; k < 3; k++) put(2 + k, h - 4, 15254090);
-        put(3, h - 4, 13119532);
+      for (let xx = 0; xx < w; xx++) {
+        put(xx, h - 7, kind === "cafe" ? 9067066 : 14210252), put(xx, h - 6, 11052188);
+        for (let j = h - 5; j < h; j++) put(xx, j, 6965818);
       }
-      if (kind === "bagels") for (let k = 1; k < w - 1; k += 3) put(k, h - 4, 12884064);
+      for (let xx = 2; xx + 10 < w; xx += 14) {
+        box(xx, 2, 10, 6, 1973792);
+        for (let k = 1; k < 9; k += 2) put(xx + k, 4, 15921126);
+        put(xx + 2, 6, 15909424);
+      }
+      for (let xx = 4; xx < w; xx += 12)
+        put(xx, 0, 2763308), put(xx, 9, 16773296), put(xx - 1, 10, 16769168), put(xx + 1, 10, 16769168);
+      if (kind === "pizza") for (let k = 0; k < 2; k++) {
+        for (let i = 0; i < 7; i++) put(4 + k * 10 + i, h - 8, 15249472);
+        put(6 + k * 10, h - 9, 13119532), put(8 + k * 10, h - 9, 13119532);
+      }
+      if (kind === "bagels") for (let k = 2; k < w - 2; k += 5)
+        put(k, h - 8, 12884064), put(k + 1, h - 8, 11565120), put(k + 2, h - 8, 12884064);
+      let cx = w - 10;
+      for (let j = h - 18; j < h - 7; j++)
+        put(cx, j, 2777016), put(cx + 1, j, 2777016);
+      put(cx, h - 20, 14196856), put(cx + 1, h - 20, 14196856), put(cx, h - 21, 2759184), put(cx + 1, h - 21, 2759184);
       return;
     }
     if (kind === "bar") {
-      for (let xx = 0; xx < w; xx++) put(xx, h - 3, 4860442);
-      for (let xx = 1; xx < w - 1; xx += 2) put(xx, 2, colors[xx * 3 % colors.length]);
-      put(1, 1, 16732010), put(2, 1, 16732010);
+      for (let xx = 0; xx < w; xx++) {
+        put(xx, h - 7, 5913122);
+        for (let j = h - 6; j < h; j++) put(xx, j, 3810326);
+      }
+      for (let row = 0; row < 2; row++) for (let xx = 1; xx < w - 1; xx += 3) {
+        let c = colors[(xx * 3 + row) % colors.length];
+        put(xx, 4 + row * 6, c), put(xx, 5 + row * 6, shade(c, 0.8)), put(xx, 6 + row * 6, shade(c, 0.7)), put(xx, 3 + row * 6, 2763306);
+      }
+      for (let xx = 0; xx < w; xx++)
+        put(xx, 7, 9071178), put(xx, 13, 9071178);
       return;
     }
     if (kind === "flowers") {
-      for (let xx = 0; xx < w; xx++) for (let yy = h - 5; yy < h; yy++) put(xx, yy, rng.chance(0.5) ? 4164149 : colors[rng.int(0, 4)]);
+      for (let xx = 0; xx < w; xx++) for (let yy = h - 12; yy < h; yy++) {
+        let r = hash2i(xx + x, yy + y, 9);
+        put(xx, yy, yy > h - 4 ? 7031346 : r < 0.45 ? r < 0.2 ? 4164149 : 5811267 : colors[Math.floor(r * 9) % 6]);
+      }
       return;
     }
     if (kind === "art") {
-      for (let xx = 1; xx + 4 < w; xx += 6) {
+      for (let xx = 2; xx + 10 < w; xx += 14) {
         let c = colors[rng.int(0, colors.length - 1)];
-        for (let yy = 2; yy < 6; yy++) for (let k = 0; k < 4; k++) put(xx + k, yy, c);
+        box(xx, 3, 11, 9, 15921126);
+        for (let j = 1; j < 8; j++) for (let i = 1; i < 10; i++) put(xx + i, 3 + j, hash2i(i, j + xx, 5) < 0.5 ? c : shade(c, 0.7));
+        put(xx + 5, 13, 2763308);
       }
       return;
     }
-    for (let yy = 1; yy < h - 1; yy += 3)
+    if (kind === "clothes") {
+      for (let xx = 0; xx < w; xx++) put(xx, 3, 10132122);
+      for (let xx = 2; xx + 5 < w; xx += 7) {
+        let c = colors[rng.int(0, colors.length - 1)];
+        for (let j = 4; j < 14; j++) for (let i = 0; i < 5; i++) j < 6 && (i === 0 || i === 4) || put(xx + i, j, i === 0 ? shade(c, 1.1) : c);
+      }
+      return;
+    }
+    for (let yy = 2; yy < h - 4; yy += 7) {
       for (let xx = 0; xx < w; xx++)
-        put(xx, yy + 2, 9078400), rng.chance(0.75) && put(xx, yy + 1, colors[rng.int(0, colors.length - 1)]);
+        put(xx, yy + 6, 10131086), put(xx, yy + 7, 6973022);
+      for (let xx = 1; xx < w - 2; ) {
+        let bw = rng.int(2, 4), bh = rng.int(3, 6);
+        rng.chance(0.85) && box(xx, yy + 6 - bh, bw, bh, colors[rng.int(0, colors.length - 1)]), xx += bw + 1;
+      }
+    }
   }
   function drawShopfront(p, x, y, w, h, kind, rng, o = {}) {
-    let S2 = SHOPS[kind] || SHOPS.bodega, frameC = o.frame ?? rng.pick([1776411, 3099194, 6044458, 8003359, 2046559, 15262416]), signH = o.signH ?? 6, name = o.name ?? rng.pick(S2.name);
+    let S2 = SHOPS[kind] || SHOPS.bodega, frameC = o.frame ?? rng.pick([1776411, 3099194, 6044458, 8003359, 2046559, 15262416]), signH = o.signH ?? 14, name = o.name ?? rng.pick(S2.name);
     signBoard(p, x, y, w, signH, name, { bg: S2.bg, fg: S2.fg, t: 0.02 });
     let by = y + signH, bh = h - signH;
-    p.rect(x, by, w, bh, frameC);
-    let dw = 5, dx = o.doorLeft ? x + 1 : x + w - dw - 1, t = 0.02 + rng.next() * 0.04, wx0 = o.doorLeft ? dx + dw + 1 : x + 1, wx1 = o.doorLeft ? x + w - 1 : dx - 1, wy = by + 1, wh = bh - 4;
+    p.rect(x, by, w, bh, frameC), p.hline(x, by, w, shade(frameC, 0.6));
+    let dw = 11, dx = o.doorLeft ? x + 2 : x + w - dw - 2, t = 0.02 + rng.next() * 0.04, wx0 = o.doorLeft ? dx + dw + 2 : x + 2, wx1 = o.doorLeft ? x + w - 2 : dx - 2, wy = by + 2, wh = bh - 9;
     for (let yy = wy; yy < wy + wh; yy++)
       for (let xx = wx0; xx < wx1; xx++) {
-        let c = shade(4216685, 1.15 - (yy - wy) / wh * 0.3);
-        p.set(xx, yy, c, winCode(t));
+        let c = shade(4216685, 1.18 - (yy - wy) / wh * 0.34);
+        (xx + yy) % 19 === 3 && yy < wy + wh * 0.5 && (c = mixc(c, glassHi, 0.5)), p.set(xx, yy, c, winCode(t));
       }
     goods(p, wx0, wy, wx1 - wx0, wh, S2.goods, rng, t);
-    for (let xx = wx0 + 7; xx < wx1 - 2; xx += 8) p.vline(xx, wy, wh, frameC);
-    if (p.rect(x, by + bh - 3, w, 3, shade(frameC, 0.8)), p.rect(dx, by + 1, dw, bh - 1, shade(frameC, 0.85)), p.rect(dx + 1, by + 2, dw - 2, bh - 5, 4216685, winCode(t)), p.set(dx + dw - 2, by + Math.floor(bh * 0.55), 15123274), o.open !== !1 && wx1 - wx0 > 10) {
-      let ox = wx0 + 2, oy = wy + 2;
-      p.text(ox, oy, "OPEN", 16732010, winCode(0.01, !0));
-    }
-    return { name, color: S2.awn, kind };
+    for (let xx = wx0 + 15; xx < wx1 - 4; xx += 16)
+      p.rect(xx, wy, 2, wh, frameC), p.vline(xx + 1, wy, wh, shade(frameC, 0.7));
+    let bky = by + bh - 7;
+    p.rect(x, bky, w, 7, shade(frameC, 0.82));
+    for (let xx = x + 3; xx < x + w - 8; xx += 12)
+      p.frame(xx, bky + 2, 9, 4, shade(frameC, 0.62)), p.hline(xx + 1, bky + 2, 7, shade(frameC, 1.1));
+    return p.hline(x, bky, w, shade(frameC, 1.15)), p.rect(dx, by + 2, dw, bh - 2, shade(frameC, 0.85)), p.rect(dx + 2, by + 4, dw - 4, bh - 12, 4216685, winCode(t)), p.hline(dx + 2, by + 5, dw - 4, glassHi, winCode(t)), p.rect(dx + 2, by + Math.floor(bh * 0.55), dw - 4, 2, 13158596), o.open !== !1 && wx1 - wx0 > 26 && (p.text7(wx0 + 3, wy + 3, "OPEN", 16732010, winCode(0.01, !0)), p.rect(wx1 - 6, wy + wh - 8, 4, 5, 15921126)), { name, color: S2.awn, kind };
   }
   function drawGate(p, w, h, rng) {
     for (let yy = 0; yy < h; yy++)
       for (let xx = 0; xx < w; xx++) {
-        let c = yy % 2 ? 9277591 : 10790829;
-        xx % 9 === 0 && (c = 8027524), p.set(xx, yy, shade(c, 0.95 + hash2i(xx, yy, 5) * 0.08));
+        let c = yy % 3 === 0 ? 8224903 : yy % 3 === 1 ? 10790829 : 9869727;
+        xx % 18 === 0 && (c = 6974836), p.set(xx, yy, shade(c, 0.95 + hash2i(xx, yy, 5) * 0.08));
       }
-    p.rect(0, 0, w, 2, 5922147), p.rect(0, h - 1, w, 1, 4869458), graffiti(p, 1, 3, w - 2, h - 5, rng, 0.8);
+    p.rect(0, 0, w, 4, 5922147), p.hline(0, 0, w, 8027523), p.rect(0, h - 2, w, 2, 4869458), graffiti(p, 2, 6, w - 4, h - 10, rng, 0.8);
   }
   function graffiti(p, x, y, w, h, rng, density = 1) {
-    let cols = [16732010, 5231359, 16767055, 8257386, 16743136, 16777215, 1776411, 16751162, 8015871], n = Math.floor(w * h / 60 * density);
+    let cols = [16732010, 5231359, 16767055, 8257386, 16743136, 16777215, 1776411, 16751162, 8015871], n = Math.floor(w * h / 240 * density);
     for (let i = 0; i < n; i++) {
-      let c = rng.pick(cols), kind = rng.int(0, 3), gx = x + rng.int(0, Math.max(0, w - 6)), gy = y + rng.int(0, Math.max(0, h - 5));
+      let c = rng.pick(cols), kind = rng.int(0, 3), gx = x + rng.int(0, Math.max(0, w - 12)), gy = y + rng.int(0, Math.max(0, h - 9));
       if (kind === 0) {
-        let s = rng.pick(["NYC", "ZEPH", "KAWS", "REVS", "SKY", "BOMB", "YO", "ART", "LOVE", "KO", "DMZ", "TAKI"]);
-        p.text(gx, gy, s.slice(0, Math.max(1, Math.floor((w - (gx - x)) / 4))), c);
+        let fit = rng.pick(["NYC", "ZEPH", "REVS", "SKY", "BOMB", "YO", "ART", "LOVE", "KO", "DMZ", "TAKI", "JOY"]).slice(0, Math.max(1, Math.floor((w - (gx - x)) / 6)));
+        p.text7(gx + 1, gy + 1, fit, shade(c, 0.4)), p.text7(gx, gy, fit, c);
       } else if (kind === 1) {
-        let sx = gx, sy = gy + 2;
-        for (let k = 0; k < 8; k++)
-          p.set(sx, sy, c), sx++, sy += rng.int(-1, 1);
-      } else kind === 2 ? (p.ellipse(gx + 2, gy + 2, 2.2, 2.2, c), p.set(gx + 2, gy + 2, shade(c, 0.6))) : p.rect(gx, gy, rng.int(3, 7), 2, c);
+        let sx = gx, sy = gy + 4;
+        for (let k = 0; k < 16; k++)
+          p.set(sx, sy, c), p.set(sx, sy + 1, c), sx++, sy += rng.int(-1, 1);
+      } else kind === 2 ? (p.ellipse(gx + 4, gy + 4, 4.5, 4.5, c), p.ellipse(gx + 4, gy + 4, 2, 2, shade(c, 0.55))) : (p.rect(gx, gy, rng.int(6, 14), 3, c), p.hline(gx, gy + 3, 6, shade(c, 0.5)));
     }
   }
   function mural(p, x, y, w, h, rng) {
     let skies = [[5231359, 16743136], [16767055, 16732010], [8257386, 5208831]], [c1, c2] = rng.pick(skies);
-    for (let yy = 0; yy < h; yy++)
-      for (let xx = 0; xx < w; xx++) p.set(x + xx, y + yy, mixc(c1, c2, yy / h));
-    p.ellipse(x + w * 0.7, y + h * 0.35, h * 0.22, h * 0.22, 16769658);
-    let sx = x;
-    for (; sx < x + w; ) {
-      let bw = rng.int(3, 7), bh = rng.int(Math.floor(h * 0.25), Math.floor(h * 0.7));
-      p.rect(sx, y + h - bh, bw, bh, 2760522);
-      for (let k = 0; k < bh - 2; k += 3) rng.chance(0.5) && p.set(sx + 1, y + h - bh + 1 + k, 16767055);
-      sx += bw;
+    for (let yy = 0; yy < h; yy++) {
+      let c = mixc(c1, c2, yy / h);
+      for (let xx = 0; xx < w; xx++) p.set(x + xx, y + yy, (xx + yy) % 2 && yy % 8 === 0 ? shade(c, 1.05) : c);
     }
-    p.text(x + 2, y + 2, rng.pick(["NYC", "PEACE", "HOOPS", "BKLYN", "LOVE"]), 16777215, 255, h > 26 ? 2 : 1);
+    let sx = x + w * 0.7, sy = y + h * 0.35, sr = h * 0.2;
+    for (let a = 0; a < Math.PI * 2; a += Math.PI / 8) for (let r = sr + 2; r < sr + 6; r++) p.set(Math.round(sx + Math.cos(a) * r), Math.round(sy + Math.sin(a) * r), 16769658);
+    p.ellipse(sx, sy, sr, sr, 16769658), p.ellipse(sx - sr * 0.2, sy - sr * 0.2, sr * 0.6, sr * 0.6, 16773808);
+    let bx = x;
+    for (; bx < x + w; ) {
+      let bw = rng.int(6, 14), bh = rng.int(Math.floor(h * 0.25), Math.floor(h * 0.7));
+      p.rect(bx, y + h - bh, bw, bh, 2760522), p.vline(bx, y + h - bh, bh, 3813210);
+      for (let k = 3; k < bh - 3; k += 4) for (let j = 2; j < bw - 2; j += 3) rng.chance(0.45) && p.set(bx + j, y + h - bh + k, 16767055);
+      rng.chance(0.3) && p.vline(bx + (bw >> 1), y + h - bh - 6, 6, 2760522), bx += bw;
+    }
+    let word = rng.pick(["NYC", "PEACE", "HOOPS", "BKLYN", "LOVE"]), sc = h > 52 ? 2 : 1;
+    p.text7(x + 5, y + 5, word, 2760522, 255, sc), p.text7(x + 4, y + 4, word, 16777215, 255, sc);
   }
   function roofFill(p, w, h, kind, rng) {
-    let base = kind === "silver" ? 13093324 : kind === "gravel" ? 9341830 : kind === "green" ? 6262597 : kind === "deck" ? 10119748 : 5987426;
+    let base = kind === "silver" ? 12895945 : kind === "gravel" ? 9341830 : kind === "green" ? 6262597 : kind === "deck" ? 10119748 : 5987426;
     for (let yy = 0; yy < h; yy++)
       for (let xx = 0; xx < w; xx++) {
         let hh = hash2i(xx + p.ox, yy + p.oy, 41), c = shade(base, 0.93 + hh * 0.12);
-        kind === "tar" && (yy + p.oy) % 10 === 0 && (c = shade(base, 0.85)), kind === "silver" && (xx + p.ox) % 12 === 0 && (c = shade(base, 0.9)), kind === "deck" && (xx + p.ox) % 3 === 0 && (c = shade(base, 0.8)), kind === "gravel" && hh > 0.9 && (c = shade(base, 1.2)), p.set(xx, yy, c);
+        kind === "tar" && yy % 20 === 0 && (c = shade(base, 0.82)), kind === "tar" && yy % 20 === 1 && (c = shade(base, 1.06)), kind === "silver" && xx % 24 === 0 && (c = shade(base, 0.88)), kind === "silver" && xx % 24 === 1 && (c = shade(base, 1.05)), kind === "deck" && xx % 6 === 0 && (c = shade(base, 0.76)), kind === "gravel" && hh > 0.86 && (c = shade(base, hh > 0.95 ? 1.3 : 0.75)), kind === "green" && hh > 0.8 && (c = shade(base, hh > 0.93 ? 1.25 : 0.8)), p.set(xx, yy, c);
       }
-    for (let i = 0; i < Math.floor(w * h / 400); i++) {
-      let x = rng.int(0, w - 6), y = rng.int(0, h - 4);
-      p.rect(x, y, rng.int(3, 8), rng.int(2, 5), shade(base, rng.range(0.85, 1.1)));
+    for (let i = 0; i < Math.floor(w * h / 1600); i++) {
+      let x = rng.int(0, w - 12), y = rng.int(0, h - 8), pw = rng.int(6, 16), ph = rng.int(4, 10), c = shade(base, rng.range(0.85, 1.1));
+      p.rect(x, y, pw, ph, c), p.hline(x, y, pw, shade(c, 1.08));
     }
   }
-  function railingTex(p, w, h, c = 1973794, step = 3) {
-    p.clear(), p.rect(0, 0, w, 1, c), p.rect(0, h - 1, w, 1, c);
-    for (let x = 0; x < w; x += step) p.rect(x, 0, 1, h, c);
+  function railingTex(p, w, h, c = 1973794, step = 4) {
+    p.clear(), p.rect(0, 0, w, 2, c), p.hline(0, 0, w, shade(c, 1.8)), p.rect(0, h - 2, w, 2, c);
+    for (let x = 0; x < w; x += step)
+      p.rect(x, 0, 1, h, c), h > 12 && p.set(x, 3, shade(c, 1.6));
+    if (h > 14) for (let x = 0; x < w; x++) x % step === Math.floor(step / 2) && p.set(x, Math.floor(h / 2), c);
   }
   function chainLinkTex(p, w, h) {
     p.clear();
     for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++)
-        ((x + y) % 4 === 0 || (x - y + 400) % 4 === 0) && p.set(x, y, 12106946);
-    p.rect(0, 0, w, 1, 10133672);
+      for (let x = 0; x < w; x++) {
+        let d1 = (x + y) % 8 === 0, d2 = (x - y + 800) % 8 === 0;
+        (d1 || d2) && p.set(x, y, d1 && d2 ? 12107462 : (x + y) % 16 < 8 ? 9081241 : 8028553);
+      }
+    p.rect(0, 0, w, 2, 10133672);
   }
   function ladderTex(p, w, h, c = 1973794) {
-    p.clear(), p.rect(0, 0, 1, h, c), p.rect(w - 1, 0, 1, h, c);
-    for (let y = 1; y < h; y += 3) p.rect(0, y, w, 1, c);
+    p.clear(), p.rect(0, 0, 2, h, c), p.rect(w - 2, 0, 2, h, c);
+    for (let y = 2; y < h; y += 5) p.rect(0, y, w, 1, c);
   }
   function plankTex(p, w, h, c, hoops = !0) {
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
-        let col = shade(c, 0.9 + hash2i(Math.floor(x / 2), y >> 3, 9) * 0.2);
-        x % 2 === 1 && (col = shade(col, 0.92)), p.set(x, y, col);
+        let plank = Math.floor(x / 4), col = shade(c, 0.88 + hash2i(plank, y >> 4, 9) * 0.22);
+        x % 4 === 3 ? col = shade(col, 0.72) : x % 4 === 0 && (col = shade(col, 1.08)), hash2i(x, y, 11) > 0.97 && (col = shade(col, 0.8)), p.set(x, y, col);
       }
-    if (hoops) for (let y = 3; y < h; y += 6) p.rect(0, y, w, 1, 3815998);
+    if (hoops) for (let y = 6; y < h; y += 12)
+      p.rect(0, y, w, 1, 3026482), p.rect(0, y + 1, w, 1, 4868688);
   }
   function grilleTex(p, w, h, c) {
     for (let y = 0; y < h; y++)
-      for (let x = 0; x < w; x++) p.set(x, y, y % 2 ? shade(c, 0.75) : c);
-    p.frame(0, 0, w, h, shade(c, 0.6));
+      for (let x = 0; x < w; x++) p.set(x, y, y % 3 === 2 ? shade(c, 0.66) : y % 3 === 0 ? shade(c, 1.08) : c);
+    p.frame(0, 0, w, h, shade(c, 0.55)), p.frame(1, 1, w - 2, h - 2, shade(c, 1.12));
   }
   function awningTex(p, w, h, c, striped, text, rng) {
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         let col = c;
-        striped && Math.floor(x / 4) % 2 === 1 && (col = 15921126), p.set(x, y, shade(col, 1 - y / h * 0.12));
+        striped && Math.floor(x / 8) % 2 === 1 && (col = 15921126), col = shade(col, 1 - y / h * 0.14 + (x % 8 === 0 ? -0.04 : 0)), p.set(x, y, col);
       }
     if (text) {
-      let tw = textWidth(text);
-      tw < w - 2 && p.text(Math.floor((w - tw) / 2), Math.max(0, Math.floor((h - 5) / 2)), text, 16777215);
+      let tw = textWidth(text, 1, !0);
+      tw < w - 4 && p.text7(Math.floor((w - tw) / 2), Math.max(0, Math.floor((h - 7) / 2)), text, 16777215);
     }
   }
   function billboardArt(p, w, h, kind, rng) {
     let t = winCode(0.03, !0), S2 = (x, y, ww, hh, c) => {
-      for (let yy = 0; yy < hh; yy++) for (let xx = 0; xx < ww; xx++) p.set(x + xx, y + yy, c, t);
-    }, txt = (x, y, s, c, sc = 1) => p.text(x, y, s, c, t, sc);
+      for (let yy = 0; yy < hh; yy++) for (let xx = 0; xx < ww; xx++) p.set(Math.round(x) + xx, Math.round(y) + yy, c, t);
+    }, txt = (x, y, s, c, sc = 1, sh = null) => {
+      sh != null && p.text7(x + sc, y + sc, s, sh, t, sc), p.text7(x, y, s, c, t, sc);
+    }, disc = (cx, cy, r, c) => p.ellipse(cx, cy, r, r, c, t);
     if (kind === "cola") {
       S2(0, 0, w, h, 14164012);
-      for (let x = 0; x < w; x++) p.set(x, Math.floor(h * 0.62 + Math.sin(x * 0.2) * 2), 16777215, t);
-      S2(w - 14, 3, 7, h - 6, 6950928), S2(w - 13, 4, 2, h - 8, 12075072), txt(3, 4, "FIZZ", 16777215, 2), txt(3, h - 8, "COLA", 16767055);
-    } else if (kind === "bagel")
-      S2(0, 0, w, h, 15909424), p.ellipse(w - 12, h / 2, 8, 6, 12875834, t), p.ellipse(w - 12, h / 2, 3, 2, 15909424, t), txt(3, 4, "BAGEL", 3877408, 2), txt(3, h - 8, "BROS", 3877408);
-    else if (kind === "jazz") {
-      S2(0, 0, w, h, 1907274), txt(3, 3, "JAZZ", 16767055, 2), txt(3, h - 8, "TONIGHT", 5231359);
-      for (let i = 0; i < 6; i++) p.set(w - 10 + i, 6 + i, 14721056, t);
-      S2(w - 6, 11, 4, 3, 14721056);
+      for (let x = 0; x < w; x++) {
+        let wy = Math.floor(h * 0.66 + Math.sin(x * 0.1) * 3);
+        for (let k = 0; k < 3; k++) p.set(x, wy + k, 16777215, t);
+      }
+      S2(w - 26, 6, 12, h - 12, 5901838), S2(w - 24, 8, 3, h - 16, 12075072), S2(w - 23, 2, 6, 5, 14211288), S2(w - 26, h / 2 - 3, 12, 6, 15921126), txt(6, 6, "FIZZ", 16777215, 2, 6950420), txt(6, h - 14, "COLA", 16767055, 1, 6950420);
+    } else if (kind === "bagel") {
+      S2(0, 0, w, h, 15909424), disc(w - 24, h / 2, 14, 10115620), disc(w - 24, h / 2, 12, 12875834), disc(w - 26, h / 2 - 3, 6, 14195288), disc(w - 24, h / 2, 5, 15909424);
+      for (let k = 0; k < 10; k++) p.set(w - 32 + rng.int(0, 16), Math.round(h / 2) - 8 + rng.int(0, 16), 15921126, t);
+      txt(6, 6, "BAGEL", 3877408, 2), txt(6, h - 14, "BROS", 3877408);
+    } else if (kind === "jazz") {
+      S2(0, 0, w, h, 1907274);
+      for (let i = 0; i < 30; i++) p.set(rng.int(0, w - 1), rng.int(0, h - 1), 4868746, t);
+      txt(6, 6, "JAZZ", 16767055, 2, 657962), txt(6, h - 14, "TONIGHT", 5231359);
+      for (let i = 0; i < 14; i++)
+        p.set(w - 22 + Math.floor(i * 0.6), 8 + i, 14721056, t), p.set(w - 21 + Math.floor(i * 0.6), 8 + i, 13142552, t);
+      S2(w - 16, 20, 8, 5, 14721056), S2(w - 14, 22, 4, 2, 9067024);
     } else if (kind === "show") {
       S2(0, 0, w, h, 723723);
-      for (let x = 1; x < w; x += 3)
-        p.set(x, 0, 16767055, t), p.set(x, h - 1, 16767055, t);
-      txt(4, 3, "BIG", 16732010, 2), txt(4, h - 8, "APPLE SHOW", 16777215);
+      for (let x = 2; x < w; x += 6)
+        S2(x, 1, 2, 2, 16767055), S2(x, h - 3, 2, 2, 16767055);
+      txt(8, 7, "BIG", 16732010, 2, 4849680), txt(8, h - 14, "APPLE SHOW", 16777215), disc(w - 18, h / 2, 9, 14164012), S2(w - 19, h / 2 - 12, 2, 4, 6965802), S2(w - 17, h / 2 - 12, 4, 2, 5811267);
     } else if (kind === "taxi") {
       S2(0, 0, w, h, 16764719);
-      for (let x = 0; x < w; x += 4) S2(x, h - 3, 2, 2, 1776411);
-      txt(3, 3, "RIDE", 1776411, 2), txt(3, h - 9, "CITY CAB", 1776411);
-    } else kind === "sun" ? (S2(0, 0, w, h, 5228799), p.ellipse(w - 10, 8, 6, 6, 16769658, t), S2(0, h - 6, w, 6, 15915430), txt(3, 3, "SPF 50", 16777215, 2), txt(3, h - 5, "SUMMER", 14241615)) : (S2(0, 0, w, h, 3115590), txt(3, 3, "GOTHAM", 16777215, 2), txt(3, h - 8, "GIN", 16767055));
-    p.frame(0, 0, w, h, 15263976, t);
+      for (let x = 0; x < w; x += 8)
+        S2(x, h - 6, 4, 3, 1776411), S2(x + 4, h - 3, 4, 3, 1776411);
+      txt(6, 6, "RIDE", 1776411, 2), txt(6, h - 16, "CITY CAB", 1776411);
+    } else if (kind === "sun") {
+      S2(0, 0, w, h, 5228799), disc(w - 20, 14, 11, 16769658), disc(w - 22, 12, 6, 16773808), S2(0, h - 12, w, 12, 15915430);
+      for (let x = 0; x < w; x += 5) p.set(x, h - 12, 15255690, t);
+      txt(6, 6, "SPF 50", 16777215, 2, 1731226), txt(6, h - 10, "SUMMER", 14241615);
+    } else
+      S2(0, 0, w, h, 3115590), txt(6, 6, "GOTHAM", 16777215, 2, 932378), txt(6, h - 14, "GIN", 16767055), S2(w - 18, 8, 10, h - 14, 14215392), S2(w - 16, 4, 6, 5, 1776411), S2(w - 18, h / 2, 10, 6, 13119532);
+    p.frame(0, 0, w, h, 15263976, t), p.frame(1, 1, w - 2, h - 2, 10132122, t);
   }
 
   // src/world/buildings.js
@@ -2064,92 +2346,134 @@ void main() {
   }
   function sharedTex(C) {
     if (C._shared) return C._shared;
-    let A = C.atlas, S2 = {}, brickTile = (name, pal, seed) => A.shared(name, 64, 64, (p) => brickFill(p, 0, 0, 64, 64, pal, seed));
-    return S2.brickRed = brickTile("b_red", PAL.brickRed, 3), S2.brickBrown = brickTile("b_brown", PAL.brickBrown, 4), S2.brickOrange = brickTile("b_orange", PAL.brickOrange, 5), S2.brickTan = brickTile("b_tan", PAL.brickTan, 6), S2.brickPurple = brickTile("b_purple", PAL.brickPurple, 8), S2.brownstone = A.shared("s_brown", 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.brownstone, 9, 6)), S2.limestone = A.shared("s_lime", 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.limestone, 10, 8, { blocks: 16 })), S2.greystone = A.shared("s_grey", 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, PAL.greystone, 11, 8, { blocks: 16 })), S2.concrete = A.shared("concrete", 64, 64, (p) => smoothFill(p, 0, 0, 64, 64, 12170926, 12, 0.05)), S2.darkMetal = A.shared("darkmetal", 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, 2763568, 13, 0.06)), S2.metal = A.shared("metal", 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, 9277591, 14, 0.05)), S2.blackIron = A.shared("iron", 8, 8, (p) => p.rect(0, 0, 8, 8, 1973794)), S2.roofSilver = A.shared("r_silver", 64, 64, (p) => roofFill(p, 64, 64, "silver", C.rng)), S2.roofTar = A.shared("r_tar", 64, 64, (p) => roofFill(p, 64, 64, "tar", C.rng)), S2.roofGravel = A.shared("r_gravel", 64, 64, (p) => roofFill(p, 64, 64, "gravel", C.rng)), S2.roofDeck = A.shared("r_deck", 64, 64, (p) => roofFill(p, 64, 64, "deck", C.rng)), S2.roofGreen = A.shared("r_green", 64, 64, (p) => roofFill(p, 64, 64, "green", C.rng)), S2.railing = A.shared("railing", 48, 9, (p) => railingTex(p, 48, 9, 1973794, 2)), S2.railingTall = A.shared("railing_t", 48, 12, (p) => railingTex(p, 48, 12, 1973794, 3)), S2.fescRail = A.shared("fesc_rail", 48, 10, (p) => {
-      p.clear(), p.rect(0, 0, 48, 1, 1710622), p.rect(0, 4, 48, 1, 1710622);
-      for (let x = 0; x < 48; x += 2) p.rect(x, 0, 1, 10, 1710622);
-    }), S2.ladder = A.shared("ladder", 6, 12, (p) => ladderTex(p, 6, 12)), S2.fstair = A.shared("fstair", 32, 4, (p) => {
-      p.clear(), p.rect(0, 0, 32, 1, 1710622), p.rect(0, 3, 32, 1, 1710622);
-      for (let x = 0; x < 32; x += 2) p.rect(x, 1, 1, 2, 2763312);
-    }), S2.stairs = A.shared("fesc_stairs", 10, 32, (p) => {
-      p.clear(), p.rect(0, 0, 1, 32, 1710622), p.rect(9, 0, 1, 32, 1710622);
-      for (let y = 1; y < 32; y += 2) p.rect(0, y, 10, 1, 2500139);
-    }), S2.grate = A.shared("grate", 16, 16, (p) => {
+    let A = C.atlas, S2 = {}, brickTile = (name, pal, seed) => A.shared(name, 128, 96, (p) => brickFill(p, 0, 0, 128, 96, pal, seed));
+    return S2.brickRed = brickTile("b_red", PAL.brickRed, 3), S2.brickBrown = brickTile("b_brown", PAL.brickBrown, 4), S2.brickOrange = brickTile("b_orange", PAL.brickOrange, 5), S2.brickTan = brickTile("b_tan", PAL.brickTan, 6), S2.brickPurple = brickTile("b_purple", PAL.brickPurple, 8), S2.brownstone = A.shared("s_brown", 128, 96, (p) => stoneFill(p, 0, 0, 128, 96, PAL.brownstone, 9, 12)), S2.limestone = A.shared("s_lime", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.limestone, 10, 16, { blocks: 32 })), S2.greystone = A.shared("s_grey", 128, 128, (p) => stoneFill(p, 0, 0, 128, 128, PAL.greystone, 11, 16, { blocks: 32 })), S2.concrete = A.shared("concrete", 128, 128, (p) => {
+      smoothFill(p, 0, 0, 128, 128, 12170926, 12, 0.05);
+      for (let i = 0; i < 40; i++) p.set(i * 37 % 128, i * 59 % 128, 10131343);
+    }), S2.darkMetal = A.shared("darkmetal", 32, 32, (p) => smoothFill(p, 0, 0, 32, 32, 2763568, 13, 0.06)), S2.metal = A.shared("metal", 32, 32, (p) => {
+      smoothFill(p, 0, 0, 32, 32, 9277591, 14, 0.05);
+      for (let x = 0; x < 32; x += 8) p.vline(x, 0, 32, 10461864);
+    }), S2.blackIron = A.shared("iron", 16, 16, (p) => {
+      p.rect(0, 0, 16, 16, 1973794), p.vline(0, 0, 16, 3816e3);
+    }), S2.roofSilver = A.shared("r_silver", 128, 128, (p) => roofFill(p, 128, 128, "silver", C.rng)), S2.roofTar = A.shared("r_tar", 128, 128, (p) => roofFill(p, 128, 128, "tar", C.rng)), S2.roofGravel = A.shared("r_gravel", 128, 128, (p) => roofFill(p, 128, 128, "gravel", C.rng)), S2.roofDeck = A.shared("r_deck", 128, 128, (p) => roofFill(p, 128, 128, "deck", C.rng)), S2.roofGreen = A.shared("r_green", 128, 128, (p) => roofFill(p, 128, 128, "green", C.rng)), S2.railing = A.shared("railing", 96, 18, (p) => railingTex(p, 96, 18, 1973794, 4)), S2.railingTall = A.shared("railing_t", 96, 24, (p) => railingTex(p, 96, 24, 1973794, 5)), S2.fescRail = A.shared("fesc_rail", 96, 20, (p) => {
+      p.clear(), p.rect(0, 0, 96, 2, 1710622), p.hline(0, 0, 96, 4868690), p.rect(0, 9, 96, 1, 1710622);
+      for (let x = 0; x < 96; x += 3) p.rect(x, 0, 1, 20, 1710622);
+      for (let x = 0; x < 96; x += 24)
+        p.rect(x, 0, 2, 20, 2500140);
+    }), S2.ladder = A.shared("ladder", 12, 24, (p) => ladderTex(p, 12, 24)), S2.fstair = A.shared("fstair", 64, 8, (p) => {
+      p.clear(), p.rect(0, 0, 64, 2, 1710622), p.hline(0, 0, 64, 4473932), p.rect(0, 6, 64, 2, 1710622);
+      for (let x = 0; x < 64; x += 3) p.rect(x, 2, 2, 4, 2763312);
+    }), S2.stairs = A.shared("fesc_stairs", 20, 64, (p) => {
+      p.clear(), p.rect(0, 0, 2, 64, 1710622), p.rect(18, 0, 2, 64, 1710622);
+      for (let y = 1; y < 64; y += 4) p.rect(0, y, 20, 2, 2500139);
+    }), S2.grate = A.shared("grate", 32, 32, (p) => {
       p.clear();
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) (x % 2 === 0 || y % 2 === 0) && p.set(x, y, 1710622);
-    }), S2.hvac = A.shared("hvac", 32, 16, (p) => grilleTex(p, 32, 16, 11119526)), S2.hvacTop = A.shared("hvac_top", 32, 32, (p) => {
-      smoothFill(p, 0, 0, 32, 32, 11843249, 15, 0.04), p.ellipse(10, 16, 7, 7, 3816256), p.ellipse(10, 16, 5, 5, 5592668), p.rect(9, 10, 2, 12, 2763568), p.rect(4, 15, 12, 2, 2763568);
-    }), S2.tank = A.shared("tank", 64, 32, (p) => plankTex(p, 64, 32, 9071176)), S2.tankDark = A.shared("tank2", 64, 32, (p) => plankTex(p, 64, 32, 6967352)), S2.tankRoof = A.shared("tank_roof", 64, 32, (p) => {
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 64; x++) p.set(x, y, shade(4869202, 0.9 + hash2i(x, y, 3) * 0.15));
-    }), S2.wood = A.shared("wood", 32, 16, (p) => plankTex(p, 32, 16, 10119748, !1)), S2.fenceWood = A.shared("fence_w", 32, 16, (p) => {
-      plankTex(p, 32, 16, 9068092, !1);
-      for (let x = 0; x < 32; x += 4) p.set(x, 0, 0, 0);
-    }), S2.chimney = A.shared("chimney", 16, 16, (p) => brickFill(p, 0, 0, 16, 16, PAL.brickRed, 19)), S2.chimneyTop = A.shared("chimney_top", 8, 8, (p) => {
-      p.rect(0, 0, 8, 8, 9079432), p.rect(2, 2, 4, 4, 1973792);
-    }), S2.skylight = A.shared("skylight", 16, 16, (p) => {
-      p.rect(0, 0, 16, 16, 10132899);
-      for (let y = 1; y < 15; y++) for (let x = 1; x < 15; x++) p.set(x, y, (x + y) % 6 < 2 ? 10274013 : 4943759);
-    }), S2.glassBlue = A.shared("glass_b", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, (x + y) % 9 < 2 ? 9221332 : 4023173, winCode(0.5));
-    }), S2.stoneStep = A.shared("step", 32, 8, (p) => {
-      stoneFill(p, 0, 0, 32, 8, PAL.brownstone, 21, 0), p.rect(0, 0, 32, 1, shade(PAL.brownstone[0], 1.2));
-    }), S2.stoneStepTop = A.shared("step_top", 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [9396816], 22, 0)), S2.limeStep = A.shared("lstep", 32, 8, (p) => {
-      stoneFill(p, 0, 0, 32, 8, PAL.limestone, 23, 0), p.rect(0, 0, 32, 1, 15787728);
-    }), S2.limeTop = A.shared("ltop", 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [14866106], 24, 0)), S2.acUnit = A.shared("ac", 8, 6, (p) => {
-      p.rect(0, 0, 8, 6, 14736592);
-      for (let y = 1; y < 5; y += 2) p.rect(1, y, 6, 1, 11052186);
-      p.frame(0, 0, 8, 6, 12104872);
-    }), S2.acTop = A.shared("ac_top", 8, 8, (p) => p.rect(0, 0, 8, 8, 13947076)), S2.flowerBox = A.shared("fbox", 16, 4, (p) => {
-      p.rect(0, 0, 16, 4, 7031346);
-      for (let x = 0; x < 16; x++)
-        p.set(x, 0, [15223391, 15909424, 5811267, 15044533, 5811267][x * 7 % 5]);
-    }), S2.flowerTop = A.shared("ftop", 16, 8, (p) => {
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 16; x++) p.set(x, y, [5811267, 4164149, 15223391, 15909424, 5811267, 15044533][Math.floor(hash2i(x, y, 4) * 6)]);
-    }), S2.xmasLights = A.shared("xmas", 32, 3, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++)
+        (x % 4 === 0 || y % 4 === 0) && p.set(x, y, x % 4 === 0 && y % 4 === 0 ? 2763312 : 1710622);
+    }), S2.hvac = A.shared("hvac", 32, 16, (p) => {
+      grilleTex(p, 32, 16, 11119526), p.rect(24, 3, 6, 4, 6974576), p.hline(25, 4, 4, 14211284), p.hline(0, 15, 32, 6974568);
+    }), S2.hvacTop = A.shared("hvac_top", 32, 24, (p) => {
+      smoothFill(p, 0, 0, 32, 24, 11843249, 15, 0.04), p.frame(0, 0, 32, 24, 9079944);
+      let cx = 16, cy = 12;
+      p.ellipse(cx, cy, 9.5, 9.5, 3026740), p.ellipse(cx, cy, 8, 8, 4868945);
+      for (let a = 0; a < 4; a++) {
+        let ang = a / 4 * Math.PI * 2 + 0.4;
+        for (let r = 2; r < 8; r++) p.set(Math.round(cx + Math.cos(ang) * r), Math.round(cy + Math.sin(ang) * r), 2763568);
+      }
+      for (let r = 0; r < 3; r++) p.ring(cx, cy, 9 - r * 3, 9 - r * 3, 0.6, 6185062);
+      p.ellipse(cx, cy, 1.5, 1.5, 9079952);
+    }), S2.tank = A.shared("tank", 128, 64, (p) => plankTex(p, 128, 64, 9071176)), S2.tankDark = A.shared("tank2", 128, 64, (p) => plankTex(p, 128, 64, 6967352)), S2.tankRoof = A.shared("tank_roof", 128, 64, (p) => {
+      for (let y = 0; y < 64; y++) for (let x = 0; x < 128; x++) p.set(x, y, shade(x % 8 === 0 ? 4079686 : 4869202, 0.9 + hash2i(x, y, 3) * 0.15));
+    }), S2.wood = A.shared("wood", 64, 32, (p) => plankTex(p, 64, 32, 10119748, !1)), S2.fenceWood = A.shared("fence_w", 64, 32, (p) => {
+      plankTex(p, 64, 32, 9068092, !1);
+      for (let x = 0; x < 64; x += 8)
+        p.set(x, 0, 0, 0), p.set(x + 1, 0, 0, 0), p.set(x, 1, 0, 0);
+      p.hline(0, 8, 64, 6965804), p.hline(0, 24, 64, 6965804);
+    }), S2.chimney = A.shared("chimney", 32, 32, (p) => {
+      brickFill(p, 0, 0, 32, 32, PAL.brickRed, 19), p.rect(0, 0, 32, 3, 10132120), p.hline(0, 3, 32, 6974056);
+    }), S2.chimneyTop = A.shared("chimney_top", 12, 12, (p) => {
+      p.rect(0, 0, 12, 12, 9079432), p.rect(2, 2, 8, 8, 2763308), p.rect(4, 4, 4, 4, 1118484);
+    }), S2.skylight = A.shared("skylight", 24, 24, (p) => {
+      p.rect(0, 0, 24, 24, 10132899);
+      for (let y = 2; y < 22; y++) for (let x = 2; x < 22; x++) p.set(x, y, (x + y) % 12 < 3 ? 10274013 : 4943759);
+      p.vline(12, 2, 20, 10132899), p.hline(2, 12, 20, 10132899), p.frame(0, 0, 24, 24, 8027523);
+    }), S2.glassBlue = A.shared("glass_b", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x + y) % 18 < 3 ? 9221332 : 4023173, winCode(0.5));
+    }), S2.stoneStep = A.shared("step", 64, 8, (p) => {
+      stoneFill(p, 0, 0, 64, 8, PAL.brownstone, 21, 0), p.rect(0, 0, 64, 2, shade(PAL.brownstone[0], 1.22)), p.hline(0, 2, 64, shade(PAL.brownstone[0], 1.08)), p.hline(0, 7, 64, shade(PAL.brownstone[0], 0.72));
+    }), S2.stoneStepTop = A.shared("step_top", 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, [9396816], 22, 0)), S2.limeStep = A.shared("lstep", 64, 8, (p) => {
+      stoneFill(p, 0, 0, 64, 8, PAL.limestone, 23, 0), p.rect(0, 0, 64, 2, 15787728), p.hline(0, 7, 64, 12102544);
+    }), S2.limeTop = A.shared("ltop", 64, 64, (p) => stoneFill(p, 0, 0, 64, 64, [14866106], 24, 0)), S2.acUnit = A.shared("ac", 16, 12, (p) => {
+      p.rect(0, 0, 16, 12, 14999764);
+      for (let y = 2; y < 10; y += 2) p.rect(2, y, 8, 1, 11052186);
+      p.rect(11, 3, 3, 3, 9078396), p.set(12, 4, 4898922), p.frame(0, 0, 16, 12, 12104872), p.hline(0, 11, 16, 10131084);
+    }), S2.acTop = A.shared("ac_top", 16, 16, (p) => {
+      p.rect(0, 0, 16, 16, 13947076), p.frame(0, 0, 16, 16, 12368044);
+    }), S2.flowerBox = A.shared("fbox", 32, 8, (p) => {
+      p.rect(0, 2, 32, 6, 7031346), p.hline(0, 2, 32, 9069124);
+      for (let x = 0; x < 32; x++)
+        p.set(x, 0, [15223391, 15909424, 5811267, 15044533, 5811267, 4164149][x * 7 % 6]), p.set(x, 1, [5811267, 4164149, 15223391, 5811267][x * 5 % 4]);
+    }), S2.flowerTop = A.shared("ftop", 32, 16, (p) => {
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, [5811267, 4164149, 15223391, 15909424, 5811267, 15044533, 7127120][Math.floor(hash2i(x >> 1, y >> 1, 4) * 7)]);
+    }), S2.xmasLights = A.shared("xmas", 64, 6, (p) => {
       p.clear();
       let cols = [16724032, 4259680, 4227327, 16764992, 16736480];
-      for (let x = 0; x < 32; x++) p.set(x, 1, 1976862, 255);
-      for (let x = 1; x < 32; x += 3) p.set(x, 2, cols[x / 3 % 5 | 0], winCode(0.01, !0));
-    }), S2.lightsWarm = A.shared("warmlights", 32, 3, (p) => {
+      for (let x = 0; x < 64; x++) p.set(x, 1 + Math.round(Math.sin(x / 64 * Math.PI * 4) * 1), 1976862, 255);
+      for (let x = 2; x < 64; x += 6) {
+        let c = cols[x / 6 % 5 | 0];
+        p.rect(x, 3, 2, 2, c, winCode(0.01, !0)), p.set(x, 5, shade(c, 0.7), winCode(0.01, !0));
+      }
+    }), S2.lightsWarm = A.shared("warmlights", 64, 6, (p) => {
       p.clear();
-      for (let x = 0; x < 32; x++) p.set(x, 0, 2763306, 255);
-      for (let x = 1; x < 32; x += 4) p.set(x, 1, 16767120, winCode(0.01, !0));
-    }), S2.wreath = A.shared("wreath", 8, 8, (p) => {
-      p.clear(), p.ring(4, 4, 4, 4, 1.6, 3111482), p.set(2, 2, 14168108), p.set(5, 5, 14168108), p.set(5, 2, 16764992), p.rect(3, 6, 2, 2, 14168108);
-    }), S2.pumpkin = A.shared("pumpkin", 8, 6, (p) => {
-      p.rect(0, 1, 8, 5, 15235610), p.rect(1, 0, 6, 6, 15764002), p.set(3, 0, 4164149), p.set(2, 2, 16764992, winCode(0.01, !0)), p.set(5, 2, 16764992, winCode(0.01, !0)), p.rect(2, 4, 4, 1, 16764992, winCode(0.01, !0));
-    }), S2.pumpkinTop = A.shared("pumpkin_t", 8, 8, (p) => {
-      p.rect(0, 0, 8, 8, 15764002), p.set(3, 3, 4164149), p.set(4, 4, 4164149);
-    }), S2.trashCan = A.shared("trash", 12, 10, (p) => {
-      for (let y = 0; y < 10; y++) for (let x = 0; x < 12; x++) p.set(x, y, x % 3 === 0 ? 4083776 : 5664858);
-      p.rect(0, 0, 12, 1, 8033406);
-    }), S2.trashTop = A.shared("trash_t", 8, 8, (p) => {
-      p.rect(0, 0, 8, 8, 4874316), p.rect(2, 2, 4, 4, 2767404);
+      for (let x = 0; x < 64; x++) p.set(x, Math.round(Math.sin(x / 64 * Math.PI) * 2), 2763306, 255);
+      for (let x = 3; x < 64; x += 8)
+        p.rect(x, 2, 2, 3, 16767120, winCode(0.01, !0));
+    }), S2.wreath = A.shared("wreath", 16, 16, (p) => {
+      p.clear(), p.ring(8, 8, 7.5, 7.5, 3, 3111482);
+      for (let a = 0; a < 12; a++) {
+        let ang = a / 12 * Math.PI * 2;
+        p.set(Math.round(8 + Math.cos(ang) * 6), Math.round(8 + Math.sin(ang) * 6), a % 3 ? 4168266 : 14168108);
+      }
+      p.rect(6, 13, 4, 3, 14168108), p.set(5, 15, 14168108), p.set(10, 15, 14168108);
+    }), S2.pumpkin = A.shared("pumpkin", 10, 8, (p) => {
+      p.clear(), p.ellipse(5, 5, 4.9, 3.2, 15235610), p.ellipse(5, 5, 3, 2.8, 15764002), p.vline(3, 3, 4, 13658128), p.vline(7, 3, 4, 13658128), p.rect(4, 0, 2, 2, 4164149);
+      let g = winCode(0.01, !0);
+      p.set(3, 4, 16764992, g), p.set(6, 4, 16764992, g), p.hline(3, 6, 4, 16764992, g);
+    }), S2.pumpkinTop = A.shared("pumpkin_t", 10, 7, (p) => {
+      p.ellipse(5, 3.5, 4.8, 3.4, 15764002), p.rect(4, 3, 2, 2, 4164149);
+    }), S2.trashCan = A.shared("trash", 24, 20, (p) => {
+      for (let y = 0; y < 20; y++) for (let x = 0; x < 24; x++) p.set(x, y, x % 6 === 0 ? 4083776 : x % 6 === 1 ? 6982254 : 5664858);
+      p.rect(0, 0, 24, 2, 8033406), p.hline(0, 9, 24, 4083776);
+    }), S2.trashTop = A.shared("trash_t", 12, 12, (p) => {
+      p.rect(0, 0, 12, 12, 4874316), p.ellipse(6, 6, 2.5, 2.5, 2767404), p.frame(0, 0, 12, 12, 6982254), p.hline(3, 2, 6, 8033406);
     }), C._shared = S2, S2;
   }
   function rowhouse(C, fr, a0, W, D, o = {}) {
-    let { mb, rng } = C, S2 = sharedTex(C), sb = o.setback ?? 1.5, nF = o.floors ?? 3, gardenH = 1.25, floorH = 1.5, band2 = 0.5, H = gardenH + nF * floorH + band2, z0 = fr.z0, tw = Math.round(W * 16), th = Math.round(H * 16), style = o.style ?? rng.pick(["brownstone", "brownstone", "brick", "limestone", "painted", "brick"]), wallPal = style === "brownstone" ? PAL.brownstone : style === "limestone" ? PAL.limestone : style === "painted" ? [rng.pick([15260864, 11060436, 11064504, 14854304, 14207200, 15784080])] : rng.pick([PAL.brickRed, PAL.brickBrown, PAL.brickOrange, PAL.brickPurple]), trim = style === "brownstone" ? shade(PAL.brownstone[0], 1.18) : style === "limestone" ? 15787724 : 14866106, frame = style === "limestone" ? rng.pick([2829104, 3099194, 6044458]) : rng.pick(PAL.frames), corniceC = rng.pick([3811874, 2829104, 3099194, 6965818, 15262416, 5906207]), doorSide = o.doorSide ?? (rng.chance(0.5) ? "L" : "R"), nb = Math.max(2, Math.floor(tw / 16)), bayW = tw / nb, doorBay = doorSide === "L" ? 0 : nb - 1, windows = [], floorT = [];
+    let { mb, rng } = C, S2 = sharedTex(C), sb = o.setback ?? 1.5, nF = o.floors ?? 3, gardenH = 1.25, floorH = 1.5, band2 = 0.5, H = gardenH + nF * floorH + band2, z0 = fr.z0, tw = Math.round(W * 32), th = Math.round(H * 32), style = o.style ?? rng.pick(["brownstone", "brownstone", "brick", "limestone", "painted", "brick"]), wallPal = style === "brownstone" ? PAL.brownstone : style === "limestone" ? PAL.limestone : style === "painted" ? [rng.pick([15260864, 11060436, 11064504, 14854304, 14207200, 15784080])] : rng.pick([PAL.brickRed, PAL.brickBrown, PAL.brickOrange, PAL.brickPurple]), trim = style === "brownstone" ? shade(PAL.brownstone[0], 1.18) : style === "limestone" ? 15787724 : 14866106, frame = style === "limestone" ? rng.pick([2829104, 3099194, 6044458]) : rng.pick(PAL.frames), corniceC = rng.pick([3811874, 2829104, 3099194, 6965818, 15262416, 5906207]), doorSide = o.doorSide ?? (rng.chance(0.5) ? "L" : "R"), nb = Math.max(2, Math.floor(tw / 32)), bayW = tw / nb, doorBay = doorSide === "L" ? 0 : nb - 1, windows = [], floorT = [];
     for (let f = 0; f < nF + 1; f++) floorT.push(rng.next());
     let curtainC = rng.pick(PAL.curtains), front = region(C, tw, th, (p) => {
-      style === "brownstone" ? stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 6) : style === "limestone" ? stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 8, { blocks: 16 }) : style === "painted" ? smoothFill(p, 0, 0, tw, th, wallPal[0], 3, 0.04) : brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
-      let gy = Math.round((band2 + nF * floorH) * 16);
-      rustication(p, 0, gy, tw, th - gy, style === "brick" ? PAL.brownstone[0] : shade(wallPal[0], 0.92), 3), corniceBand(p, 0, 0, tw, 8, shade(corniceC, 1));
+      style === "brownstone" ? stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 12) : style === "limestone" ? stoneFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999), 16, { blocks: 32 }) : style === "painted" ? smoothFill(p, 0, 0, tw, th, wallPal[0], 3, 0.04) : brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
+      let gy = Math.round((band2 + nF * floorH) * 32);
+      rustication(p, 0, gy, tw, th - gy, style === "brick" ? PAL.brownstone[0] : shade(wallPal[0], 0.92), 6), corniceBand(p, 0, 0, tw, 16, shade(corniceC, 1)), p.rect(0, gy - 3, tw, 3, trim), p.hline(0, gy - 3, tw, shade(trim, 1.12)), p.hline(0, gy - 1, tw, shade(trim, 0.7));
+      let wallC = wallPal[0];
       for (let f = 0; f < nF; f++) {
-        let fy = Math.round((band2 + f * floorH) * 16), parlor = f === nF - 1, wh = parlor ? 17 : 13, wy = fy + (parlor ? 4 : 6);
+        let fy = Math.round((band2 + f * floorH) * 32), parlor = f === nF - 1, wh = parlor ? 34 : 27, wy = fy + (parlor ? 8 : 12);
         for (let b = 0; b < nb; b++) {
           let cx = Math.round(bayW * b + bayW / 2);
           if (parlor && b === doorBay) {
-            let dx = cx - 4, dy = fy + 24 - 20;
-            p.rect(dx - 2, dy - 3, 13, 3, trim), p.hline(dx - 2, dy - 1, 13, shade(trim, 0.75)), p.rect(dx - 1, dy, 1, 20, shade(trim, 0.9)), p.rect(dx + 9, dy, 1, 20, shade(trim, 0.9)), drawDoor(p, dx, dy, 9, 20, { color: rng.pick([6044458, 2829104, 8003359, 3099194, 2046559, 9067050]), t: floorT[f] * 0.5, number: o.number, glass: rng.chance(0.3) }), windows.push({ x: dx, y: dy, w: 9, h: 20, f, door: !0 });
+            let dx = cx - 9, dy = fy + 48 - 40;
+            p.rect(dx - 5, dy - 7, 28, 5, trim), p.hline(dx - 5, dy - 7, 28, shade(trim, 1.15)), p.hline(dx - 5, dy - 3, 28, shade(trim, 0.7)), p.rect(dx - 4, dy - 2, 3, 4, shade(trim, 0.9)), p.rect(dx + 18 + 1, dy - 2, 3, 4, shade(trim, 0.9)), p.rect(dx - 2, dy, 2, 40, shade(trim, 0.92)), p.rect(dx + 18, dy, 2, 40, shade(trim, 0.85)), drawDoor(p, dx, dy, 18, 40, { color: rng.pick([6044458, 2829104, 8003359, 3099194, 2046559, 9067050]), t: floorT[f] * 0.5, number: o.number, glass: rng.chance(0.3) }), windows.push({ x: dx, y: dy, w: 18, h: 40, f, door: !0 });
             continue;
           }
-          let ww = 8, wx = cx - 4, t = floorT[f] * 0.6 + rng.next() * 0.4, det = rng.next();
+          let ww = 16, wx = cx - 8, t = floorT[f] * 0.6 + rng.next() * 0.4, det = rng.next();
           drawWindow(p, wx, wy, ww, wh, {
             frame,
             lintel: trim,
             sill: trim,
             t,
             keystone: style !== "painted" && rng.chance(0.4),
+            wall: wallC,
+            panes: rng.chance(0.3) ? "6/6" : "2/2",
             curtain: det < 0.35 ? curtainC : null,
             blinds: det >= 0.35 && det < 0.55,
             plant: det > 0.9 ? "flower" : det > 0.85,
@@ -2161,25 +2485,27 @@ void main() {
       for (let b = 0; b < nb; b++) {
         let cx = Math.round(bayW * b + bayW / 2);
         if (b === doorBay) {
-          p.rect(cx - 4, gy + 6, 8, gH - 6, 1973794), p.rect(cx - 3, gy + 7, 6, gH - 7, 3811874);
-          for (let x = cx - 3; x < cx + 3; x += 2) p.vline(x, gy + 7, gH - 7, 1973794);
+          p.rect(cx - 8, gy + 12, 16, gH - 12, 1973794), p.rect(cx - 6, gy + 14, 12, gH - 14, 3811874);
+          for (let x = cx - 6; x < cx + 6; x += 3) p.vline(x, gy + 14, gH - 14, 1973794);
+          p.hline(cx - 6, gy + 20, 12, 1973794);
           continue;
         }
-        let wx = cx - 4, wy = gy + 5;
-        drawWindow(p, wx, wy, 8, 10, { frame: 2829104, t: rng.next(), rail: !1 }, rng);
-        for (let x = wx; x < wx + 8; x += 2) p.vline(x, wy - 1, 12, 1447448);
+        let wx = cx - 8, wy = gy + 10;
+        drawWindow(p, wx, wy, 16, 20, { frame: 2829104, t: rng.next(), rail: !1, wall: wallC }, rng);
+        for (let x = wx + 1; x < wx + 16; x += 3) p.vline(x, wy - 2, 24, 1447448);
+        p.hline(wx, wy + 6, 16, 1447448), p.hline(wx, wy + 14, 16, 1447448);
       }
     }), back = region(C, tw, th, (p) => {
-      brickFill(p, 0, 0, tw, th, style === "brick" ? wallPal : PAL.brickRed, rng.int(1, 999)), p.rect(0, 0, tw, 2, 9079432);
+      brickFill(p, 0, 0, tw, th, style === "brick" ? wallPal : PAL.brickRed, rng.int(1, 999)), p.rect(0, 0, tw, 4, 9079432), p.hline(0, 4, tw, 5921368);
       for (let f = 0; f < nF + 1; f++) {
-        let fy = Math.round((band2 + f * floorH) * 16), n = Math.max(2, nb);
+        let fy = Math.round((band2 + f * floorH) * 32), n = Math.max(2, nb);
         for (let b = 0; b < n; b++) {
           if (f === nF && b === 0) {
-            drawDoor(p, Math.round(bayW / 2) - 4, fy + 4, 8, 16, { color: 6044458, transom: !1 });
+            drawDoor(p, Math.round(bayW / 2) - 8, fy + 8, 16, 32, { color: 6044458, transom: !1 });
             continue;
           }
           let cx = Math.round(tw / n * b + tw / n / 2);
-          drawWindow(p, cx - 4, fy + 6, 8, 12, { frame: 15921126, sill: 10132120, t: rng.next(), curtain: rng.chance(0.25) ? rng.pick(PAL.curtains) : null }, rng);
+          drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 15921126, sill: 10132120, t: rng.next(), curtain: rng.chance(0.25) ? rng.pick(PAL.curtains) : null, blinds: rng.chance(0.2) }, rng);
         }
       }
     }), sideTex = style === "brownstone" ? S2.brownstone : style === "limestone" ? S2.limestone : S2.brickRed, top = rng.pick([S2.roofSilver, S2.roofTar, S2.roofSilver, S2.roofGravel]), side = { t: o.sideTex ?? sideTex }, aabb = fr.box(mb, a0, a0 + W, sb, sb + D, z0, z0 + H, {
@@ -2190,9 +2516,11 @@ void main() {
       top: { t: top, world: !0 }
     });
     markHeight(C.world, ...aabb, z0 + H);
-    let corn = C.atlas.shared("cornice_" + corniceC, 32, 6, (p) => {
-      corniceBand(p, 0, 0, 32, 6, corniceC);
-    }), cornTop = C.atlas.shared("cornice_top_" + corniceC, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, shade(corniceC, 1.1), 3, 0.05));
+    let corn = C.atlas.shared("cornice_" + corniceC, 64, 14, (p) => {
+      corniceBand(p, 0, 0, 64, 14, corniceC);
+    }), cornTop = C.atlas.shared("cornice_top_" + corniceC, 32, 32, (p) => {
+      smoothFill(p, 0, 0, 32, 32, shade(corniceC, 1.1), 3, 0.05), p.hline(0, 0, 32, shade(corniceC, 1.25));
+    });
     fr.box(
       mb,
       a0 - 0.0625,
@@ -2212,13 +2540,13 @@ void main() {
       fr.box(mb, sa0, sa1, d0p, d1, z0, z0 + gardenH - 0.25 * (i + 1), { front: stepTex, left: sideStone, right: sideStone, top: { t: stepTop, world: !0 } });
     }
     for (let a of [sa0 + 0.03, sa1 - 0.03]) {
-      let pb = fr.pt(a, 0.05), pt_ = fr.pt(a, sb - 0.5), zb = z0 + 0.25, zt = z0 + gardenH, hR = 0.56, len = Math.hypot(pt_[0] - pb[0], pt_[1] - pb[1]) * 16;
+      let pb = fr.pt(a, 0.05), pt_ = fr.pt(a, sb - 0.5), zb = z0 + 0.25, zt = z0 + gardenH, hR = 0.56, len = Math.hypot(pt_[0] - pb[0], pt_[1] - pb[1]) * 32;
       mb.quad(
         [pb[0], pb[1], zb + hR + 0.15],
         [pt_[0], pt_[1], zt + hR],
         [pt_[0], pt_[1], zt],
         [pb[0], pb[1], zb],
-        [[0, 0], [len, 0], [len, 9], [0, 9]],
+        [[0, 0], [len, 0], [len, 18], [0, 18]],
         S2.railing,
         [fr.ux, fr.uy, 0],
         MAT.FLAT
@@ -2227,7 +2555,7 @@ void main() {
         [pt_[0], pt_[1], zt + hR],
         [pt_[0], pt_[1], zt],
         [pb[0], pb[1], zb],
-        [[0, 0], [len, 0], [len, 9], [0, 9]],
+        [[0, 0], [len, 0], [len, 6], [0, 6]],
         S2.xmasLights,
         [fr.ux, fr.uy, 0],
         MAT.FLAT | MAT.NOSHADOW,
@@ -2237,15 +2565,15 @@ void main() {
     let fenceH = 0.5;
     sa0 - a0 > 0.2 && fr.facadeQuad(mb, a0 + 0.05, sa0 - 0.05, 0.06, z0, z0 + fenceH, S2.railing), a0 + W - sa1 > 0.2 && fr.facadeQuad(mb, sa1 + 0.05, a0 + W - 0.05, 0.06, z0, z0 + fenceH, S2.railing);
     let canA = doorSide === "L" ? a0 + W - 0.55 : a0 + 0.3;
-    if (rng.chance(0.7) && fr.box(mb, canA, canA + 0.36, 0.3, 0.66, z0, z0 + 0.6, { front: S2.trashCan, left: S2.trashCan, right: S2.trashCan, top: S2.trashTop }), C.ground) {
+    if (rng.chance(0.7) && fr.box(mb, canA, canA + 0.375, 0.3, 0.675, z0, z0 + 0.625, { front: S2.trashCan, left: S2.trashCan, right: S2.trashCan, top: S2.trashTop }), C.ground) {
       let [gx0, gy0, gx1, gy1] = fr.aabb(doorSide === "L" ? sa1 + 0.1 : a0 + 0.1, doorSide === "L" ? a0 + W - 0.1 : sa0 - 0.1, 0.15, sb - 0.05);
       C.paintGround(gx0, gy0, gx1, gy1, rng.chance(0.6) ? "flowerbed" : "patio");
     }
-    let zTop = z0 + H, toZ = (ty) => zTop - ty / 16, toA = (tx) => a0 + tx / 16;
+    let zTop = z0 + H, toZ = (ty) => zTop - ty / 32, toA = (tx) => a0 + tx / 32;
     fr.facadeQuad(mb, a0, a0 + W, sb - 0.27, zTop - 0.56, zTop - 0.38, S2.xmasLights, { group: GRP.XMAS, mat: MAT.NOSHADOW | MAT.FLAT });
     for (let w of windows) {
       if (w.door) {
-        fr.facadeQuad(mb, toA(w.x + 0.5), toA(w.x + 8.5), sb - 0.03, toZ(w.y + 14), toZ(w.y + 6), S2.wreath, { group: GRP.XMAS });
+        fr.facadeQuad(mb, toA(w.x + 1), toA(w.x + 17), sb - 0.03, toZ(w.y + 30), toZ(w.y + 14), S2.wreath, { group: GRP.XMAS });
         continue;
       }
       let r = rng.next();
@@ -2253,7 +2581,7 @@ void main() {
         let a = toA(w.x + 0), zb = toZ(w.y + w.h) + 0.0625;
         fr.box(mb, a, a + 0.5, sb - 0.3, sb, zb, zb + 0.375, { front: S2.acUnit, left: S2.acUnit, right: S2.acUnit, top: S2.acTop }, { group: GRP.WARM });
       } else if (w.f === nF - 1 && r < 0.55) {
-        let a = toA(w.x - 1), zb = toZ(w.y + w.h) - 0.05;
+        let a = toA(w.x - 2), zb = toZ(w.y + w.h) - 0.05;
         fr.box(mb, a, a + 0.625, sb - 0.2, sb, zb, zb + 0.25, { front: S2.flowerBox, left: S2.flowerBox, right: S2.flowerBox, top: S2.flowerTop }, { group: GRP.SUMMER_OR_SPRING });
       }
     }
@@ -2261,7 +2589,7 @@ void main() {
       for (let i = 0; i < 3; i++) {
         if (rng.chance(0.4)) continue;
         let d = sb - 0.5 - 0.25 * i - 0.2, zt = z0 + gardenH - 0.25 * i, a = rng.chance(0.5) ? sa0 + 0.12 : sa1 - 0.42;
-        fr.box(mb, a, a + 0.3, d - 0.05, d + 0.15, zt, zt + 0.25, { front: S2.pumpkin, left: S2.pumpkin, right: S2.pumpkin, top: S2.pumpkinTop }, { group: GRP.AUTUMN });
+        fr.box(mb, a, a + 0.3125, d - 0.05, d + 0.17, zt, zt + 0.25, { front: S2.pumpkin, left: S2.pumpkin, right: S2.pumpkin, top: S2.pumpkinTop }, { group: GRP.AUTUMN });
       }
     let R2 = { a0, a1: a0 + W, d0: sb, d1: sb + D, z: zTop };
     rng.chance(0.75) && chimney(C, fr, a0 + rng.range(0.2, W - 0.7), sb + rng.range(D * 0.3, D - 0.8), zTop), rng.chance(0.5) && skylight(C, fr, a0 + rng.range(0.4, W - 1.2), sb + rng.range(1, D - 2), zTop), rng.chance(0.18) && roofDeck(C, fr, a0 + 0.3, a0 + W - 0.3, sb + D * 0.55, sb + D - 0.3, zTop), rng.chance(0.25) && C.addSprite("dish", ...fr.pt(a0 + rng.range(0.5, W - 0.5), sb + D - 0.6), zTop), o.flag && C.addFlag(fr, a0 + W * 0.5, sb - 0.1, z0 + gardenH + floorH * 1.6);
@@ -2274,17 +2602,17 @@ void main() {
     return { H: zTop, R: R2 };
   }
   function walkup(C, fr, a0, W, D, o = {}) {
-    let { mb, rng } = C, S2 = sharedTex(C), nF = o.floors ?? rng.int(4, 5), gH = 1.75, fH = 1.5, band2 = 0.75, H = gH + nF * fH + band2, z0 = fr.z0, tw = Math.round(W * 16), th = Math.round(H * 16), brickName = o.brick ?? rng.pick(["brickRed", "brickBrown", "brickOrange", "brickTan", "brickPurple", "brickRed"]), wallPal = { brickRed: PAL.brickRed, brickBrown: PAL.brickBrown, brickOrange: PAL.brickOrange, brickTan: PAL.brickTan, brickPurple: PAL.brickPurple }[brickName], trim = rng.pick([14866106, 14208434, 15787728, 12104356]), frame = rng.pick([15921126, 15921126, 2829104, 3099194, 8003359]), corniceC = rng.pick([2829104, 3811874, 3099194, 15262416, 6974056, 5906207]), nb = Math.max(2, Math.round(tw / 18)), bayW = tw / nb, shop = o.shop === void 0 ? rng.pick(["bodega", "pizza", "laundry", "coffee", "bar", "books", "flowers", "chinese", "nails", "hardware", "bagels", "diner"]) : o.shop, esc = o.fireEscape ?? (nb >= 3 && rng.chance(0.85)), escBays = esc ? (nb >= 4 ? [1, 2] : [0, 1]).map((b) => Math.min(b, nb - 1)) : [], windows = [], shopInfo = null, shopTW = shop ? o.resDoor === !1 ? tw : tw - 12 : 0, resDoorX = o.resDoorLeft ? 1 : tw - 11, floorT = [];
+    let { mb, rng } = C, S2 = sharedTex(C), nF = o.floors ?? rng.int(4, 5), gH = 1.75, fH = 1.5, band2 = 0.75, H = gH + nF * fH + band2, z0 = fr.z0, tw = Math.round(W * 32), th = Math.round(H * 32), brickName = o.brick ?? rng.pick(["brickRed", "brickBrown", "brickOrange", "brickTan", "brickPurple", "brickRed"]), wallPal = { brickRed: PAL.brickRed, brickBrown: PAL.brickBrown, brickOrange: PAL.brickOrange, brickTan: PAL.brickTan, brickPurple: PAL.brickPurple }[brickName], trim = rng.pick([14866106, 14208434, 15787728, 12104356]), frame = rng.pick([15921126, 15921126, 2829104, 3099194, 8003359]), corniceC = rng.pick([2829104, 3811874, 3099194, 15262416, 6974056, 5906207]), nb = Math.max(2, Math.round(tw / 36)), bayW = tw / nb, shop = o.shop === void 0 ? rng.pick(["bodega", "pizza", "laundry", "coffee", "bar", "books", "flowers", "chinese", "nails", "hardware", "bagels", "diner"]) : o.shop, esc = o.fireEscape ?? (nb >= 3 && rng.chance(0.85)), escBays = esc ? (nb >= 4 ? [1, 2] : [0, 1]).map((b) => Math.min(b, nb - 1)) : [], windows = [], shopInfo = null, shopTW = shop ? o.resDoor === !1 ? tw : tw - 24 : 0, resDoorX = o.resDoorLeft ? 2 : tw - 22, floorT = [];
     for (let f = 0; f < nF; f++) floorT.push(rng.next());
     let paintFacade = (p, wide, withShop, sideMode) => {
-      brickFill(p, 0, 0, wide, th, wallPal, rng.int(1, 999)), p.rect(0, 0, wide, 4, shade(corniceC, 0.9)), corniceBand(p, 0, 4, wide, 8, corniceC);
-      let n = Math.max(2, Math.round(wide / 18)), bw = wide / n;
+      brickFill(p, 0, 0, wide, th, wallPal, rng.int(1, 999)), p.rect(0, 0, wide, 8, shade(corniceC, 0.9)), corniceBand(p, 0, 8, wide, 16, corniceC);
+      let n = Math.max(2, Math.round(wide / 36)), bw = wide / n;
       for (let f = 0; f < nF; f++) {
-        let fy = Math.round((band2 + f * fH) * 16);
-        f === nF - 1 && p.rect(0, fy + 23, wide, 1, trim);
+        let fy = Math.round((band2 + f * fH) * 32);
+        f === nF - 1 && (p.rect(0, fy + 45, wide, 3, trim), p.hline(0, fy + 45, wide, shade(trim, 1.12)), p.hline(0, fy + 47, wide, shade(trim, 0.7)));
         for (let b = 0; b < n; b++) {
           let cx = Math.round(bw * b + bw / 2), t = floorT[f] * 0.5 + rng.next() * 0.5, det = rng.next();
-          drawWindow(p, cx - 4, fy + 6, 8, 14, {
+          drawWindow(p, cx - 8, fy + 12, 16, 28, {
             frame,
             lintel: trim,
             sill: trim,
@@ -2293,40 +2621,43 @@ void main() {
             blinds: det > 0.3 && det < 0.5,
             plant: det > 0.92,
             cat: det > 0.985 ? 1973790 : null,
-            keystone: rng.chance(0.2)
-          }, rng), sideMode || windows.push({ x: cx - 4, y: fy + 6, w: 8, h: 14, f, b });
+            keystone: rng.chance(0.2),
+            wall: wallPal[0],
+            panes: rng.chance(0.25) ? "1/1" : "2/2"
+          }, rng), sideMode || windows.push({ x: cx - 8, y: fy + 12, w: 16, h: 28, f, b });
         }
       }
-      let gy = Math.round((band2 + nF * fH) * 16), gh = th - gy;
+      let gy = Math.round((band2 + nF * fH) * 32), gh = th - gy;
       if (withShop && shop) {
-        let sx = o.resDoorLeft ? 12 : 0;
+        let sx = o.resDoorLeft ? 24 : 0;
         if (shopInfo = drawShopfront(p, sx, gy, shopTW, gh, shop, rng, { doorLeft: rng.chance(0.5) }), o.resDoor !== !1) {
           let rx = resDoorX;
-          p.rect(rx - 1, gy, 12, gh, trim), drawDoor(p, rx + 1, gy + 4, 8, gh - 4, { color: rng.pick([2829104, 6044458, 8003359]), glass: !0, number: o.number });
+          p.rect(rx - 2, gy, 24, gh, trim), p.hline(rx - 2, gy, 24, shade(trim, 1.15)), drawDoor(p, rx + 2, gy + 10, 18, gh - 10, { color: rng.pick([2829104, 6044458, 8003359]), glass: !0, number: o.number });
+          for (let by of [gy + 6]) p.rect(rx + 4, by - 3, 14, 2, 13148240);
         }
       } else {
-        p.rect(0, gy, wide, 1, trim);
+        p.rect(0, gy, wide, 3, trim);
         for (let b = 0; b < n; b++) {
           let cx = Math.round(bw * b + bw / 2);
-          !sideMode && b === Math.floor(n / 2) ? (p.rect(cx - 6, gy + 1, 12, gh - 1, trim), drawDoor(p, cx - 4, gy + 6, 8, gh - 6, { color: 2829104, glass: !0, number: o.number })) : drawWindow(p, cx - 4, gy + 6, 8, 14, { frame, sill: trim, t: rng.next() }, rng);
+          !sideMode && b === Math.floor(n / 2) ? (p.rect(cx - 12, gy + 3, 24, gh - 3, trim), drawDoor(p, cx - 9, gy + 14, 18, gh - 14, { color: 2829104, glass: !0, number: o.number })) : drawWindow(p, cx - 8, gy + 12, 16, 28, { frame, sill: trim, t: rng.next(), wall: wallPal[0] }, rng);
         }
       }
       if (sideMode && rng.chance(0.55)) {
-        let txt = rng.pick(["ROOMS", "SODA 5C", "PIANOS", "COAL & ICE", "LOFTS", "GARAGE", "HATS", "BAKERY", "TAILOR", "FURS"]), sw = textWidth(txt, 2) + 8;
-        if (sw < wide - 4) {
-          let sx = Math.floor((wide - sw) / 2), sy = 14, col = rng.pick([15921126, 15909424, 5939416]);
-          for (let yy = 0; yy < 18; yy++) for (let xx = 0; xx < sw; xx++) p.blend(sx + xx, sy + yy, 2761760, 0.55);
-          p.sub(sx, sy, sw, 18).text(4, 4, txt, col, 255, 2);
-          for (let yy = 0; yy < 18; yy++) for (let xx = 0; xx < sw; xx++) hash2i(xx + sx, yy + sy, 3) < 0.3 && p.blend(sx + xx, sy + yy, wallPal[0], 0.5);
+        let txt = rng.pick(["ROOMS", "SODA 5C", "PIANOS", "COAL & ICE", "LOFTS", "GARAGE", "HATS", "BAKERY", "TAILOR", "FURS"]), sw = textWidth(txt, 2, !0) + 16;
+        if (sw < wide - 8) {
+          let sx = Math.floor((wide - sw) / 2), sy = 30, col = rng.pick([15921126, 15909424, 5939416]);
+          for (let yy = 0; yy < 26; yy++) for (let xx = 0; xx < sw; xx++) p.blend(sx + xx, sy + yy, 2761760, 0.55);
+          p.sub(sx, sy, sw, 26).text7(8, 6, txt, col, 255, 2);
+          for (let yy = 0; yy < 26; yy++) for (let xx = 0; xx < sw; xx++) hash2i(xx + sx, yy + sy, 3) < 0.3 && p.blend(sx + xx, sy + yy, wallPal[0], 0.5);
         }
       }
-    }, front = region(C, tw, th, (p) => paintFacade(p, tw, !0, !1)), sideW = Math.round(D * 16), sideFacade = o.cornerSide ? region(C, sideW, th, (p) => paintFacade(p, sideW, !1, !0)) : null, plainSide = { brickRed: S2.brickRed, brickBrown: S2.brickBrown, brickOrange: S2.brickOrange, brickTan: S2.brickTan, brickPurple: S2.brickPurple }[brickName], back = region(C, tw, th, (p) => {
+    }, front = region(C, tw, th, (p) => paintFacade(p, tw, !0, !1)), sideW = Math.round(D * 32), sideFacade = o.cornerSide ? region(C, sideW, th, (p) => paintFacade(p, sideW, !1, !0)) : null, plainSide = { brickRed: S2.brickRed, brickBrown: S2.brickBrown, brickOrange: S2.brickOrange, brickTan: S2.brickTan, brickPurple: S2.brickPurple }[brickName], back = region(C, tw, th, (p) => {
       brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
       for (let f = 0; f < nF + 1; f++) {
-        let fy = Math.round((band2 + f * fH) * 16);
+        let fy = Math.round((band2 + f * fH) * 32);
         for (let b = 0; b < nb; b++) {
           let cx = Math.round(bayW * b + bayW / 2);
-          drawWindow(p, cx - 4, fy + 6, 8, 12, { frame: 15921126, sill: 10132120, t: rng.next() }, rng);
+          drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 15921126, sill: 10132120, t: rng.next() }, rng);
         }
       }
     }), top = rng.pick([S2.roofTar, S2.roofSilver, S2.roofGravel]), sides = {
@@ -2334,31 +2665,35 @@ void main() {
       right: o.cornerSide === "R" ? sideFacade : plainSide
     }, aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back, ...sides, top: { t: top, world: !0 } });
     markHeight(C.world, ...aabb, z0 + H);
-    let zTop = z0 + H, toZ = (ty) => zTop - ty / 16, toA = (tx) => a0 + tx / 16, corn = C.atlas.shared("wcornice_" + corniceC, 32, 10, (p) => {
-      corniceBand(p, 0, 0, 32, 10, corniceC);
-      for (let x = 1; x < 32; x += 8)
-        p.rect(x, 2, 2, 7, shade(corniceC, 0.75)), p.rect(x, 8, 3, 1, shade(corniceC, 0.6));
-    }), cornTop = C.atlas.shared("cornice_top_" + corniceC, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, shade(corniceC, 1.1), 3, 0.05)), cornA0 = a0 - (o.cornerSide === "L" ? 0.3 : 0.0625), cornA1 = a0 + W + (o.cornerSide === "R" ? 0.3 : 0.0625);
+    let zTop = z0 + H, toZ = (ty) => zTop - ty / 32, toA = (tx) => a0 + tx / 32, corn = C.atlas.shared("wcornice_" + corniceC, 64, 22, (p) => {
+      corniceBand(p, 0, 0, 64, 22, corniceC);
+      for (let x = 2; x < 64; x += 16)
+        p.rect(x, 5, 4, 14, shade(corniceC, 0.75)), p.rect(x, 17, 6, 2, shade(corniceC, 0.6)), p.vline(x, 5, 14, shade(corniceC, 1.15));
+    }), cornTop = C.atlas.shared("cornice_top_" + corniceC, 32, 32, (p) => {
+      smoothFill(p, 0, 0, 32, 32, shade(corniceC, 1.1), 3, 0.05), p.hline(0, 0, 32, shade(corniceC, 1.25));
+    }), cornA0 = a0 - (o.cornerSide === "L" ? 0.3 : 0.0625), cornA1 = a0 + W + (o.cornerSide === "R" ? 0.3 : 0.0625);
     if (fr.box(mb, cornA0, cornA1, -0.3, 0.02, zTop - 0.625, zTop + 0.0625, { front: corn, left: corn, right: corn, top: { t: cornTop, world: !0 } }), o.cornerSide) {
       let a = o.cornerSide === "L" ? a0 - 0.3 : a0 + W;
       fr.box(mb, a, a + 0.3, 0, D, zTop - 0.625, zTop + 0.0625, { front: corn, left: corn, right: corn, back: corn, top: { t: cornTop, world: !0 } });
     }
     let pa = { t: plainSide };
     if (fr.box(mb, a0, a0 + W, D - 0.125, D, zTop, zTop + 0.375, { back: pa, front: pa, left: pa, right: pa, top: { t: S2.concrete, world: !0 } }), shop && shopInfo) {
-      let sx0 = o.resDoorLeft ? 12 : 0, aA0 = toA(sx0 + 0.5), aA1 = toA(sx0 + shopTW - 0.5), zA = z0 + gH - 0.375, awnC = shopInfo.color, striped = rng.chance(0.4), awTex = C.atlas.shared(`awn_${awnC}_${striped}`, 32, 12, (p) => awningTex(p, 32, 12, awnC, striped, null, rng)), valW = Math.round((aA1 - aA0) * 16), valance = region(C, valW, 4, (p) => {
-        awningTex(p, valW, 4, awnC, striped, null, rng), p.rect(0, 3, valW, 1, shade(awnC, 0.7));
+      let sx0 = o.resDoorLeft ? 24 : 0, aA0 = toA(sx0 + 0.5), aA1 = toA(sx0 + shopTW - 0.5), zA = z0 + gH - 0.375, awnC = shopInfo.color, striped = rng.chance(0.4), awTex = C.atlas.shared(`awn_${awnC}_${striped}`, 64, 24, (p) => awningTex(p, 64, 24, awnC, striped, null, rng)), valW = Math.round((aA1 - aA0) * 32), valance = region(C, valW, 8, (p) => {
+        awningTex(p, valW, 8, awnC, striped, null, rng);
+        for (let x = 0; x < valW; x++) (x % 8 === 0 || x % 8 === 7) && (p.setA(x, 7, 0), p.setA(x, 6, x % 8 === 0 ? 0 : 255));
+        p.hline(0, 0, valW, shade(awnC, 1.2)), shopInfo.name && textWidth(shopInfo.name, 1, !0) < valW - 8 && p.text7(Math.floor((valW - textWidth(shopInfo.name, 1, !0)) / 2), 0, shopInfo.name, striped ? 1776411 : 16777215);
       });
       if (rng.chance(0.8)) {
         let p0 = fr.pt(aA0, 0), p1 = fr.pt(aA1, 0), q0 = fr.pt(aA0, -1), q1 = fr.pt(aA1, -1);
         mb.slope([q0[0], q0[1], zA - 0.35], [q1[0], q1[1], zA - 0.35], [p0[0], p0[1], zA + 0.1], [p1[0], p1[1], zA + 0.1], awTex, { mat: MAT.SNOW | MAT.WET }), fr.facadeQuad(mb, aA0, aA1, -1, zA - 0.6, zA - 0.35, valance);
       }
-      let gate = region(C, Math.round(shopTW), Math.round((gH - 0.4) * 16), (p) => drawGate(p, Math.round(shopTW), Math.round((gH - 0.4) * 16), rng));
+      let gate = region(C, Math.round(shopTW), Math.round((gH - 0.4) * 32), (p) => drawGate(p, Math.round(shopTW), Math.round((gH - 0.4) * 32), rng));
       fr.facadeQuad(mb, toA(sx0), toA(sx0 + shopTW), -0.03, z0, z0 + gH - 0.4, gate, { group: GRP.NIGHT, mat: 0 }), C.world.shops.push({ kind: shop, name: shopInfo.name, ...ptObj(fr.pt(toA(sx0 + shopTW / 2), -0.8)), dx: fr.pt(toA(sx0 + shopTW / 2), 0.3)[0], dy: fr.pt(toA(sx0 + shopTW / 2), 0.3)[1], n: fr.n });
       let lp = fr.pt(toA(sx0 + shopTW / 2), -0.9);
-      C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 2.2, color: [1, 0.85, 0.6], k: 0.55, kind: "shop", group: GRP.DAY }), rng.chance(0.45) && bladeSign(C, fr, toA(sx0 + 2), zA + 0.2, shopInfo.name, rng);
+      C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 2.2, color: [1, 0.85, 0.6], k: 0.55, kind: "shop", group: GRP.DAY }), rng.chance(0.45) && bladeSign(C, fr, toA(sx0 + 4), zA + 0.2, shopInfo.name, rng);
     }
     if (esc) {
-      let ex0 = toA(Math.round(bayW * escBays[0] + bayW / 2) - 9), ex1 = toA(Math.round(bayW * escBays[escBays.length - 1] + bayW / 2) + 9);
+      let ex0 = toA(Math.round(bayW * escBays[0] + bayW / 2) - 18), ex1 = toA(Math.round(bayW * escBays[escBays.length - 1] + bayW / 2) + 18);
       fireEscape(C, fr, ex0, ex1, 0, z0 + gH, fH, nF);
     }
     for (let w of windows)
@@ -2369,17 +2704,17 @@ void main() {
     rng.chance(0.5) && fr.facadeQuad(mb, a0, a0 + W, -0.32, zTop - 0.85, zTop - 0.66, S2.xmasLights, { group: GRP.XMAS, mat: MAT.NOSHADOW | MAT.FLAT });
     let roof = { a0, a1: a0 + W, d0: 0, d1: D, z: zTop };
     roofClutter(C, fr, roof, { waterTower: o.waterTower ?? rng.chance(0.45), billboard: o.billboard });
-    let rdA = o.resDoorLeft ? toA(6) : toA(resDoorX + 5), st = fr.pt(shop ? rdA : a0 + W / 2, -0.7), dp = fr.pt(shop ? rdA : a0 + W / 2, 0.2);
+    let rdA = o.resDoorLeft ? toA(12) : toA(resDoorX + 10), st = fr.pt(shop ? rdA : a0 + W / 2, -0.7), dp = fr.pt(shop ? rdA : a0 + W / 2, 0.2);
     return C.world.doors.push({ x: st[0], y: st[1], sx: st[0], sy: st[1], dx: dp[0], dy: dp[1], dz: z0, kind: "home", n: fr.n }), { H: zTop };
   }
   function ptObj(p) {
     return { x: p[0], y: p[1] };
   }
   function bladeSign(C, fr, a, z, text, rng) {
-    let word = text.split(" ")[0].slice(0, 7), hh = word.length * 6 + 4, bg = rng.pick([1776411, 13119532, 2051994, 3099194]), fg = rng.pick([16732010, 5231359, 16767055, 16777215]), tex = region(C, 12, hh, (p2) => {
-      p2.rect(0, 0, 12, hh, bg), p2.frame(0, 0, 12, hh, shade(bg, 1.6));
-      for (let i = 0; i < word.length; i++) p2.text(4, 2 + i * 6, word[i], fg, winCode(0.02, !0));
-    }), H = hh / 16;
+    let word = text.split(" ")[0].slice(0, 7), hh = word.length * 10 + 8, bg = rng.pick([1776411, 13119532, 2051994, 3099194]), fg = rng.pick([16732010, 5231359, 16767055, 16777215]), tex = region(C, 24, hh, (p2) => {
+      p2.rect(0, 0, 24, hh, bg), p2.frame(0, 0, 24, hh, shade(bg, 1.6)), p2.frame(2, 2, 20, hh - 4, fg, winCode(0.02, !0));
+      for (let i = 0; i < word.length; i++) p2.text7(10, 5 + i * 10, word[i], fg, winCode(0.02, !0));
+    }), H = hh / 32;
     fr.sideQuad(C.mb, a, -0.2, -0.95, z, z + H, tex, { mat: MAT.NOSHADOW }), fr.sideQuad(C.mb, a + 0.01, -0.95, -0.2, z, z + H, tex, { mat: MAT.NOSHADOW });
     let p = fr.pt(a, -0.6);
     C.world.lamps.push({ x: p[0], y: p[1], z, r: 1.4, color: [0.9, 0.5, 0.6], k: 0.3, kind: "neon" });
@@ -2389,13 +2724,13 @@ void main() {
     for (let f = 0; f < nF; f++) {
       let zf = zFirst + f * fH;
       if (fr.box(mb, ea0, ea1, dFace - depth, dFace, zf - 0.06, zf, { front: iron, left: iron, right: iron, top: { t: S2.grate } }, { topMat: MAT.SNOW }), fr.facadeQuad(mb, ea0, ea1, dFace - depth + 0.02, zf, zf + 0.62, S2.fescRail), fr.sideQuad(mb, ea0 + 0.02, dFace - depth, dFace, zf, zf + 0.62, S2.fescRail), fr.sideQuad(mb, ea1 - 0.02, dFace, dFace - depth, zf, zf + 0.62, S2.fescRail), f < nF - 1) {
-        let goingRight = f % 2 === 0, sa0 = goingRight ? ea0 + 0.25 : ea1 - 0.25, sa1 = goingRight ? ea1 - 0.55 : ea0 + 0.55, d = dFace - depth * 0.4, p0 = fr.pt(sa0, d), p1 = fr.pt(sa1, d), len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), sl = Math.hypot(len, fH) * 16, th = 0.25;
+        let goingRight = f % 2 === 0, sa0 = goingRight ? ea0 + 0.25 : ea1 - 0.25, sa1 = goingRight ? ea1 - 0.55 : ea0 + 0.55, d = dFace - depth * 0.4, p0 = fr.pt(sa0, d), p1 = fr.pt(sa1, d), len = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]), sl = Math.hypot(len, fH) * 32, th = 0.25;
         mb.quad(
           [p0[0], p0[1], zf + th],
           [p1[0], p1[1], zf + fH + th - 0.06],
           [p1[0], p1[1], zf + fH - 0.06],
           [p0[0], p0[1], zf],
-          [[0, 0], [sl, 0], [sl, 4], [0, 4]],
+          [[0, 0], [sl, 0], [sl, 8], [0, 8]],
           S2.fstair,
           [fr.nx, fr.ny, 0],
           MAT.FLAT
@@ -2423,10 +2758,12 @@ void main() {
     rng.chance(0.6) && chimney(C, fr, roof.a0 + rng.range(0.2, W - 0.6), roof.d0 + rng.range(0.4, D - 0.6), z), rng.chance(0.3) && C.addSprite("antenna", ...fr.pt(roof.a0 + rng.range(0.5, W - 0.5), roof.d0 + rng.range(0.5, D - 0.5)), z), rng.chance(0.35) && C.addSprite("dish", ...fr.pt(roof.a0 + rng.range(0.5, W - 0.5), roof.d0 + rng.range(0.5, D - 0.5)), z), o.billboard && billboard(C, fr, roof.a0 + 0.3, roof.a0 + Math.min(W - 0.3, 5.3), roof.d0 + 0.6, z, o.billboard), (o.garden || rng.chance(0.12)) && roofGarden(C, fr, roof.a0 + 0.4, roof.a1 - 0.4, roof.d0 + 0.4, roof.d0 + Math.min(D * 0.5, 3), z), rng.chance(0.08) && C.world.pigeonCoops.push({ ...ptObj(fr.pt(roof.a0 + W / 2, roof.d0 + D / 2)), z });
   }
   function bulkhead(C, fr, a0, a1, d0, d1, z, h) {
-    let S2 = sharedTex(C), tex = C.atlas.shared("bulk", 32, 20, (p) => {
-      brickFill(p, 0, 0, 32, 20, PAL.brickBrown, 31), p.rect(0, 0, 32, 2, 9079432);
-    }), doorT = C.atlas.shared("bulk_door", 24, 20, (p) => {
-      brickFill(p, 0, 0, 24, 20, PAL.brickBrown, 31), p.rect(0, 0, 24, 2, 9079432), p.rect(8, 6, 8, 14, 5922147), p.frame(8, 6, 8, 14, 3816771);
+    let S2 = sharedTex(C), tex = C.atlas.shared("bulk", 64, 40, (p) => {
+      brickFill(p, 0, 0, 64, 40, PAL.brickBrown, 31), p.rect(0, 0, 64, 4, 9079432), p.hline(0, 4, 64, 5921368);
+    }), doorT = C.atlas.shared("bulk_door", 48, 40, (p) => {
+      brickFill(p, 0, 0, 48, 40, PAL.brickBrown, 31), p.rect(0, 0, 48, 4, 9079432), p.hline(0, 4, 48, 5921368), p.rect(16, 12, 16, 28, 5922147), p.frame(16, 12, 16, 28, 3816771);
+      for (let y = 16; y < 38; y += 4) p.hline(18, y, 12, 6974835);
+      p.rect(28, 26, 2, 2, 13158596);
     });
     fr.box(C.mb, a0, a1, d0, d1, z, z + h, { front: doorT, back: tex, left: tex, right: tex, top: { t: S2.roofTar, world: !0 } }), markHeight(C.world, ...fr.aabb(a0, a1, d0, d1), z + h);
   }
@@ -2436,14 +2773,20 @@ void main() {
       mb.solid(x + dx * r - 0.06, y + dy * r - 0.06, z, x + dx * r + 0.06, y + dy * r + 0.06, z + legH, iron, iron);
     mb.solid(x - r, y - 0.03, z + legH * 0.45, x + r, y + 0.03, z + legH * 0.45 + 0.06, iron, iron), mb.solid(x - 0.03, y - r, z + legH * 0.45, x + 0.03, y + r, z + legH * 0.45 + 0.06, iron, iron), mb.solid(x - r * 1.05, y - r * 1.05, z + legH - 0.08, x + r * 1.05, y + r * 1.05, z + legH, iron, S2.grate);
     let tankTex = rng.next() < 0.12 ? flagTank(C) : rng.chance(0.5) ? S2.tank : S2.tankDark;
-    mb.cylinder(x, y, z + legH, z + legH + tankH, r, 12, tankTex, null), mb.cone(x, y, z + legH + tankH, z + legH + tankH + 0.85, r * 1.08, 12, S2.tankRoof), mb.solid(x - 0.04, y - 0.04, z + legH + tankH + 0.8, x + 0.04, y + 0.04, z + legH + tankH + 1.05, iron, iron), mb.vquad(x - 0.15, y + r + 0.02, x + 0.15, y + r + 0.02, z, z + legH + tankH, S2.ladder), markHeight(C.world, x - r, y - r, x + r, y + r, z + legH + tankH + 0.9), C.world.perches.push({ x, y, z: z + legH + tankH + 0.85 });
+    mb.cylinder(x, y, z + legH, z + legH + tankH, r, 12, tankTex, null), mb.cone(x, y, z + legH + tankH, z + legH + tankH + 0.85, r * 1.08, 12, S2.tankRoof), mb.solid(x - 0.04, y - 0.04, z + legH + tankH + 0.8, x + 0.04, y + 0.04, z + legH + tankH + 1.05, iron, iron), mb.vquad(x - 0.1875, y + r + 0.02, x + 0.1875, y + r + 0.02, z, z + legH + tankH, S2.ladder), markHeight(C.world, x - r, y - r, x + r, y + r, z + legH + tankH + 0.9), C.world.perches.push({ x, y, z: z + legH + tankH + 0.85 });
   }
   function flagTank(C) {
-    return C.atlas.shared("tank_flag", 64, 30, (p) => {
-      for (let y = 0; y < 30; y++) for (let x = 0; x < 64; x++) p.set(x, y, Math.floor(y / 3) % 2 ? 15921126 : 13119532);
-      p.rect(0, 0, 26, 15, 2046586);
-      for (let y = 2; y < 14; y += 3) for (let x = 2; x < 25; x += 4) p.set(x + y % 2 * 2, y, 16777215);
-      for (let x = 1; x < 64; x += 2) p.set(x, 29, 3815998);
+    return C.atlas.shared("tank_flag", 128, 61, (p) => {
+      for (let y = 0; y < 61; y++) for (let x = 0; x < 128; x++) {
+        let c = Math.floor(y / 5) % 2 ? 15921126 : 13119532;
+        x % 4 === 3 && (c = shade(c, 0.88)), p.set(x, y, c);
+      }
+      p.rect(0, 0, 52, 30, 2046586);
+      for (let y = 3; y < 28; y += 5) for (let x = 3; x < 50; x += 8) {
+        let sx = x + Math.floor(y / 5) % 2 * 4;
+        p.set(sx, y, 16777215), p.set(sx - 1, y + 1, 16777215), p.set(sx + 1, y + 1, 16777215), p.set(sx, y + 2, 16777215);
+      }
+      for (let x = 1; x < 128; x += 2) p.set(x, 60, 3815998);
     });
   }
   function hvac(C, fr, a, d, z) {
@@ -2470,8 +2813,8 @@ void main() {
       fr.box(C.mb, a, a + 0.8, d0, d0 + 0.5, z, z + 0.35, { front: S2.wood, back: S2.wood, left: S2.wood, right: S2.wood, top: { t: S2.roofGreen, world: !0 } }), C.addSprite("bush", ...fr.pt(a + 0.4, d0 + 0.25), z + 0.35);
   }
   function billboard(C, fr, a0, a1, d, z, kind) {
-    let { mb } = C, S2 = sharedTex(C), W = a1 - a0, H = 1.75, legH = 1, tw = Math.round(W * 16), th = Math.round(H * 16), art = region(C, tw, th, (p) => billboardArt(p, tw, th, kind, C.rng)), backT = C.atlas.shared("bb_back", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, x % 4 === 0 || y % 8 === 0 ? 4869202 : 6974578);
+    let { mb } = C, S2 = sharedTex(C), W = a1 - a0, H = 1.75, legH = 1, tw = Math.round(W * 32), th = Math.round(H * 32), art = region(C, tw, th, (p) => billboardArt(p, tw, th, kind, C.rng)), backT = C.atlas.shared("bb_back", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 || y % 16 === 0 ? 4869202 : (x + y) % 16 === 0 ? 5921890 : 6974578);
     });
     for (let a of [a0 + 0.4, a1 - 0.4])
       fr.box(mb, a - 0.06, a + 0.06, d + 0.1, d + 0.22, z, z + legH, { front: S2.darkMetal, left: S2.darkMetal, right: S2.darkMetal, back: S2.darkMetal }), fr.box(mb, a - 0.04, a + 0.04, d + 0.2, d + 0.9, z, z + legH * 0.6, { front: S2.darkMetal, left: S2.darkMetal, right: S2.darkMetal });
@@ -2495,16 +2838,20 @@ void main() {
     top && (faces.pz = { t: top, world: !0 }), opt.faces && Object.assign(faces, opt.faces), C.mb.box(x0, y0, z0, x1, y1, z1, faces, { seed }), markHeight(C.world, x0, y0, x1, y1, z1);
   }
   function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
-    let h = Math.round((z1 - z0) * 16), wx = Math.round((x1 - x0) * 16), wy = Math.round((y1 - y0) * 16), faces = {}, mk = (w, i) => ({ t: region2(C, w, h, (p) => fn(p, w, h, i)), mat: opt.mat ?? MAT.OFFICE });
+    let h = Math.round((z1 - z0) * 32), wx = Math.round((x1 - x0) * 32), wy = Math.round((y1 - y0) * 32), faces = {}, mk = (w, i) => ({ t: region2(C, w, h, (p) => fn(p, w, h, i)), mat: opt.mat ?? MAT.OFFICE });
     faces.py = mk(wx, 0), faces.px = mk(wy, 1), faces.ny = mk(wx, 2), faces.nx = mk(wy, 3), top && (faces.pz = { t: top, world: !0 }), C.mb.box(x0, y0, z0, x1, y1, z1, faces), markHeight(C.world, x0, y0, x1, y1, z1);
   }
   function beacon(C, x, y, z) {
     C.world.beacons.push({ x, y, z });
   }
   function decoTower(C, L) {
-    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, stone = 14997952, stoneD = 13221540, spandrel = 3881544, module = C.atlas.shared("deco_mod", 16, 24, (p) => {
-      stoneFill(p, 0, 0, 16, 24, [stone], 5, 0), p.rect(0, 0, 3, 24, shade(stone, 1.05)), p.rect(13, 0, 3, 24, shade(stone, 0.95)), p.vline(3, 0, 24, stoneD), drawWindow(p, 4, 2, 4, 16, { frame: 2829104, t: 0.5, rail: !1 }, rng), drawWindow(p, 8, 2, 4, 16, { frame: 2829104, t: 0.5, rail: !1 }, rng);
-      for (let x = 4; x < 12; x++) for (let y = 18; y < 24; y++) p.set(x, y, (x + y) % 3 === 0 ? 5592170 : spandrel);
+    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, stone = 14997952, stoneD = 13221540, spandrel = 3881544, module = C.atlas.shared("deco_mod", 32, 48, (p) => {
+      stoneFill(p, 0, 0, 32, 48, [stone], 5, 0), p.rect(0, 0, 6, 48, shade(stone, 1.05)), p.vline(0, 0, 48, shade(stone, 1.14)), p.rect(26, 0, 6, 48, shade(stone, 0.96)), p.vline(31, 0, 48, shade(stone, 0.86)), p.vline(6, 0, 48, stoneD), p.vline(25, 0, 48, shade(stoneD, 1.06)), drawWindow(p, 7, 3, 9, 32, { frame: 2829104, t: 0.5, panes: "1/1" }, rng), drawWindow(p, 16, 3, 9, 32, { frame: 2829104, t: 0.5, panes: "1/1" }, rng);
+      for (let y = 36; y < 48; y++) for (let x = 7; x < 25; x++) {
+        let v = Math.abs((x - 7) % 6 - 3) + (y - 36);
+        p.set(x, y, v % 4 === 0 ? 6973568 : (x + y) % 3 === 0 ? 4539482 : spandrel);
+      }
+      p.hline(7, 36, 18, 2763060), p.hline(7, 47, 18, 5921136);
     }), roofT = S2.roofGravel, cx = (L.x0 + L.x1) / 2, cy = (L.y0 + L.y1) / 2, tiers = [
       { r: 8, z: 11 },
       { r: 6.5, z: 18 },
@@ -2512,20 +2859,25 @@ void main() {
       { r: 3.5, z: 6 }
     ];
     band(C, cx - 8, cy - 8, cx + 8, cy + 8, z0, z0 + 2, (p, w, h, i) => {
-      stoneFill(p, 0, 0, w, h, [14273968], 7, 8, { blocks: 16 }), p.rect(0, 0, w, 3, 9071162), p.hline(0, 1, w, 13148746);
-      for (let x = 4; x < w - 12; x += 16)
-        p.rect(x, 6, 10, h - 6, 6965794), p.rect(x + 1, 7, 8, h - 7, 4216685, winCode(0.05)), p.vline(x + 5, 7, h - 7, 9071162);
-      (i === 0 || i === 1) && signBoard(p, Math.floor(w / 2) - 30, 1, 60, 5, "THE PIXEL BLDG", { bg: 9071162, fg: 15913594, t: 0.03 });
+      stoneFill(p, 0, 0, w, h, [14273968], 7, 16, { blocks: 32 }), p.rect(0, 0, w, 6, 9071162), p.hline(0, 2, w, 13148746), p.hline(0, 3, w, 14728282);
+      for (let x = 8; x < w - 24; x += 32) {
+        p.rect(x, 12, 20, h - 12, 6965794), p.rect(x + 2, 14, 16, h - 14, 4216685, winCode(0.05)), p.vline(x + 10, 25, h - 25, 9071162), p.hline(x + 2, 24, 16, 9071162);
+        for (let k = 0; k < 5; k++) p.line(x + 10, 24, x + 2 + k * 4, 14, 13148746);
+        p.rect(x + 7, h - 22, 2, 6, 13148746), p.rect(x + 11, h - 22, 2, 6, 13148746);
+      }
+      (i === 0 || i === 1) && signBoard(p, Math.floor(w / 2) - 60, 1, 120, 10, "THE PIXEL BLDG", { bg: 9071162, fg: 15913594, t: 0.03, shadow: !1 });
     }, roofT);
     let z = z0 + 2;
     tiers.forEach((tr, i) => {
       section(C, cx - tr.r, cy - tr.r, cx + tr.r, cy + tr.r, z, z + tr.z, module, roofT, { seed: 40 + i });
       let pr = tr.r;
       if (band(C, cx - pr, cy - pr, cx + pr, cy + pr, z + tr.z, z + tr.z + 0.5, (p, w, h) => {
-        p.rect(0, 0, w, h, stone);
-        for (let x = 0; x < w; x += 4)
-          p.set(x, 2, 9075290), p.set(x + 1, 3, 9075290), p.set(x + 2, 2, 9075290);
-        p.hline(0, h - 1, w, stoneD);
+        p.rect(0, 0, w, h, stone), p.hline(0, 0, w, shade(stone, 1.12));
+        for (let x = 0; x < w; x++) {
+          let k = x % 8, yy = 4 + (k < 4 ? k : 8 - k);
+          p.set(x, yy, 9075290), p.set(x, yy + 1, 11049082);
+        }
+        p.hline(0, h - 3, w, shade(stone, 0.9)), p.hline(0, h - 1, w, stoneD);
       }, S2.concrete, { mat: 0 }), i < 3) for (let [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
         let ex = cx + sx * (pr - 0.25), ey = cy + sy * (pr - 0.25);
         C.mb.solid(ex - 0.2, ey - 0.2, z + tr.z + 0.5, ex + 0.2, ey + 0.2, z + tr.z + 1.1, S2.limestone, S2.limestone);
@@ -2533,19 +2885,24 @@ void main() {
       z += tr.z;
     });
     let crown = (p, w, h) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(13159636, 0.9 + ((x + y) % 4 === 0 ? 0.2 : 0) + hash2i(x, y, 2) * 0.05));
-      let tw = 10;
-      for (let x0 = 1; x0 + tw <= w; x0 += tw + 2)
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(13159636, 0.9 + ((x + y) % 8 === 0 ? 0.2 : 0) + hash2i(x, y, 2) * 0.05));
+      for (let x = 0; x < w; x += 10)
+        p.vline(x, 0, h, 15265010), p.vline(x + 1, 0, h, 10133674);
+      let tw = 20;
+      for (let x0 = 2; x0 + tw <= w; x0 += tw + 4)
         for (let row = 0; row < 3; row++) {
-          let by = h - 4 - row * Math.floor(h / 3.5);
-          for (let k = 0; k < 4; k++)
-            for (let xx = k; xx < tw - k; xx++) p.set(x0 + xx, by - k, 14209720, 254);
+          let by = h - 6 - row * Math.floor(h / 3.4);
+          for (let k = 0; k < 8; k++) for (let xx = k; xx < tw - k; xx++) p.set(x0 + xx, by - k, 14209720, 254);
+          for (let k = 0; k < 9; k++)
+            p.set(x0 + k - 1, by - k, 8028298), p.set(x0 + tw - k, by - k, 8028298);
+          p.hline(x0 - 1, by + 1, tw + 2, 8028298);
         }
-      p.hline(0, 0, w, 15790838);
+      p.hline(0, 0, w, 15790838), p.hline(0, 1, w, 14212324);
     };
     band(C, cx - 2.5, cy - 2.5, cx + 2.5, cy + 2.5, z + 0.5, z + 3.5, crown, S2.metal, { mat: MAT.GLASS }), band(C, cx - 1.5, cy - 1.5, cx + 1.5, cy + 1.5, z + 3.5, z + 6, crown, S2.metal, { mat: MAT.GLASS });
-    let spire = C.atlas.shared("spire", 16, 32, (p) => {
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 16; x++) p.set(x, y, x % 4 === 0 ? 15790838 : 11844292);
+    let spire = C.atlas.shared("spire", 32, 64, (p) => {
+      for (let y = 0; y < 64; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 8 === 0 ? 15790838 : x % 8 === 1 ? 13949152 : y % 16 === 0 ? 10133674 : 11844292);
+      for (let y = 8; y < 64; y += 16) for (let x = 4; x < 32; x += 8) p.set(x, y, 16777215, 254);
     });
     C.mb.pyramid(cx - 0.75, cy - 0.75, cx + 0.75, cy + 0.75, z + 6, z + 14, spire, { mat: MAT.GLASS }), beacon(C, cx, cy, z + 14.1), C.world.perches.push({ x: cx + 2, y: cy + 2, z: z + 0.5 }), C.world.lamps.push({ x: cx, y: cy + 3, z, r: 3, color: [1, 0.9, 0.7], k: 0.15, kind: "up" }), C.world.officeDoors.push(...lobbyDoors(cx, cy, 8, 8)), plaza(C, L, { x0: cx - 8, y0: cy - 8, x1: cx + 8, y1: cy + 8 });
   }
@@ -2558,31 +2915,36 @@ void main() {
     ];
   }
   function glassTower(C, L) {
-    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, module = C.atlas.shared("glass_mod", 12, 24, (p) => {
-      for (let y = 0; y < 24; y++)
-        for (let x = 0; x < 12; x++) {
-          let c = shade(4095651, 1.12 - y / 24 * 0.28);
-          (x + y) % 11 === 3 && y < 14 && (c = mixc(c, 11065584, 0.6)), p.set(x, y, c, winCode(0.5));
+    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, module = C.atlas.shared("glass_mod", 24, 48, (p) => {
+      for (let y = 0; y < 48; y++)
+        for (let x = 0; x < 24; x++) {
+          let c = shade(4095651, 1.12 - y / 48 * 0.28), d = (x + y) % 22;
+          (d === 6 || d === 7) && y < 28 ? c = mixc(c, 11065584, 0.6) : d === 8 && y < 20 && (c = mixc(c, 11065584, 0.3)), p.set(x, y, c, winCode(0.5));
         }
-      for (let y = 19; y < 24; y++) for (let x = 0; x < 12; x++) p.set(x, y, y === 19 ? 10467012 : 2903910);
-      p.vline(0, 0, 24, 12110034);
+      for (let x = 2; x < 24; x++) p.set(x, 2, 12112096, winCode(0.5));
+      for (let y = 38; y < 48; y++) for (let x = 0; x < 24; x++) p.set(x, y, y === 38 ? 10467012 : y === 39 ? 7309978 : x % 6 === 0 ? 3496562 : 2903910);
+      p.vline(0, 0, 48, 12110034), p.vline(1, 0, 48, 9085102), p.vline(12, 0, 38, 8033702);
     }), x0 = L.x0 + 4, x1 = L.x0 + 14, y0 = L.y0 + 2.5, y1 = L.y0 + 12.5;
     band(C, x0, y0, x1, y1, z0, z0 + 2.5, (p, w, h) => {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(6262440, 1.1 - y / h * 0.2), winCode(0.03));
-      for (let x = 0; x < w; x += 12) p.vline(x, 0, h, 13161692);
-      p.rect(0, 0, w, 3, 13161692), p.rect(0, 18, w, 1, 13161692);
-      for (let x = 6; x < w - 6; x += 23)
-        p.rect(x, h - 8, 10, 4, 14209216, winCode(0.03, !0));
-      signBoard(p, Math.floor(w / 2) - 18, 4, 36, 7, "ONE PARK", { bg: 1780536, fg: 13691647, t: 0.03 });
+      for (let x = 0; x < w; x += 24)
+        p.vline(x, 0, h, 13161692), p.vline(x + 1, 0, h, 10136244);
+      p.rect(0, 0, w, 6, 13161692), p.hline(0, 6, w, 9083556), p.rect(0, 36, w, 2, 13161692);
+      for (let x = 12; x < w - 24; x += 46)
+        p.rect(x, h - 16, 20, 8, 14209216, winCode(0.03, !0)), p.hline(x, h - 16, 20, 15788248, winCode(0.03, !0)), p.rect(x + 4, h - 22, 2, 6, 2763310), p.rect(x + 2, h - 24, 6, 2, 16771248, winCode(0.03, !0));
+      signBoard(p, Math.floor(w / 2) - 36, 10, 72, 14, "ONE PARK", { bg: 1780536, fg: 13691647, t: 0.03 });
     }, S2.concrete, { mat: MAT.GLASS | MAT.OFFICE }), section(C, x0, y0, x1, y1, z0 + 2.5, z0 + 44.5, module, null, { mat: MAT.GLASS | MAT.OFFICE, seed: 61 });
-    let louv = C.atlas.shared("louver", 12, 12, (p) => {
-      for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) p.set(x, y, y % 3 === 0 ? 5926780 : 9216946);
-      p.vline(0, 0, 12, 12110034);
+    let louv = C.atlas.shared("louver", 24, 24, (p) => {
+      for (let y = 0; y < 24; y++) for (let x = 0; x < 24; x++) p.set(x, y, y % 4 === 0 ? 4874092 : y % 4 === 1 ? 6980498 : 9216946);
+      p.vline(0, 0, 24, 12110034), p.vline(1, 0, 24, 10137790);
     });
     section(C, x0 + 0.75, y0 + 0.75, x1 - 0.75, y1 - 0.75, z0 + 44.5, z0 + 47.5, louv, S2.roofSilver, { mat: MAT.GLASS, seed: 62 }), C.mb.solid(x0, y0, z0 + 44.5, x1, y0 + 0.25, z0 + 48.5, module, S2.metal, { mat: MAT.GLASS }), C.mb.solid(x0 + 4, y0 + 4, z0 + 47.5, x0 + 4.25, y0 + 4.25, z0 + 54, S2.metal, S2.metal), beacon(C, x0 + 4.1, y0 + 4.1, z0 + 54.1), hvacAt(C, x0 + 2, y0 + 3, z0 + 47.5), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y1 + 0.9, dx: (x0 + x1) / 2, dy: y1 - 0.2, kind: "office" }), C.world.officeDoors.push({ x: x1 + 0.9, y: (y0 + y1) / 2, dx: x1 - 0.2, dy: (y0 + y1) / 2, kind: "office" }), band(C, L.x0 + 1, L.y0 + 14, L.x0 + 7, L.y1 - 1, z0, z0 + 2.25, (p, w, h) => {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(6262440, 1.1 - y / h * 0.2), winCode(0.04));
-      for (let x = 0; x < w; x += 12) p.vline(x, 0, h, 13161692);
-      p.rect(0, 0, w, 2, 13161692), p.text(4, 4, "CAFE", 16767055, winCode(0.02, !0));
+      for (let x = 0; x < w; x += 24)
+        p.vline(x, 0, h, 13161692), p.vline(x + 1, 0, h, 10136244);
+      p.rect(0, 0, w, 4, 13161692), p.text7(8, 9, "CAFE", 16767055, winCode(0.02, !0), 2);
+      for (let x = 10; x < w - 16; x += 28)
+        p.rect(x, h - 18, 12, 2, 15261904, winCode(0.04, !0)), p.rect(x + 5, h - 16, 2, 10, 2763310), p.rect(x - 4, h - 14, 3, 8, 6044458), p.rect(x + 13, h - 14, 3, 8, 6044458);
     }, S2.roofSilver, { mat: MAT.GLASS }), plaza(C, L, { x0, y0, x1, y1 }, { sculpture: !0, subway: { x: L.x1 - 1.5, y: L.y1 - 4 } });
   }
   function hvacAt(C, x, y, z) {
@@ -2590,81 +2952,89 @@ void main() {
     hvac(C, fr, 0, 0, z);
   }
   function modernTower(C, L) {
-    let S2 = sharedTex(C), z0 = C.z0, module = C.atlas.shared("bronze_mod", 12, 24, (p) => {
-      for (let y = 0; y < 24; y++)
-        for (let x = 0; x < 12; x++) {
-          let c = shade(4865848, 1.1 - y / 24 * 0.25);
-          (x + y) % 13 === 5 && y < 15 && (c = mixc(c, 10127994, 0.5)), p.set(x, y, c, winCode(0.5));
+    let S2 = sharedTex(C), z0 = C.z0, module = C.atlas.shared("bronze_mod", 24, 48, (p) => {
+      for (let y = 0; y < 48; y++)
+        for (let x = 0; x < 24; x++) {
+          let c = shade(4865848, 1.1 - y / 48 * 0.25), d = (x + y) % 26;
+          (d === 10 || d === 11) && y < 30 && (c = mixc(c, 10127994, 0.5)), p.set(x, y, c, winCode(0.5));
         }
-      for (let y = 20; y < 24; y++) for (let x = 0; x < 12; x++) p.set(x, y, 3812902);
-      p.vline(0, 0, 24, 9071170), p.vline(6, 0, 24, 6967858);
+      for (let y = 40; y < 48; y++) for (let x = 0; x < 24; x++) p.set(x, y, y === 40 ? 5917242 : 3812902);
+      p.vline(0, 0, 48, 9071170), p.vline(1, 0, 48, 11043918), p.vline(2, 0, 48, 6967858), p.vline(12, 0, 40, 6967858), p.vline(13, 0, 40, 9071170);
     }), x0 = L.x0 + 3, x1 = L.x0 + 15, y0 = L.y0 + 1.5, y1 = L.y0 + 10.5;
     band(C, x0, y0, x1, y1, z0, z0 + 2.25, (p, w, h) => {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(8022618, 1.05 - y / h * 0.15), winCode(0.03));
-      for (let x = 0; x < w; x += 12) p.vline(x, 0, h, 9071170);
-      p.rect(0, 0, w, 2, 9071170);
+      for (let x = 0; x < w; x += 24)
+        p.vline(x, 0, h, 9071170), p.vline(x + 1, 0, h, 11043918);
+      p.rect(0, 0, w, 4, 9071170), p.hline(0, 4, w, 5915688);
     }, S2.concrete, { mat: MAT.GLASS | MAT.OFFICE }), section(C, x0, y0, x1, y1, z0 + 2.25, z0 + 38.25, module, S2.roofGravel, { mat: MAT.GLASS | MAT.OFFICE, seed: 71 }), section(C, x0 + 1.5, y0 + 1.5, x1 - 1.5, y1 - 1.5, z0 + 38.25, z0 + 40.25, module, S2.roofTar, { mat: MAT.GLASS | MAT.OFFICE, seed: 72 }), C.mb.solid(x1 - 2, y0 + 2, z0 + 40.25, x1 - 1.8, y0 + 2.2, z0 + 45, S2.metal, S2.metal), beacon(C, x1 - 1.9, y0 + 2.1, z0 + 45.1), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y1 + 0.9, dx: (x0 + x1) / 2, dy: y1 - 0.2, kind: "office" }), plaza(C, L, { x0, y0, x1, y1 }, { pools: !0 });
   }
   function limestoneOffice(C, L) {
-    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, module = C.atlas.shared("lime_mod", 16, 24, (p) => {
-      stoneFill(p, 0, 0, 16, 24, PAL.limestone, 33, 8, { blocks: 16 }), drawWindow(p, 2, 5, 5, 14, { frame: 15921126, sill: 13221540, t: 0.5 }, rng), drawWindow(p, 9, 5, 5, 14, { frame: 15921126, sill: 13221540, t: 0.5 }, rng);
+    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, module = C.atlas.shared("lime_mod", 32, 48, (p) => {
+      stoneFill(p, 0, 0, 32, 48, PAL.limestone, 33, 16, { blocks: 32 }), drawWindow(p, 4, 10, 10, 28, { frame: 15921126, sill: 13221540, lintel: 14208176, t: 0.5, panes: "1/1", wall: PAL.limestone[0] }, rng), drawWindow(p, 18, 10, 10, 28, { frame: 15921126, sill: 13221540, lintel: 14208176, t: 0.5, panes: "1/1", wall: PAL.limestone[0] }, rng);
     }), x0 = L.x0 + 1, x1 = L.x1 - 1, y0 = L.y0 + 1, y1 = L.y0 + 11;
     band(C, x0, y0, x1, y1, z0, z0 + 2.5, (p, w, h) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(12102540, (y % 4 === 3 ? 0.8 : 1) * (0.95 + hash2i(x, y, 9) * 0.08)));
-      for (let x = 6; x < w - 14; x += 32)
-        p.rect(x, 10, 12, h - 10, 9075290), p.rect(x + 1, 11, 10, h - 11, 4216685, winCode(0.05)), p.rect(x + 3, 4, 6, 5, 15787724);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) p.set(x, y, shade(12102540, (y % 8 === 7 ? 0.8 : 1) * (0.95 + hash2i(x, y, 9) * 0.08)));
+      for (let x = 12; x < w - 28; x += 64)
+        p.rect(x, 20, 24, h - 20, 9075290), p.rect(x + 2, 22, 20, h - 22, 4216685, winCode(0.05)), p.vline(x + 12, 22, h - 22, 9075290), p.hline(x + 2, 34, 20, 9075290), p.rect(x + 6, 5, 12, 11, 15787724), p.frame(x + 6, 5, 12, 11, 13221540), p.rect(x + 10, 8, 4, 5, 14208176);
     }, S2.concrete, { mat: MAT.OFFICE }), section(C, x0, y0, x1, y1, z0 + 2.5, z0 + 15.5, module, S2.roofTar, { seed: 81 }), section(C, x0 + 1.5, y0 + 1, x1 - 1.5, y1 - 1, z0 + 15.5, z0 + 24.5, module, S2.roofTar, { seed: 82 }), section(C, x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 24.5, z0 + 30.5, module, null, { seed: 83 });
-    let copper = C.atlas.shared("copper", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, shade(x % 4 === 0 ? 5216902 : 7125152, 0.92 + hash2i(x, y, 4) * 0.12));
+    let copper = C.atlas.shared("copper", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
+        let c = shade(x % 8 === 0 ? 5216902 : x % 8 === 1 ? 8177840 : 7125152, 0.92 + hash2i(x, y, 4) * 0.12);
+        hash2i(x >> 1, y >> 2, 7) > 0.86 && (c = mixc(c, 9099456, 0.4)), p.set(x, y, c);
+      }
     });
     C.mb.pyramid(x0 + 4, y0 + 2, x1 - 4, y1 - 2, z0 + 30.5, z0 + 36, copper, { mat: MAT.SNOW }), C.mb.solid((x0 + x1) / 2 - 0.05, (y0 + y1) / 2 - 0.05, z0 + 35.5, (x0 + x1) / 2 + 0.05, (y0 + y1) / 2 + 0.05, z0 + 38, S2.metal, S2.metal), beacon(C, (x0 + x1) / 2, (y0 + y1) / 2, z0 + 38.1), waterTower(C, x0 + 3, y0 + 2.5, z0 + 15.5, 0.9), C.world.officeDoors.push({ x: (x0 + x1) / 2, y: y0 - 0.9, dx: (x0 + x1) / 2, dy: y0 + 0.2, kind: "office" }), hotel(C, { x0: L.x0 + 1, y0: L.y0 + 12, x1: L.x1 - 1, y1: L.y1 - 0.5 });
   }
   function hotel(C, R2) {
-    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, brickMod = C.atlas.shared("hotel_mod", 16, 24, (p) => {
-      brickFill(p, 0, 0, 16, 24, PAL.brickTan, 44), drawWindow(p, 4, 5, 8, 14, { frame: 2829104, lintel: 15787724, sill: 15787724, t: 0.5 }, rng);
-    }), fr = new Frame(R2.x0, R2.y1, 0, 1, z0), W = R2.x1 - R2.x0, D = R2.y1 - R2.y0, lobby = region2(C, Math.round(W * 16), 40, (p) => {
-      stoneFill(p, 0, 0, p.w, 40, [9054762], 5, 4), p.rect(0, 0, p.w, 3, 14200906);
-      for (let x = 6; x < p.w - 10; x += 22)
-        p.rect(x, 12, 14, 28, 14200906), p.rect(x + 1, 13, 12, 27, 4216685, winCode(0.02)), p.vline(x + 7, 13, 27, 14200906);
-      signBoard(p, 8, 4, p.w - 16, 7, "THE PIXEL HOTEL", { bg: 1776411, fg: 16767055, t: 0.02 });
+    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, brickMod = C.atlas.shared("hotel_mod", 32, 48, (p) => {
+      brickFill(p, 0, 0, 32, 48, PAL.brickTan, 44), drawWindow(p, 8, 10, 16, 28, { frame: 2829104, lintel: 15787724, sill: 15787724, t: 0.5, wall: PAL.brickTan[0] }, rng);
+    }), fr = new Frame(R2.x0, R2.y1, 0, 1, z0), W = R2.x1 - R2.x0, D = R2.y1 - R2.y0, LH = Math.round(2.5 * 32), lobby = region2(C, Math.round(W * 32), LH, (p) => {
+      stoneFill(p, 0, 0, p.w, LH, [9054762], 5, 8), p.rect(0, 0, p.w, 6, 14200906), p.hline(0, 6, p.w, 10123818);
+      for (let x = 12; x < p.w - 20; x += 44)
+        p.rect(x, 26, 28, LH - 26, 14200906), p.rect(x + 2, 28, 24, LH - 28, 4216685, winCode(0.02)), p.vline(x + 14, 28, LH - 28, 14200906), p.hline(x + 2, 38, 24, 14200906), p.rect(x + 11, LH - 26, 2, 8, 15782e3), p.rect(x + 15, LH - 26, 2, 8, 15782e3);
+      signBoard(p, 16, 9, p.w - 32, 14, "THE PIXEL HOTEL", { bg: 1776411, fg: 16767055, t: 0.02 });
     }), shaft = { t: brickMod, mat: 0, seed: 91 }, H = 2.5 + 12 * 1.5;
     C.mb.box(R2.x0, R2.y0, z0, R2.x1, R2.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S2.brickTan }, nx: { t: S2.brickTan } }), C.mb.box(R2.x0, R2.y0, z0 + 2.5, R2.x1, R2.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S2.roofTar, world: !0 } }), markHeight(C.world, R2.x0, R2.y0, R2.x1, R2.y1, z0 + H);
-    let can = region2(C, Math.round((W - 4) * 16), 5, (p) => {
-      p.rect(0, 0, p.w, 5, 1776411);
-      for (let x = 1; x < p.w; x += 3) p.set(x, 1, 16773280, winCode(0.01, !0)), p.set(x, 3, 16773280, winCode(0.01, !0));
+    let can = region2(C, Math.round((W - 4) * 32), 10, (p) => {
+      p.rect(0, 0, p.w, 10, 1776411), p.hline(0, 0, p.w, 14200906), p.hline(0, 9, p.w, 10123818);
+      for (let x = 2; x < p.w; x += 5)
+        p.rect(x, 3, 2, 1, 16773280, winCode(0.01, !0)), p.rect(x + 2, 6, 2, 1, 16773280, winCode(0.01, !0));
     });
     fr.box(C.mb, 2, W - 2, -1.6, 0, z0 + 2.3, z0 + 2.62, { front: can, left: can, right: can, top: { t: S2.darkMetal } });
     for (let a of [2.2, W - 2.2]) fr.box(C.mb, a - 0.05, a + 0.05, -1.55, -1.45, z0, z0 + 2.3, { front: S2.metal, left: S2.metal, right: S2.metal });
     C.world.lamps.push({ x: R2.x0 + W / 2, y: R2.y1 + 1.2, z: 0.5, r: 3.2, color: [1, 0.85, 0.55], k: 0.75, kind: "marquee" });
-    let word = "HOTEL", hh = word.length * 12 + 6, tex = region2(C, 16, hh, (p) => {
-      p.rect(0, 0, 16, hh, 1776411), p.frame(0, 0, 16, hh, 16732010, winCode(0.01, !0));
-      for (let i = 0; i < word.length; i++) p.text(2, 3 + i * 12, word[i], 16732010, winCode(0.01, !0), 2);
+    let word = "HOTEL", hh = word.length * 24 + 10, tex = region2(C, 32, hh, (p) => {
+      p.rect(0, 0, 32, hh, 1776411), p.frame(0, 0, 32, hh, 16732010, winCode(0.01, !0)), p.frame(2, 2, 28, hh - 4, 4856356);
+      for (let i = 0; i < word.length; i++) p.text7(9, 7 + i * 24, word[i], 16732010, winCode(0.01, !0), 3);
     }), sz = z0 + 6, bx = R2.x1 - 0.2;
-    C.mb.vquad(bx, R2.y1, bx, R2.y1 + 1.2, sz, sz + hh / 16, tex, { mat: MAT.NOSHADOW }), C.mb.vquad(bx + 0.02, R2.y1 + 1.2, bx + 0.02, R2.y1, sz, sz + hh / 16, tex, { mat: MAT.NOSHADOW }), C.world.lamps.push({ x: R2.x1, y: R2.y1 + 1.4, z: sz, r: 2.5, color: [1, 0.3, 0.45], k: 0.4, kind: "neon" });
+    C.mb.vquad(bx, R2.y1, bx, R2.y1 + 1, sz, sz + hh / 32, tex, { mat: MAT.NOSHADOW }), C.mb.vquad(bx + 0.02, R2.y1 + 1, bx + 0.02, R2.y1, sz, sz + hh / 32, tex, { mat: MAT.NOSHADOW }), C.world.lamps.push({ x: R2.x1, y: R2.y1 + 1.4, z: sz, r: 2.5, color: [1, 0.3, 0.45], k: 0.4, kind: "neon" });
     for (let a of [4, 7, 10]) C.addFlag(fr, a, -0.1, z0 + 3.2, a === 7 ? "us" : "hotel");
     C.world.doors.push({ x: R2.x0 + W / 2, y: R2.y1 + 0.9, dx: R2.x0 + W / 2, dy: R2.y1 - 0.2, kind: "hotel", n: [0, 1] }), roofClutter(C, fr, { a0: 0.5, a1: W - 0.5, d0: 0.5, d1: D - 0.5, z: z0 + H }, { waterTower: !0 });
   }
   function loft(C, fr, a0, W, D, o = {}) {
-    let { mb, rng } = C, S2 = sharedTex(C), nF = o.floors ?? rng.int(5, 7), gH = 2, fH = 1.75, band2 = 0.75, H = gH + nF * fH + band2, z0 = fr.z0, tw = Math.round(W * 16), th = Math.round(H * 16), paint = rng.pick([15262416, 14210248, 12106944, 14733488, 10135712, 13154464]), front = region2(C, tw, th, (p) => {
-      smoothFill(p, 0, 0, tw, th, paint, rng.int(1, 99), 0.03), corniceBand(p, 0, 0, tw, 10, shade(paint, 0.85));
-      let nb = Math.max(2, Math.round(tw / 20)), bw = tw / nb;
+    let { mb, rng } = C, S2 = sharedTex(C), nF = o.floors ?? rng.int(5, 7), gH = 2, fH = 1.75, band2 = 0.75, H = gH + nF * fH + band2, z0 = fr.z0, tw = Math.round(W * 32), th = Math.round(H * 32), paint = rng.pick([15262416, 14210248, 12106944, 14733488, 10135712, 13154464]), front = region2(C, tw, th, (p) => {
+      smoothFill(p, 0, 0, tw, th, paint, rng.int(1, 99), 0.03), corniceBand(p, 0, 0, tw, 20, shade(paint, 0.85));
+      let nb = Math.max(2, Math.round(tw / 40)), bw = tw / nb;
       for (let f = 0; f < nF; f++) {
-        let fy = Math.round((band2 + f * fH) * 16);
-        p.rect(0, fy, tw, 2, shade(paint, 0.82));
+        let fy = Math.round((band2 + f * fH) * 32);
+        p.rect(0, fy, tw, 4, shade(paint, 0.82)), p.hline(0, fy, tw, shade(paint, 1.1));
         for (let b = 0; b < nb; b++) {
           let x = Math.round(bw * b);
-          p.rect(x, fy, 3, 28, shade(paint, 1.06)), p.vline(x + 1, fy, 28, shade(paint, 0.88));
-          let wx = x + 4, ww = Math.round(bw) - 6;
-          drawWindow(p, wx, fy + 4, ww, 20, { frame: 2829104, t: rng.next(), panes: !0, arch: !0, wall: paint, curtain: rng.chance(0.15) ? rng.pick(PAL.curtains) : null }, rng);
+          p.rect(x, fy + 4, 6, 52, shade(paint, 1.06)), p.vline(x + 2, fy + 8, 44, shade(paint, 0.86)), p.vline(x + 4, fy + 8, 44, shade(paint, 0.86)), p.vline(x + 5, fy + 4, 52, shade(paint, 0.92)), p.rect(x - 1, fy + 4, 8, 3, shade(paint, 1.14)), p.hline(x - 1, fy + 7, 8, shade(paint, 0.8)), p.rect(x - 1, fy + 53, 8, 3, shade(paint, 0.9));
+          let wx = x + 9, ww = Math.round(bw) - 12, wy = fy + 10;
+          drawWindow(p, wx, wy, ww, 40, { frame: 2829104, t: rng.next(), panes: "2/2", wall: paint, curtain: rng.chance(0.15) ? rng.pick(PAL.curtains) : null }, rng);
+          for (let k = 0; k < 4; k++)
+            p.hline(wx, wy + k, 4 - k, paint), p.hline(wx + ww - (4 - k), wy + k, 4 - k, paint);
+          p.hline(wx + 3, wy - 2, ww - 6, shade(paint, 0.8));
         }
       }
-      let gy = Math.round((band2 + nF * fH) * 16), kind2 = o.shop ?? rng.pick(["gallery", "boutique", "coffee", "books", "boutique", "diner", "pharmacy"]);
-      p.shopInfo = drawShopfront(p, 0, gy, tw, th - gy, kind2, rng, { doorLeft: rng.chance(0.5), signH: 7 });
+      let gy = Math.round((band2 + nF * fH) * 32), kind2 = o.shop ?? rng.pick(["gallery", "boutique", "coffee", "books", "boutique", "diner", "pharmacy"]);
+      p.shopInfo = drawShopfront(p, 0, gy, tw, th - gy, kind2, rng, { doorLeft: rng.chance(0.5), signH: 14 });
     }), side = S2.brickRed, aabb = fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: side, left: side, right: side, top: { t: S2.roofTar, world: !0 } });
     markHeight(C.world, ...aabb, z0 + H);
-    let zTop = z0 + H, corn = C.atlas.shared("loft_corn_" + paint, 32, 10, (p) => corniceBand(p, 0, 0, 32, 10, shade(paint, 0.9)));
+    let zTop = z0 + H, corn = C.atlas.shared("loft_corn_" + paint, 64, 21, (p) => corniceBand(p, 0, 0, 64, 21, shade(paint, 0.9)));
     fr.box(mb, a0 - 0.0625, a0 + W + 0.0625, -0.35, 0.02, zTop - 0.6, zTop + 0.06, { front: corn, left: corn, right: corn, top: { t: S2.concrete } }), rng.chance(0.6) && fireEscape(C, fr, a0 + W * 0.2, a0 + W * 0.8, 0, z0 + gH, fH, nF);
-    let kind = front.p.shopInfo?.kind || "gallery", gate = region2(C, tw, Math.round((gH - 0.45) * 16), (p) => drawGate(p, tw, Math.round((gH - 0.45) * 16), rng));
+    let kind = front.p.shopInfo?.kind || "gallery", gate = region2(C, tw, Math.round((gH - 0.45) * 32), (p) => drawGate(p, tw, Math.round((gH - 0.45) * 32), rng));
     fr.facadeQuad(mb, a0, a0 + W, -0.03, z0, z0 + gH - 0.45, gate, { group: GRP.NIGHT, mat: 0 });
     let sp = fr.pt(a0 + W / 2, -0.8);
     C.world.shops.push({ kind, name: front.p.shopInfo?.name || "", x: sp[0], y: sp[1], n: fr.n }), C.world.lamps.push({ x: sp[0], y: sp[1], z: 0.5, r: 2.2, color: [1, 0.88, 0.65], k: 0.5, kind: "shop", group: GRP.DAY }), roofClutter(C, fr, { a0, a1: a0 + W, d0: 0, d1: D, z: zTop }, { waterTower: rng.chance(0.6) });
@@ -2683,7 +3053,7 @@ void main() {
       r < 0.45 ? C.addTree(x, y, "plane", !0) : r < 0.75 ? C.addBench(x, y, Math.abs(y - (L.y1 - 1)) < 0.01 ? "y" : "x") : C.addPlanter(x, y);
     }
     if (o.sculpture) {
-      let sx = L.x0 + 3.5, sy = L.y1 - 3.5, red = C.atlas.shared("red_sculpt", 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, 14168108, 3, 0.04));
+      let sx = L.x0 + 3.5, sy = L.y1 - 3.5, red = C.atlas.shared("red_sculpt", 32, 32, (p) => smoothFill(p, 0, 0, 32, 32, 14168108, 3, 0.04));
       C.mb.solid(sx - 0.9, sy - 0.9, C.z0, sx + 0.9, sy + 0.9, C.z0 + 0.25, sharedTex(C).concrete, sharedTex(C).concrete), C.mb.solid(sx - 0.6, sy - 0.6, C.z0 + 0.25, sx + 0.6, sy + 0.6, C.z0 + 1.45, red, red), C.mb.solid(sx - 0.2, sy - 0.2, C.z0 + 1.45, sx + 0.2, sy + 0.2, C.z0 + 2.2, red, red);
     }
     if (o.pools)
@@ -2697,78 +3067,99 @@ void main() {
   // src/world/props.js
   function propTex(C) {
     if (C._props) return C._props;
-    let A = C.atlas, P = {}, solid = (name, c, amt = 0.04) => A.shared(name, 8, 8, (p) => smoothFill(p, 0, 0, 8, 8, c, 5, amt));
-    return P.pole = solid("pole", 6122082), P.poleDark = solid("pole_d", 2896688), P.black = solid("black", 1973794), P.yellow = solid("sig_y", 14198824), P.red = solid("red", 13119532), P.blue = solid("blue", 2052e3), P.green = solid("green", 3111482), P.orange = solid("orange", 15234074), P.silver = solid("silver", 12106946), P.wood = A.shared("bench_wood", 16, 4, (p) => {
-      for (let y = 0; y < 4; y++) for (let x = 0; x < 16; x++) p.set(x, y, y === 1 || y === 3 ? 7029800 : 10119742);
-    }), P.lampHead = A.shared("lamp_head", 8, 4, (p) => {
-      p.rect(0, 0, 8, 4, 4870734), p.rect(1, 3, 6, 1, 16773312, winCode(0.32, !0));
-    }), P.lantern = A.shared("lantern", 6, 8, (p) => {
-      p.rect(0, 0, 6, 8, 1973794), p.rect(1, 1, 4, 6, 16769696, winCode(0.32, !0)), p.vline(3, 1, 6, 1973794);
-    }), P.globe = A.shared("globe", 4, 4, (p) => {
-      p.rect(0, 0, 4, 4, 4177754, winCode(0, !0)), p.set(0, 0, 2787898, winCode(0, !0));
-    }), P.sigHead = A.shared("sig_head", 4, 12, (p) => {
-      p.rect(0, 0, 4, 12, 2763302), p.frame(0, 0, 4, 12, 13148712);
-      for (let i = 0; i < 3; i++) p.rect(1, 1 + i * 4, 2, 2, 1118481);
-    }), P.pedHead = A.shared("ped_head", 4, 6, (p) => {
-      p.rect(0, 0, 4, 6, 2763302), p.frame(0, 0, 4, 6, 13148712);
-    }), P.streetSign = A.shared("st_sign", 16, 3, (p) => {
-      p.rect(0, 0, 16, 3, 2062906), p.hline(1, 1, 14, 15266024), p.set(3, 1, 2062906), p.set(8, 1, 2062906);
-    }), P.hydrant = A.shared("hydrant", 6, 8, (p) => {
-      p.rect(0, 0, 6, 8, 13119532), p.rect(0, 0, 6, 2, 14211280), p.rect(0, 4, 6, 1, 10493984), p.set(1, 1, 16777215);
-    }), P.hydrantTop = A.shared("hydrant_t", 4, 4, (p) => {
-      p.rect(0, 0, 4, 4, 14211280), p.set(1, 1, 11053216);
-    }), P.mailbox = A.shared("mailbox", 10, 14, (p) => {
-      p.rect(0, 0, 10, 14, 2052e3), p.rect(0, 0, 10, 2, 2777016), p.rect(2, 4, 6, 2, 1456760), p.text(1, 7, "US", 16777215), p.rect(1, 12, 2, 2, 1456760), p.rect(7, 12, 2, 2, 1456760);
-    }), P.newsBoxes = ["news_r", "news_y", "news_b", "news_g"].map((k, i) => A.shared(k, 6, 9, (p) => {
+    let A = C.atlas, P = {}, solid = (name, c, amt = 0.04) => A.shared(name, 16, 16, (p) => smoothFill(p, 0, 0, 16, 16, c, 5, amt));
+    return P.pole = solid("pole", 6122082), P.poleDark = solid("pole_d", 2896688), P.black = solid("black", 1973794), P.yellow = solid("sig_y", 14198824), P.red = solid("red", 13119532), P.blue = solid("blue", 2052e3), P.green = solid("green", 3111482), P.orange = solid("orange", 15234074), P.silver = solid("silver", 12106946), P.wood = A.shared("bench_wood", 32, 8, (p) => {
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 32; x++) {
+        let r = y % 4, c = r === 3 ? 4861466 : r === 0 ? 11565640 : 10119742;
+        r !== 3 && hash2i(x >> 2, y >> 2, 5) > 0.7 && (c = shade(c, 0.92)), p.set(x, y, c);
+      }
+    }), P.lampHead = A.shared("lamp_head", 16, 6, (p) => {
+      p.rect(0, 0, 16, 6, 4870734), p.hline(0, 0, 16, 6976622), p.rect(1, 4, 14, 2, 16773312, winCode(0.32, !0));
+    }), P.lantern = A.shared("lantern", 11, 14, (p) => {
+      p.rect(0, 0, 11, 14, 1973794), p.hline(1, 0, 9, 3816e3), p.rect(2, 2, 7, 11, 16769696, winCode(0.32, !0)), p.rect(3, 3, 2, 4, 16774352, winCode(0.32, !0)), p.vline(5, 2, 11, 1973794);
+    }), P.globe = A.shared("globe", 8, 8, (p) => {
+      let t = winCode(0, !0);
+      p.rect(0, 0, 8, 8, 4177754, t), p.rect(1, 1, 3, 2, 9105568, t), p.hline(0, 7, 8, 2787898, t), p.vline(7, 0, 8, 2787898, t);
+    }), P.sigHead = A.shared("sig_head", 8, 24, (p) => {
+      p.rect(0, 0, 8, 24, 2763302), p.frame(0, 0, 8, 24, 13148712);
+      for (let i = 0; i < 3; i++)
+        p.ellipse(3.5, 4.5 + i * 8, 2.4, 2.4, 1118481), p.hline(1, 1 + i * 8, 6, 4868674);
+    }), P.pedHead = A.shared("ped_head", 7, 12, (p) => {
+      p.rect(0, 0, 7, 12, 2763302), p.frame(0, 0, 7, 12, 13148712), p.rect(1, 1, 5, 10, 1118481), p.hline(1, 6, 5, 2763302);
+    }), P.streetSign = A.shared("st_sign", 32, 5, (p) => {
+      p.rect(0, 0, 32, 5, 2062906), p.hline(0, 0, 32, 3119690), p.hline(0, 4, 32, 1530410), p.rect(2, 2, 28, 1, 15266024);
+      for (let x of [6, 12, 17, 23]) p.set(x, 2, 2062906);
+    }), P.hydrant = A.shared("hydrant", 9, 14, (p) => {
+      p.rect(0, 0, 9, 14, 13119532), p.rect(1, 0, 7, 3, 14211280), p.hline(1, 0, 7, 15921900), p.hline(0, 3, 9, 10493984), p.vline(0, 4, 8, 14174780), p.vline(8, 4, 8, 10100768), p.rect(0, 7, 9, 2, 10493984), p.rect(3, 6, 3, 3, 14211280), p.set(4, 7, 10132114), p.hline(0, 12, 9, 9050650), p.hline(0, 13, 9, 6951956), p.set(2, 1, 16777215);
+    }), P.hydrantTop = A.shared("hydrant_t", 9, 9, (p) => {
+      p.rect(0, 0, 9, 9, 14211280), p.ellipse(4, 4, 2.5, 2.5, 11053216), p.set(4, 4, 6974052), p.set(2, 2, 16777215);
+    }), P.mailbox = A.shared("mailbox", 19, 27, (p) => {
+      p.rect(0, 0, 19, 27, 2052e3), p.rect(0, 0, 19, 4, 2777016), p.hline(0, 0, 19, 4882384), p.rect(3, 7, 13, 3, 1456760), p.hline(3, 7, 13, 5933784), p.text7(4, 12, "US", 16777215), p.text(2, 20, "MAIL", 14214392), p.vline(18, 4, 23, 1523590), p.rect(0, 25, 19, 2, 1710622), p.rect(1, 25, 3, 2, 1456760), p.rect(15, 25, 3, 2, 1456760);
+    }), P.newsBoxes = ["news_r", "news_y", "news_b", "news_g"].map((k, i) => A.shared(k, 11, 18, (p) => {
       let c = [13119532, 15253552, 2777016, 3115590][i];
-      p.rect(0, 0, 6, 9, c), p.rect(1, 1, 4, 3, 14213352), p.rect(1, 6, 4, 1, shade(c, 0.6));
-    })), P.basket = A.shared("basket", 8, 10, (p) => {
+      p.rect(0, 0, 11, 18, c), p.hline(0, 0, 11, shade(c, 1.25)), p.rect(2, 2, 7, 6, 14213352), p.hline(3, 3, 5, 4868682), p.hline(3, 5, 4, 9079434), p.hline(3, 6, 5, 10132122), p.rect(3, 10, 5, 2, shade(c, 0.6)), p.rect(0, 14, 11, 4, shade(c, 0.75)), p.vline(10, 0, 18, shade(c, 0.8));
+    })), P.basket = A.shared("basket", 13, 19, (p) => {
       p.clear();
-      for (let y = 0; y < 10; y++) for (let x = 0; x < 8; x++) ((x + y) % 2 === 0 || y === 0 || y === 9) && p.set(x, y, 3107386);
-    }), P.basketTop = A.shared("basket_t", 8, 8, (p) => {
-      p.rect(0, 0, 8, 8, 3107386), p.rect(1, 1, 6, 6, 3815990), p.set(3, 3, 15263968), p.set(5, 2, 13119532);
-    }), P.chain = A.shared("chainlink", 32, 40, (p) => chainLinkTex(p, 32, 40)), P.chainLow = A.shared("chainlink_low", 32, 12, (p) => chainLinkTex(p, 32, 12)), P.backboard = A.shared("backboard", 28, 17, (p) => {
-      p.rect(0, 0, 28, 17, 15921904), p.frame(0, 0, 28, 17, 13119532), p.frame(9, 7, 10, 8, 13119532);
-    }), P.net = A.shared("net", 8, 6, (p) => {
+      for (let y = 0; y < 19; y++) for (let x = 0; x < 13; x++)
+        ((x + y) % 3 === 0 || (x - y + 99) % 3 === 0 || y <= 1 || y >= 17) && p.set(x, y, y <= 1 ? 4160074 : 3107386);
+    }), P.basketTop = A.shared("basket_t", 13, 13, (p) => {
+      p.rect(0, 0, 13, 13, 3107386), p.rect(2, 2, 9, 9, 3815990), p.rect(4, 4, 2, 2, 15263968), p.rect(7, 3, 2, 3, 13119532), p.set(5, 8, 15909424), p.rect(7, 7, 3, 2, 14209216);
+    }), P.chain = A.shared("chainlink", 48, 80, (p) => chainLinkTex(p, 48, 80)), P.chainLow = A.shared("chainlink_low", 48, 36, (p) => chainLinkTex(p, 48, 36)), P.backboard = A.shared("backboard", 58, 34, (p) => {
+      p.rect(0, 0, 58, 34, 15921904), p.frame(0, 0, 58, 34, 13119532), p.frame(1, 1, 56, 32, 13119532), p.frame(19, 15, 20, 15, 13119532), p.frame(20, 16, 18, 13, 13119532), p.hline(2, 2, 54, 16777215);
+      for (let [bx, by] of [[4, 4], [53, 4], [4, 29], [53, 29]]) p.set(bx, by, 9079432);
+    }), P.net = A.shared("net", 14, 12, (p) => {
       p.clear();
-      for (let y = 0; y < 6; y++) for (let x = y >> 1; x < 8 - (y >> 1); x++) (x + y) % 2 === 0 && p.set(x, y, 15921904);
-    }), P.rim = solid("rim", 15228954, 0.02), P.stack = A.shared("steam_stack", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, Math.floor(y / 4) % 2 ? 15921902 : 15759898);
-    }), P.stackTop = A.shared("steam_stack_t", 8, 8, (p) => {
-      p.rect(0, 0, 8, 8, 3815994), p.rect(2, 2, 4, 4, 1710618);
-    }), P.barrel = A.shared("barrel", 8, 10, (p) => {
-      for (let y = 0; y < 10; y++) p.rect(0, y, 8, 1, y % 4 < 2 ? 15759898 : 15921902);
-    }), P.cone = A.shared("cone", 8, 8, (p) => {
-      for (let y = 0; y < 8; y++) p.rect(0, y, 8, 1, y === 3 || y === 4 ? 15921902 : 15759898);
-    }), P.stoneWall = A.shared("parkwall", 32, 12, (p) => {
-      stoneFill(p, 0, 0, 32, 12, [9341568], 17, 4, { blocks: 8 }), p.rect(0, 0, 32, 1, 11578530);
-    }), P.stoneWallTop = A.shared("parkwall_t", 16, 16, (p) => stoneFill(p, 0, 0, 16, 16, [11052186], 18, 0)), P.concrete = sharedTex(C).concrete, P.glass = A.shared("shelter_glass", 16, 16, (p) => {
+      for (let y = 0; y < 12; y++) {
+        let inset = Math.floor(y / 4);
+        for (let x = inset; x < 14 - inset; x++) ((x + y) % 3 === 0 || (x - y + 99) % 3 === 0) && p.set(x, y, 15921904);
+      }
+    }), P.rim = solid("rim", 15228954, 0.02), P.stack = A.shared("steam_stack", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(Math.floor(y / 8) % 2 ? 15921902 : 15759898, 0.94 + hash2i(x, y, 3) * 0.08));
+    }), P.stackTop = A.shared("steam_stack_t", 16, 16, (p) => {
+      p.rect(0, 0, 16, 16, 3815994), p.ellipse(8, 8, 5, 5, 1710618);
+    }), P.barrel = A.shared("barrel", 16, 20, (p) => {
+      for (let y = 0; y < 20; y++) p.rect(0, y, 16, 1, y % 8 < 4 ? 15759898 : 15921902);
+      p.hline(0, 0, 16, 2763306);
+      for (let x = 0; x < 16; x += 4) p.set(x, 2, 16765088);
+    }), P.cone = A.shared("cone", 16, 14, (p) => {
+      for (let y = 0; y < 14; y++) p.rect(0, y, 16, 1, y >= 5 && y <= 7 ? 15921902 : 15759898);
+      p.rect(0, 12, 16, 2, 2763306);
+    }), P.stoneWall = A.shared("parkwall", 64, 22, (p) => {
+      stoneFill(p, 0, 0, 64, 22, [9341568], 17, 8, { blocks: 16 }), p.rect(0, 0, 64, 3, 11578530), p.hline(0, 3, 64, 7236194);
+    }), P.stoneWallTop = A.shared("parkwall_t", 32, 32, (p) => stoneFill(p, 0, 0, 32, 32, [11052186], 18, 0)), P.concrete = sharedTex(C).concrete, P.glass = A.shared("shelter_glass", 32, 32, (p) => {
       p.clear();
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) (x + y) % 7 === 0 && p.set(x, y, 14215408);
-      p.frame(0, 0, 16, 16, 5922918);
-    }), P.adPanel = A.shared("ad_panel", 16, 28, (p) => {
-      p.rect(0, 0, 16, 28, 5922918);
-      for (let y = 1; y < 27; y++) for (let x = 1; x < 15; x++) p.set(x, y, y < 14 ? 16743136 : 5231359, winCode(0.15, !0));
-      p.text(2, 3, "NEW", 16777215, winCode(0.15, !0)), p.text(2, 16, "SHOW", 1776411, winCode(0.15, !0));
-    }), P.kiosk = A.shared("kiosk", 8, 32, (p) => {
-      p.rect(0, 0, 8, 32, 2764339), p.rect(1, 3, 6, 20, 5939416, winCode(0, !0)), p.text(1, 8, "NY", 16777215, winCode(0, !0));
-    }), P.subwayRail = A.shared("sub_rail", 32, 10, (p) => {
-      p.clear(), p.rect(0, 0, 32, 1, 2054698), p.rect(0, 9, 32, 1, 2054698);
-      for (let x = 0; x < 32; x += 4) p.rect(x, 0, 1, 10, 2054698);
-    }), P.subwaySign = A.shared("sub_sign", 24, 7, (p) => {
-      p.rect(0, 0, 24, 7, 1776411), p.text(1, 1, "SUBWAY", 16777215, winCode(0.2, !0));
-    }), P.lineDots = A.shared("sub_dots", 24, 4, (p) => {
-      p.rect(0, 0, 24, 4, 1776411);
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) ((x + y) % 14 === 0 || (x + y) % 14 === 1) && p.set(x, y, 14215408);
+      p.frame(0, 0, 32, 32, 5922918), p.hline(0, 1, 32, 8028294);
+    }), P.adPanel = A.shared("ad_panel", 29, 58, (p) => {
+      p.rect(0, 0, 29, 58, 5922918);
+      let t = winCode(0.15, !0);
+      for (let y = 2; y < 56; y++) for (let x = 2; x < 27; x++) p.set(x, y, y < 30 ? (x + y) % 9 === 0 ? 16751336 : 16743136 : 5231359, t);
+      p.ellipse(14, 12, 5, 6, 16769224, t), p.rect(9, 6, 10, 3, 3810328, t), p.rect(8, 19, 12, 11, 1776411, t), p.text7(4, 34, "NEW", 16777215, t), p.text7(3, 45, "SHOW", 1776411, t);
+    }), P.kiosk = A.shared("kiosk", 9, 64, (p) => {
+      p.rect(0, 0, 9, 64, 2764339), p.hline(0, 0, 9, 4869715);
+      let t = winCode(0, !0);
+      p.rect(1, 6, 7, 40, 5939416, t), p.rect(1, 6, 7, 8, 2052e3, t), p.text(1, 8, "NY", 16777215, t), p.rect(2, 20, 5, 12, 14215408, t), p.rect(3, 50, 3, 2, 1118481);
+    }), P.subwayRail = A.shared("sub_rail", 64, 24, (p) => {
+      p.clear(), p.rect(0, 0, 64, 2, 2054698), p.hline(0, 0, 64, 4164170), p.rect(0, 21, 64, 2, 2054698);
+      for (let x = 0; x < 64; x += 6) p.rect(x, 0, 1, 24, 2054698);
+      for (let x = 0; x < 64; x += 32) p.rect(x, 0, 2, 24, 1526306);
+    }), P.subwaySign = A.shared("sub_sign", 48, 14, (p) => {
+      p.rect(0, 0, 48, 14, 1776411), p.hline(0, 0, 48, 3815994), p.text7(6, 4, "SUBWAY", 16777215, winCode(0.2, !0));
+    }), P.lineDots = A.shared("sub_dots", 48, 8, (p) => {
+      p.rect(0, 0, 48, 8, 1776411);
       let c = [15611182, 37692, 12137389, 14758, 16567306];
-      for (let i = 0; i < 5; i++) p.rect(1 + i * 5, 0, 3, 3, c[i], winCode(0.2, !0));
-    }), P.planter = A.shared("planter", 16, 8, (p) => {
-      smoothFill(p, 0, 0, 16, 8, 11840928, 7, 0.05), p.rect(0, 0, 16, 1, 13157046);
-    }), P.soilTop = A.shared("soil_top", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, hash2i(x, y, 3) < 0.5 ? 4880946 : 3828266);
-    }), P.scaffold = A.shared("scaffold", 16, 16, (p) => {
-      smoothFill(p, 0, 0, 16, 16, 3111494, 3, 0.05), p.rect(0, 0, 16, 1, 4168278);
-    }), P.bleacher = A.shared("bleach", 16, 4, (p) => {
-      p.rect(0, 0, 16, 4, 12106946), p.rect(0, 0, 16, 1, 14212322), p.rect(0, 3, 16, 1, 9080468);
+      for (let i = 0; i < 5; i++) p.ellipse(4.5 + i * 9, 3.5, 3, 3, c[i], winCode(0.2, !0));
+    }), P.planter = A.shared("planter", 32, 16, (p) => {
+      smoothFill(p, 0, 0, 32, 16, 11840928, 7, 0.05), p.rect(0, 0, 32, 2, 13157046), p.hline(0, 2, 32, 9077880);
+      for (let x = 0; x < 32; x += 16) p.vline(x, 3, 13, 10130568);
+    }), P.soilTop = A.shared("soil_top", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, hash2i(x >> 1, y >> 1, 3) < 0.5 ? 4880946 : hash2i(x, y, 4) < 0.15 ? 6986306 : 3828266);
+    }), P.scaffold = A.shared("scaffold", 32, 32, (p) => {
+      smoothFill(p, 0, 0, 32, 32, 3111494, 3, 0.05), p.rect(0, 0, 32, 2, 4168278);
+      for (let x = 0; x < 32; x += 16) p.vline(x, 0, 32, 2383930);
+    }), P.bleacher = A.shared("bleach", 32, 10, (p) => {
+      p.rect(0, 0, 32, 10, 12106946), p.rect(0, 0, 32, 2, 14212322), p.rect(0, 8, 32, 2, 9080468);
+      for (let x = 0; x < 32; x += 16) p.vline(x, 2, 6, 10133156);
     }), C._props = P, P;
   }
   var solidBox = (C, x0, y0, z0, x1, y1, z1, side, top, opt) => C.mb.box(x0, y0, z0, x1, y1, z1, { px: side, nx: side, py: side, ny: side, pz: top || side }, opt);
@@ -2892,10 +3283,10 @@ void main() {
     }
   }
   function handballWall(C, x0, y0, x1, y1, h) {
-    let P = propTex(C), W = Math.round(Math.max(x1 - x0, y1 - y0) * 16), H = Math.round(h * 16), front = C.atlas.alloc(W, H);
-    front.p.rect(0, 0, W, H, 12170926), mural(front.p, 2, 2, W - 4, H - 10, C.rng), front.p.rect(0, H - 8, W, 1, 15921902);
+    let P = propTex(C), W = Math.round(Math.max(x1 - x0, y1 - y0) * 32), H = Math.round(h * 32), front = C.atlas.alloc(W, H);
+    front.p.rect(0, 0, W, H, 12170926), mural(front.p, 4, 4, W - 8, H - 20, C.rng), front.p.rect(0, H - 16, W, 2, 15921902);
     let back = C.atlas.alloc(W, H);
-    smoothFill(back.p, 0, 0, W, H, 12170926, 4, 0.05), mural(back.p, 3, 3, W - 6, H - 12, C.rng), x1 - x0 > y1 - y0 ? C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { py: front, ny: back, px: P.concrete, nx: P.concrete, pz: P.concrete }) : C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { px: front, nx: back, py: P.concrete, ny: P.concrete, pz: P.concrete }), markHeight(C.world, x0, y0, x1, y1, 0.125 + h);
+    smoothFill(back.p, 0, 0, W, H, 12170926, 4, 0.05), mural(back.p, 6, 6, W - 12, H - 24, C.rng), x1 - x0 > y1 - y0 ? C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { py: front, ny: back, px: P.concrete, nx: P.concrete, pz: P.concrete }) : C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { px: front, nx: back, py: P.concrete, ny: P.concrete, pz: P.concrete }), markHeight(C.world, x0, y0, x1, y1, 0.125 + h);
   }
   function playground(C, x0, y0, x1, y1) {
     let P = propTex(C), z = 0.125;
@@ -2908,8 +3299,8 @@ void main() {
       C.world.swings.push({ x: sx + dx, y: sy + 0.6, z: z + 0.45, top: z + 1.85 });
     let tx = x1 - 1.6, ty = y0 + 0.8;
     solidBox(C, tx, ty, z, tx + 0.8, ty + 0.8, z + 1.2, P.yellow, P.blue);
-    let chute = C.atlas.shared("chute", 12, 16, (p) => {
-      p.rect(0, 0, 12, 16, 15253552), p.rect(0, 0, 1, 16, 13146656), p.rect(11, 0, 1, 16, 13146656);
+    let chute = C.atlas.shared("chute", 24, 32, (p) => {
+      p.rect(0, 0, 24, 32, 15253552), p.rect(0, 0, 3, 32, 13146656), p.rect(21, 0, 3, 32, 13146656), p.vline(3, 0, 32, 16310384);
     });
     C.mb.slope([tx + 0.05, ty + 2.6, z + 0.1], [tx + 0.75, ty + 2.6, z + 0.1], [tx + 0.05, ty + 0.8, z + 1.2], [tx + 0.75, ty + 0.8, z + 1.2], chute, { mat: MAT.SNOW }), C.world.slides.push({ x: tx + 0.4, y: ty + 0.4, z: z + 1.2, ex: tx + 0.4, ey: ty + 2.5 });
     let cx = (x0 + x1) / 2, cy = y1 - 1.3;
@@ -2935,7 +3326,7 @@ void main() {
       z0: 0.125,
       ground: world.ground,
       paintGround(x0, y0, x1, y1, kind) {
-        let X0 = Math.round(Math.min(x0, x1) * 16), X1 = Math.round(Math.max(x0, x1) * 16), Y0 = Math.round(Math.min(y0, y1) * 16), Y1 = Math.round(Math.max(y0, y1) * 16);
+        let X0 = Math.round(Math.min(x0, x1) * 32), X1 = Math.round(Math.max(x0, x1) * 32), Y0 = Math.round(Math.min(y0, y1) * 32), Y1 = Math.round(Math.max(y0, y1) * 32);
         for (let y = Y0; y < Y1; y++)
           for (let x = X0; x < X1; x++) {
             let r = groundFill(kind, x, y, X0, Y0, X1, Y1);
@@ -2992,26 +3383,34 @@ void main() {
   function groundFill(kind, x, y, X0, Y0, X1, Y1) {
     let h = hash2i(x, y, 51);
     switch (kind) {
-      case "flowerbed":
-        return x === X0 || y === Y0 || x === X1 - 1 || y === Y1 - 1 ? [10131084, GC.CURB] : [shade(5914154, 0.9 + h * 0.2), GC.FLOWERBED];
+      case "flowerbed": {
+        let e = Math.min(x - X0, y - Y0, X1 - 1 - x, Y1 - 1 - y);
+        return e < 2 ? [e === 0 ? 11578530 : 9078396, GC.CURB] : [shade(hash2i(x >> 1, y >> 1, 8) > 0.5 ? 5914154 : 5125156, 0.9 + h * 0.2), GC.FLOWERBED];
+      }
       case "soil":
         return [shade(5914154, 0.88 + h * 0.24), GC.SOIL];
-      case "treepit":
-        return x === X0 || y === Y0 || x === X1 - 1 || y === Y1 - 1 ? [9078400, GC.CURB] : [shade(5125670, 0.88 + h * 0.24), GC.SOIL];
+      case "treepit": {
+        let e = Math.min(x - X0, y - Y0, X1 - 1 - x, Y1 - 1 - y);
+        if (e < 2) return [e === 0 ? 10131086 : 8025710, GC.CURB];
+        let cx = (X0 + X1) / 2, cy = (Y0 + Y1) / 2;
+        return Math.hypot(x + 0.5 - cx, y + 0.5 - cy) > 7 && e > 2 && ((x - X0) % 4 === 0 || (y - Y0) % 4 === 0) ? [3814704, GC.SOIL] : [shade(hash2i(x >> 1, y >> 1, 6) > 0.6 ? 6177328 : 5125670, 0.88 + h * 0.24), GC.SOIL];
+      }
       case "patio": {
-        let jx = x % 8 === 0, jy = y % 8 === 0;
-        return [jx || jy ? 8023650 : shade(mixc(11047546, 12098176, hash2i(x >> 3, y >> 3, 3)), 0.95 + h * 0.08), GC.PATIO];
+        let row = y >> 3, off = row % 2 ? 8 : 0, jx = (x + off) % 16 === 0, jy = y % 8 === 0, c = shade(mixc(11047546, 12098176, hash2i(x + off >> 4, row, 3)), 0.95 + h * 0.08);
+        return jy ? c = 8023650 : jx ? c = 8812908 : y % 8 === 1 && (c = shade(c, 1.06)), [c, GC.PATIO];
       }
       case "plaza": {
-        let jx = x % 16 === 0, jy = y % 16 === 0, tile = hash2i(x >> 4, y >> 4, 9), c = shade(mixc(13223616, 11907756, tile), 0.97 + h * 0.05);
-        return (jx || jy) && (c = 10131344), [c, GC.PLAZA];
+        let jx = x % 32 === 0, jy = y % 32 === 0, tile = hash2i(x >> 5, y >> 5, 9), c = shade(mixc(13223616, 11907756, tile), 0.97 + h * 0.05);
+        return jx || jy ? c = 10131344 : (x % 32 === 1 || y % 32 === 1) && (c = shade(c, 1.05)), [c, GC.PLAZA];
       }
       case "grass": {
-        let c = valueNoise(x * 0.08, y * 0.08, 5) > 0.55 ? COL.grass : mixc(COL.grass, COL.grassDark, 0.55);
-        return c = shade(c, 0.92 + h * 0.14), h > 0.97 && (c = shade(c, 1.2)), [c, GC.GRASS];
+        let n = valueNoise(x * 0.04, y * 0.04, 5), n2 = valueNoise(x * 0.15, y * 0.15, 6), c = n > 0.55 ? COL.grass : mixc(COL.grass, COL.grassDark, 0.55);
+        c = shade(c, 0.9 + h * 0.12 + (n2 - 0.5) * 0.1);
+        let b = hash2i(x, y >> 1, 77);
+        return b > 0.9 ? c = shade(c, 1.16) : b < 0.08 && (c = shade(c, 0.84)), h > 0.996 && (c = [15921896, 15915082, 14209264][Math.floor(hash2i(x, y, 3) * 3)]), [c, GC.GRASS];
       }
       case "path": {
-        let hx = x / 6, hy = y / 5.2, row = Math.floor(hy), off = row % 2 ? 0.5 : 0, fx = hx + off - Math.floor(hx + off), fy = hy - row, edge = fx < 0.12 || fy < 0.15, c = shade(7302248, 0.94 + h * 0.08);
+        let hx = x / 12, hy = y / 10.4, row = Math.floor(hy), off = row % 2 ? 0.5 : 0, fx = hx + off - Math.floor(hx + off), fy = hy - row, edge = fx < 0.12 || fy < 0.15, c = shade(7302248, 0.94 + h * 0.08);
         return edge && (c = 5591630), [c, GC.PATH];
       }
       case "court":
@@ -3028,13 +3427,15 @@ void main() {
         return [3108744, GC.WATER];
       case "sand":
         return [shade(14468234, 0.92 + h * 0.14), GC.SAND];
-      case "gravel":
-        return [shade(10127988, 0.85 + h * 0.3), GC.GRAVEL];
+      case "gravel": {
+        let st = hash2i(x >> 1, y >> 1, 21);
+        return [shade(st > 0.8 ? 11575434 : st < 0.2 ? 8023130 : 10127988, 0.85 + h * 0.3), GC.GRAVEL];
+      }
       case "wood":
-        return [shade(x % 3 === 0 ? 8016438 : 10119748, 0.95 + h * 0.08), GC.WOOD];
+        return [shade(x % 6 === 0 ? 6964784 : x % 6 === 1 ? 11172432 : 10119748, 0.95 + h * 0.08), GC.WOOD];
       case "stairsX":
       case "stairsY": {
-        let t = kind === "stairsX" ? (x - X0) / (X1 - X0) : (y - Y0) / (Y1 - Y0), step = Math.floor((kind === "stairsX" ? x - X0 : y - Y0) / 3), edge = (kind === "stairsX" ? x - X0 : y - Y0) % 3 === 0, c = mixc(9078400, 1447450, Math.min(1, t * 1.15));
+        let t = kind === "stairsX" ? (x - X0) / (X1 - X0) : (y - Y0) / (Y1 - Y0), step = Math.floor((kind === "stairsX" ? x - X0 : y - Y0) / 6), edge = (kind === "stairsX" ? x - X0 : y - Y0) % 6 === 0, c = mixc(9078400, 1447450, Math.min(1, t * 1.15));
         return edge && (c = shade(c, 1.25)), [c, GC.STAIRS];
       }
       case "dirt":
@@ -3133,42 +3534,57 @@ void main() {
     C.addTree((L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, "plane", !1, { scale: 0.9 }), C.addSprite("laundry", (L.x0 + L.x1) / 2 + 1.2, (L.y0 + L.y1) / 2 - 1, 0.125, { group: "warm" });
   }
   function firehouse(C, fr, a0, W, D) {
-    let { mb, rng } = C, S2 = sharedTex(C), H = 2.75 + 2 * 1.5 + 0.75, tw = Math.round(W * 16), th = Math.round(H * 16), front = C.atlas.alloc(tw, th), p = front.p;
-    brickFill(p, 0, 0, tw, th, PAL.brickRed, 77), p.rect(0, 0, tw, 12, 14866106), p.text(Math.max(1, Math.floor((tw - 40) / 2)), 3, "ENGINE 7", 13119532, 255, 1);
-    for (let f = 0; f < 2; f++) {
-      let fy = 12 + f * 24;
-      for (let b = 0; b < 3; b++) drawWindow(p, Math.round(tw / 3 * b + tw / 6) - 4, fy + 5, 8, 14, { frame: 15921126, lintel: 14866106, sill: 14866106, t: rng.next() }, rng);
+    let { mb, rng } = C, S2 = sharedTex(C), H = 2.75 + 2 * 1.5 + 0.75, tw = Math.round(W * 32), th = Math.round(H * 32), front = C.atlas.alloc(tw, th), p = front.p;
+    brickFill(p, 0, 0, tw, th, PAL.brickRed, 77), p.rect(0, 0, tw, 24, 14866106), p.hline(0, 0, tw, 15919826), p.hline(0, 23, tw, 11050112);
+    {
+      let tx = textWidth("ENGINE 7", 2, !0);
+      p.text7(Math.max(2, Math.floor((tw - tx) / 2)), 5, "ENGINE 7", 13119532, 255, 2);
     }
-    let gy = 60;
-    p.rect(0, gy, tw, th - gy, 14866106);
-    let dw = tw - 20;
-    p.rect(4, gy + 4, dw, th - gy - 4, 13119532);
-    for (let y = gy + 6; y < th; y += 3) p.hline(5, y, dw - 2, 11019296);
-    for (let x = 6; x < 4 + dw - 4; x += 8) p.rect(x, gy + 8, 5, 4, 4216685, winCode(0.1));
-    drawDoor(p, tw - 13, gy + 6, 8, th - gy - 6, { color: 13119532, glass: !0 });
+    for (let f = 0; f < 2; f++) {
+      let fy = 24 + f * 48;
+      for (let b = 0; b < 3; b++) drawWindow(p, Math.round(tw / 3 * b + tw / 6) - 8, fy + 10, 16, 28, { frame: 15921126, lintel: 14866106, sill: 14866106, t: rng.next(), wall: PAL.brickRed[0], keystone: !0 }, rng);
+    }
+    let gy = 120;
+    p.rect(0, gy, tw, th - gy, 14866106), p.hline(0, gy, tw, 15919826);
+    let dw = tw - 40;
+    p.rect(8, gy + 8, dw, th - gy - 8, 13119532), p.frame(8, gy + 8, dw, th - gy - 8, 9050648);
+    for (let y = gy + 12; y < th; y += 5)
+      p.hline(10, y, dw - 4, 11019296), p.hline(10, y + 1, dw - 4, 14174780);
+    for (let x = 14; x < 8 + dw - 16; x += 16)
+      p.rect(x, gy + 16, 10, 8, 4216685, winCode(0.1)), p.frame(x - 1, gy + 15, 12, 10, 15921126);
+    p.text7(Math.floor(8 + dw / 2 - 3), gy + 30, "7", 15909424, 255, 2), drawDoor(p, tw - 26, gy + 12, 18, th - gy - 12, { color: 13119532, glass: !0 });
     let back = S2.brickRed, aabb = fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back, left: back, right: back, top: { t: S2.roofTar, world: !0 } });
     markHeight(C.world, ...aabb, 0.125 + H), C.addFlag(fr, a0 + W - 1, -0.05, 0.125 + 4.2, "us");
-    let bay = fr.pt(a0 + (dw / 2 + 4) / 16, -0.5);
-    C.world.firehouse = { x: bay[0], y: bay[1], n: fr.n, door: fr.pt(a0 + (dw / 2 + 4) / 16, 1.5) }, C.world.lamps.push({ x: bay[0], y: bay[1], z: 2.5, r: 2.4, color: [1, 0.9, 0.7], k: 0.6, kind: "shop" });
+    let bay = fr.pt(a0 + (dw / 2 + 8) / 32, -0.5);
+    C.world.firehouse = { x: bay[0], y: bay[1], n: fr.n, door: fr.pt(a0 + (dw / 2 + 8) / 32, 1.5) }, C.world.lamps.push({ x: bay[0], y: bay[1], z: 2.5, r: 2.4, color: [1, 0.9, 0.7], k: 0.6, kind: "shop" });
   }
   function theater(C, fr, a0, W, D) {
-    let { mb, rng } = C, S2 = sharedTex(C), H = 7.5, tw = Math.round(W * 16), th = Math.round(H * 16), front = C.atlas.alloc(tw, th), p = front.p;
-    stoneFill(p, 0, 0, tw, th, PAL.limestone, 66, 8, { blocks: 16 });
-    for (let x = 4; x < tw - 4; x += 12)
-      p.rect(x, 10, 6, 56, 13154448), drawWindow(p, x + 1, 14, 4, 22, { frame: 2829104, t: rng.next() * 0.4, rail: !1 }, rng);
-    let gy = th - 34;
-    p.rect(0, gy, tw, 34, 5906207);
-    for (let x = 6; x < tw - 6; x += 14)
-      p.rect(x, gy + 12, 10, 22, 14200906), p.rect(x + 1, gy + 13, 8, 21, 4216685, winCode(0.02));
+    let { mb, rng } = C, S2 = sharedTex(C), H = 7.5, tw = Math.round(W * 32), th = Math.round(H * 32), front = C.atlas.alloc(tw, th), p = front.p;
+    stoneFill(p, 0, 0, tw, th, PAL.limestone, 66, 16, { blocks: 32 }), p.rect(0, 0, tw, 8, 13154448), p.hline(0, 8, tw, 10127976);
+    for (let x = 2; x < tw; x += 8)
+      p.rect(x, 2, 4, 4, 15260864), p.set(x + 1, 3, 12101760);
+    for (let x = 8; x < tw - 8; x += 24)
+      p.rect(x, 20, 12, 112, 13154448), p.vline(x + 1, 20, 112, 14734516), p.vline(x + 10, 20, 112, 11049072), p.rect(x - 2, 16, 16, 5, 14734516), drawWindow(p, x + 2, 28, 8, 44, { frame: 2829104, t: rng.next() * 0.4, rail: !1, panes: "1/1" }, rng);
+    let gy = th - 68;
+    p.rect(0, gy, tw, 68, 5906207), p.hline(0, gy, tw, 9058858);
+    for (let x = 12; x < tw - 24; x += 28)
+      p.rect(x, gy + 24, 20, 44, 14200906), p.rect(x + 2, gy + 26, 16, 42, 4216685, winCode(0.02)), p.vline(x + 10, gy + 26, 42, 14200906), p.rect(x + 7, gy + 44, 2, 6, 15782e3), p.rect(x + 11, gy + 44, 2, 6, 15782e3);
+    for (let x of [2, tw - 10])
+      p.rect(x, gy + 24, 8, 30, 14200906), p.rect(x + 1, gy + 25, 6, 28, 15918784, winCode(0.02, !0)), p.rect(x + 2, gy + 28, 4, 10, 13119532, winCode(0.02, !0));
     let aabb = fr.box(mb, a0, a0 + W, 0, D, 0.125, 0.125 + H, { front, back: S2.brickBrown, left: S2.brickBrown, right: S2.brickBrown, top: { t: S2.roofTar, world: !0 } });
     markHeight(C.world, ...aabb, 0.125 + H);
-    let mw = Math.round((W - 1) * 16), marq = C.atlas.alloc(mw, 14), q = marq.p;
-    q.rect(0, 0, mw, 14, 15921126);
-    for (let x = 1; x < mw; x += 2)
-      q.set(x, 0, 16769658, winCode(0, !0)), q.set(x, 13, 16769658, winCode(0, !0));
-    q.text(Math.floor((mw - 39) / 2), 2, "NOW SHOWING", 1776411, winCode(0, !0)), q.text(Math.floor((mw - 47) / 2), 8, "PIXEL CITY 3", 13119532, winCode(0, !0)), fr.box(mb, a0 + 0.5, a0 + W - 0.5, -1.4, 0, 0.125 + 2.2, 0.125 + 3.1, { front: marq, left: S2.darkMetal, right: S2.darkMetal, top: { t: S2.darkMetal } });
-    let vt = C.atlas.alloc(16, 72);
-    vt.p.rect(0, 0, 16, 72, 13119532), vt.p.frame(0, 0, 16, 72, 16769658, winCode(0, !0)), "RIALTO".split("").forEach((ch, i) => vt.p.text(2, 4 + i * 11, ch, 16777215, winCode(0, !0), 2)), fr.sideQuad(mb, a0 + 1, -0.15, -1.3, 0.125 + 3.4, 0.125 + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW }), fr.sideQuad(mb, a0 + 1.01, -1.3, -0.15, 0.125 + 3.4, 0.125 + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
+    let mw = Math.round((W - 1) * 32), MH = 28, marq = C.atlas.alloc(mw, MH), q = marq.p;
+    q.rect(0, 0, mw, MH, 15921126), q.rect(0, 0, mw, 3, 2763310), q.rect(0, MH - 3, mw, 3, 2763310);
+    let bulb = winCode(0, !0);
+    for (let x = 1; x < mw; x += 3)
+      q.set(x, 1, 16769658, bulb), q.set(x, MH - 2, 16769658, bulb);
+    let l1 = "NOW SHOWING", l2 = "PIXEL CITY 3";
+    q.text7(Math.floor((mw - textWidth(l1, 1, !0)) / 2), 5, l1, 1776411, bulb), q.text7(Math.floor((mw - textWidth(l2, 1, !0)) / 2), 15, l2, 13119532, bulb), fr.box(mb, a0 + 0.5, a0 + W - 0.5, -1.4, 0, 0.125 + 2.2, 0.125 + 3.1, { front: marq, left: S2.darkMetal, right: S2.darkMetal, top: { t: S2.darkMetal } });
+    let vt = C.atlas.alloc(32, 144);
+    vt.p.rect(0, 0, 32, 144, 13119532);
+    for (let y = 0; y < 144; y += 3)
+      vt.p.set(1, y, 16769658, winCode(0, !0)), vt.p.set(30, y, 16769658, winCode(0, !0));
+    vt.p.frame(3, 3, 26, 138, 9050648), "RIALTO".split("").forEach((ch, i) => vt.p.text7(9, 6 + i * 23, ch, 16777215, winCode(0, !0), 3)), fr.sideQuad(mb, a0 + 1, -0.15, -1.15, 0.125 + 3.4, 0.125 + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW }), fr.sideQuad(mb, a0 + 1.01, -1.15, -0.15, 0.125 + 3.4, 0.125 + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
     let lp = fr.pt(a0 + W / 2, -1.5);
     C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 3.4, color: [1, 0.85, 0.5], k: 0.9, kind: "marquee" }), C.world.marquees.push({ x: lp[0], y: lp[1] }), C.world.shops.push({ kind: "theater", name: "RIALTO", x: lp[0], y: lp[1], n: fr.n });
   }
@@ -3203,29 +3619,30 @@ void main() {
     C.addBench(L.x0 + 4.8, L.y1 - 2, "x", -1), C.addBench(L.x1 - 1, cy1 + 3, "y", -1), parkLamp(C, L.x0 + 9, L.y1 - 2.2), trashBasket(C, L.x0 + 9.5, L.y1 - 0.6), C.world.playground = { x0: L.x0 + 9.5, y0: L.y1 - 6.8, x1: L.x1 - 1, y1: L.y1 - 1 };
   }
   function courtLines(C, x0, y0, x1, y1) {
-    let g = C.world.ground.p, X0 = Math.round(x0 * 16), X1 = Math.round(x1 * 16), Y0 = Math.round(y0 * 16), Y1 = Math.round(y1 * 16), line = (x, y) => g.set(x, y, 15921902, GC.COURT_LINE);
-    for (let x = X0; x < X1; x++)
-      line(x, Y0), line(x, Y0 + 1), line(x, Y1 - 1), line(x, Y1 - 2);
-    for (let y = Y0; y < Y1; y++)
-      line(X0, y), line(X0 + 1, y), line(X1 - 1, y), line(X1 - 2, y);
+    let g = C.world.ground.p, X0 = Math.round(x0 * 32), X1 = Math.round(x1 * 32), Y0 = Math.round(y0 * 32), Y1 = Math.round(y1 * 32), line = (x, y) => g.set(x, y, 15921902, GC.COURT_LINE), k = 32 / 16;
+    for (let x = X0; x < X1; x++) for (let w = 0; w < 3; w++)
+      line(x, Y0 + w), line(x, Y1 - 1 - w);
+    for (let y = Y0; y < Y1; y++) for (let w = 0; w < 3; w++)
+      line(X0 + w, y), line(X1 - 1 - w, y);
     let mx = Math.round((X0 + X1) / 2), my = Math.round((Y0 + Y1) / 2);
     for (let y = Y0; y < Y1; y++)
-      line(mx, y), line(mx - 1, y);
-    g.ring(mx, my, 15, 15, 2, 15921902, GC.COURT_LINE);
+      line(mx, y), line(mx - 1, y), line(mx + 1, y);
+    g.ring(mx, my, 15 * k, 15 * k, 3, 15921902, GC.COURT_LINE);
     for (let [ex, dir] of [[X0, 1], [X1, -1]]) {
-      let bx = ex + dir * 14;
-      for (let a = -Math.PI / 2; a <= Math.PI / 2; a += 0.01) {
-        let px = Math.round(bx + dir * Math.cos(a) * 58), py = Math.round(my + Math.sin(a) * 58);
-        py > Y0 + 6 && py < Y1 - 6 && (line(px, py), line(px + dir, py));
+      let bx = ex + dir * 14 * k, R2 = 58 * k;
+      for (let a = -Math.PI / 2; a <= Math.PI / 2; a += 4e-3) {
+        let px = Math.round(bx + dir * Math.cos(a) * R2), py = Math.round(my + Math.sin(a) * R2);
+        py > Y0 + 6 * k && py < Y1 - 6 * k && (line(px, py), line(px + dir, py), line(px + 2 * dir, py));
       }
-      for (let sy of [my - 54, my + 54]) for (let x = Math.min(ex, bx); x <= Math.max(ex, bx); x++)
-        line(x, sy), line(x, sy + 1);
-      let kx = ex + dir * 48;
-      for (let y = my - 20; y <= my + 20; y++)
-        line(kx, y), line(kx + dir, y);
-      for (let x = Math.min(ex, kx); x <= Math.max(ex, kx); x++)
-        line(x, my - 20), line(x, my + 20);
-      g.ring(kx, my, 16, 16, 2, 15921902, GC.COURT_LINE);
+      for (let sy of [my - 54 * k, my + 54 * k]) for (let x = Math.min(ex, bx); x <= Math.max(ex, bx); x++)
+        line(x, sy), line(x, sy + 1), line(x, sy + 2);
+      let kx = ex + dir * 48 * k;
+      for (let y = my - 20 * k; y <= my + 20 * k; y++)
+        line(kx, y), line(kx + dir, y), line(kx + 2 * dir, y);
+      for (let x = Math.min(ex, kx); x <= Math.max(ex, kx); x++) for (let w = 0; w < 3; w++)
+        line(x, my - 20 * k + w), line(x, my + 20 * k - w);
+      g.ring(kx, my, 16 * k, 16 * k, 3, 15921902, GC.COURT_LINE);
+      for (let d of [18, 26, 34]) for (let sy of [my - 20 * k - 4, my + 20 * k + 1]) for (let w = 0; w < 3; w++) for (let t = 0; t < 3; t++) line(ex + dir * (d * k + w), sy + t);
     }
   }
   function parkBlock(C, L) {
@@ -3293,9 +3710,9 @@ void main() {
   }
   function circleGround(C, cx, cy, r, kind) {
     let g = C.world.ground.p;
-    for (let y = Math.floor((cy - r) * 16); y < Math.ceil((cy + r) * 16); y++)
-      for (let x = Math.floor((cx - r) * 16); x < Math.ceil((cx + r) * 16); x++) {
-        let dx = (x + 0.5) / 16 - cx, dy = (y + 0.5) / 16 - cy;
+    for (let y = Math.floor((cy - r) * 32); y < Math.ceil((cy + r) * 32); y++)
+      for (let x = Math.floor((cx - r) * 32); x < Math.ceil((cx + r) * 32); x++) {
+        let dx = (x + 0.5) / 32 - cx, dy = (y + 0.5) / 32 - cy;
         if (dx * dx + dy * dy <= r * r) {
           let f = groundFill(kind, x, y, 0, 0, 1e9, 1e9);
           f && g.set(x, y, f[0], f[1]);
@@ -3304,9 +3721,9 @@ void main() {
   }
   function ellipseGround(C, cx, cy, rx, ry, kind) {
     let g = C.world.ground.p;
-    for (let y = Math.floor((cy - ry) * 16); y < Math.ceil((cy + ry) * 16); y++)
-      for (let x = Math.floor((cx - rx) * 16); x < Math.ceil((cx + rx) * 16); x++) {
-        let dx = ((x + 0.5) / 16 - cx) / rx, dy = ((y + 0.5) / 16 - cy) / ry;
+    for (let y = Math.floor((cy - ry) * 32); y < Math.ceil((cy + ry) * 32); y++)
+      for (let x = Math.floor((cx - rx) * 32); x < Math.ceil((cx + rx) * 32); x++) {
+        let dx = ((x + 0.5) / 32 - cx) / rx, dy = ((y + 0.5) / 32 - cy) / ry;
         if (dx * dx + dy * dy <= 1) {
           let f = groundFill(kind, x, y, 0, 0, 1e9, 1e9);
           f && g.set(x, y, f[0], f[1]);
@@ -3380,14 +3797,28 @@ void main() {
   function buildCart(C, c) {
     let P = propTex(C), A = C.atlas, n = cartNormal(c);
     c.nx = n[0], c.ny = n[1];
-    let along = c.axis === "x" ? [1, 0] : [0, 1], L = 1.3, D = 0.7, H = 0.95, cx = c.x, cy = c.y, x0 = cx - (along[0] * L + Math.abs(n[0]) * D) / 2, x1 = cx + (along[0] * L + Math.abs(n[0]) * D) / 2, y0 = cy - (along[1] * L + Math.abs(n[1]) * D) / 2, y1 = cy + (along[1] * L + Math.abs(n[1]) * D) / 2, side = A.shared("cart_side_" + c.kind, 24, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 24; x++) p.set(x, y, (x + y) % 5 === 0 ? 14541028 : 13159634);
-      c.kind === "halal" ? (p.rect(0, 2, 24, 6, 13119532), p.text(2, 3, "HALAL", 15909424, 255)) : c.kind === "pretzel" ? (p.rect(0, 2, 24, 6, 2052e3), p.text(2, 3, "PRTZL", 15909424, 255)) : (p.rect(0, 2, 24, 6, 15909424), p.text(2, 3, "HOTDG", 13119532, 255)), p.rect(0, 15, 24, 1, 5922147);
-    }), top = A.shared("cart_top", 16, 16, (p) => {
-      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, (x * 3 + y) % 7 === 0 ? 9080468 : 11843774);
-      p.rect(2, 2, 5, 5, 5913130), p.rect(9, 3, 5, 4, 14196816);
-    });
-    C.mb.box(x0, y0, 0.125 + 0.2, x1, y1, 0.125 + H, { px: side, nx: side, py: side, ny: side, pz: { t: top } });
+    let along = c.axis === "x" ? [1, 0] : [0, 1], L = 1.3, D = 0.7, H = 0.95, cx = c.x, cy = c.y, x0 = cx - (along[0] * L + Math.abs(n[0]) * D) / 2, x1 = cx + (along[0] * L + Math.abs(n[0]) * D) / 2, y0 = cy - (along[1] * L + Math.abs(n[1]) * D) / 2, y1 = cy + (along[1] * L + Math.abs(n[1]) * D) / 2, sideFor = (len) => A.shared(`cart_side_${c.kind}_${len}`, len, 24, (p) => {
+      for (let y = 0; y < 24; y++) for (let x = 0; x < len; x++) p.set(x, y, (x + y) % 7 === 0 ? 14541028 : x % 16 === 0 ? 11054258 : 13159634);
+      let [bg, fg, word] = c.kind === "halal" ? [13119532, 15909424, "HALAL"] : c.kind === "pretzel" ? [2052e3, 15909424, "PRETZEL"] : [15909424, 13119532, "HOT DOG"];
+      p.rect(0, 3, len, 11, bg), p.hline(0, 3, len, shade(bg, 1.2)), p.hline(0, 13, len, shade(bg, 0.7));
+      let tw = textWidth(word, 1, !0);
+      if (tw <= len - 1) p.text7(Math.floor((len - tw) / 2), 5, word, fg, 255);
+      else {
+        let cx2 = len >> 1;
+        c.kind === "hotdog" ? (p.ellipse(cx2, 8, 7, 3, 14196816), p.rect(cx2 - 7, 7, 14, 2, 12079146), p.hline(cx2 - 5, 7, 10, 15909424)) : c.kind === "pretzel" ? (p.ring(cx2 - 2, 8, 3.5, 3.5, 1.4, 9062938), p.ring(cx2 + 2, 8, 3.5, 3.5, 1.4, 9062938), p.set(cx2 - 2, 7, 15921902), p.set(cx2 + 3, 9, 15921902)) : (p.ellipse(cx2, 9, 7, 3, 15921902), p.ellipse(cx2 - 2, 8, 3, 1.6, 10115626), p.ellipse(cx2 + 3, 9, 2.5, 1.4, 15919280));
+      }
+      for (let k = 0; k * 14 + 4 < len - 8; k++)
+        p.rect(4 + k * 14, 16, 10, 5, [14195280, 15259824, 9062954][k % 3]), p.frame(4 + k * 14, 16, 10, 5, 15921902);
+      p.rect(0, 22, len, 2, 5922147);
+    }), longSide = sideFor(42), shortSide = sideFor(22), top = A.shared("cart_top", 32, 32, (p) => {
+      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x * 3 + y) % 9 === 0 ? 9080468 : 11843774);
+      p.frame(0, 0, 32, 32, 9080468), p.rect(3, 3, 12, 11, 3811874);
+      for (let k = 0; k < 4; k++) p.rect(5 + k * 2, 5, 1, 7, 13138490);
+      p.rect(18, 4, 11, 9, 14196816);
+      for (let k = 0; k < 3; k++) p.ellipse(21 + k * 3, 8, 1.2, 1.2, 10115616);
+      p.rect(4, 18, 24, 10, 10133672), p.frame(4, 18, 24, 10, 6975092);
+    }), F = c.axis === "x" ? { py: longSide, ny: longSide, px: shortSide, nx: shortSide } : { px: longSide, nx: longSide, py: shortSide, ny: shortSide };
+    C.mb.box(x0, y0, 0.125 + 0.2, x1, y1, 0.125 + H, { ...F, pz: { t: top } });
     for (let [wx, wy] of [[x0 + 0.1, y0 + 0.1], [x1 - 0.1, y1 - 0.1]]) C.mb.box(wx - 0.06, wy - 0.06, 0.125, wx + 0.06, wy + 0.06, 0.125 + 0.25, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
     C.addSprite("cartUmbrella", cx, cy, 0.125 + H, { cart: c.kind }), C.world.steam.push({ x: cx, y: cy, z: 0.125 + H + 0.1, kind: "cart", rate: 0.6 }), C.world.lamps.push({ x: cx, y: cy, z: 1.5, r: 1.5, color: [1, 0.9, 0.7], k: 0.45, kind: "shop", group: GRP.DAY });
   }
@@ -3399,7 +3830,7 @@ void main() {
   // src/world/world.js
   function buildWorld(seed = 1977, progress = () => {
   }) {
-    let rng = new RNG(seed), atlas = new Atlas(2048), groundReg = atlas.allocPage(117 * 16, 117 * 16);
+    let rng = new RNG(seed), atlas = new Atlas(2048), groundPage = new Page(117 * 32, 117 * 32), groundReg = { layer: 0, x: 0, y: 0, w: 117 * 32, h: 117 * 32, p: new Painter(groundPage, 0, 0, 117 * 32, 117 * 32), page: groundPage };
     progress("Paving streets");
     let groundInfo = paintGround(groundReg, rng), tex = makeBaseTextures(atlas), mb = new MeshBuilder();
     buildGroundGeometry(mb, groundReg, tex), buildSlabSides(mb, atlas, tex);
@@ -3408,6 +3839,7 @@ void main() {
       atlas,
       tex,
       ground: groundReg,
+      groundPage,
       groundInfo,
       heights: new Float32Array(117 * 117),
       lamps: [],
@@ -3697,100 +4129,120 @@ void main() {
     C8: 8,
     C9: 9,
     C10: 10
-  }, TREE_SPECIES = {
-    plane: { w: 44, h: 58, trunkH: 20, canopy: [20, 17], blobs: 16, bark: 9079412 },
-    locust: { w: 38, h: 54, trunkH: 22, canopy: [17, 15], blobs: 22, small: !0, bark: 5917242 },
-    oak: { w: 48, h: 56, trunkH: 18, canopy: [22, 18], blobs: 14, bark: 5916214 },
-    elm: { w: 60, h: 70, trunkH: 26, canopy: [28, 20], blobs: 18, vase: !0, bark: 6181446 },
-    cherry: { w: 42, h: 44, trunkH: 14, canopy: [19, 13], blobs: 16, bark: 4862e3 },
-    pine: { w: 36, h: 54, trunkH: 6, pine: !0, bark: 4863526 },
-    xmas: { w: 40, h: 76, trunkH: 6, pine: !0, xmas: !0, bark: 4863526 }
+  };
+  function shadeMul(sp, x, y, f) {
+    if (x < 0 || y < 0 || x >= sp.w || y >= sp.h) return;
+    let d = sp.page.data, i = ((sp.oy + y) * sp.page.w + sp.ox + x) * 4;
+    !d[i + 3] || !d[i] || (d[i + 1] = clamp(Math.round(d[i + 1] * f), 30, 255));
+  }
+  function selOut(sp, dark = 0.74, lit = 1.08) {
+    let W = sp.w, H = sp.h, m = new Uint8Array(W * H);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) m[y * W + x] = sp.get(x, y) > 0 ? 1 : 0;
+    let at = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : m[y * W + x];
+    for (let y = 0; y < H; y++)
+      for (let x = 0; x < W; x++)
+        m[y * W + x] && (!at(x + 1, y) || !at(x, y + 1) ? shadeMul(sp, x, y, dark) : (!at(x - 1, y) || !at(x, y - 1)) && shadeMul(sp, x, y, lit));
+  }
+  var TREE_SPECIES = {
+    plane: { w: 88, h: 116, trunkH: 40, canopy: [40, 34], blobs: 30, bark: 9079412, camo: !0 },
+    locust: { w: 76, h: 108, trunkH: 44, canopy: [34, 30], blobs: 40, small: !0, bark: 5917242 },
+    oak: { w: 96, h: 112, trunkH: 36, canopy: [44, 36], blobs: 26, bark: 5916214 },
+    elm: { w: 120, h: 140, trunkH: 52, canopy: [56, 40], blobs: 34, vase: !0, bark: 6181446 },
+    cherry: { w: 84, h: 88, trunkH: 28, canopy: [38, 26], blobs: 30, bark: 4862e3 },
+    pine: { w: 72, h: 108, trunkH: 12, pine: !0, bark: 4863526 },
+    xmas: { w: 80, h: 152, trunkH: 12, pine: !0, xmas: !0, bark: 4863526 }
   };
   function paintTree(sp, spec, seed) {
     let rng = new RNG(seed), { w, h } = spec, cx = Math.floor(w / 2), base = h - 1;
-    if (spec.pine) return paintPine(sp, spec, rng);
+    if (spec.pine) return paintPine(sp, spec, rng, seed);
     let th = spec.trunkH;
     for (let y = base; y > base - th; y--) {
-      let half = (base - y) / th < 0.15 ? 2 : 1;
-      for (let x = cx - half; x <= cx + half - (half === 1 ? 0 : 1); x++) {
-        let sh = x < cx ? 150 : x === cx ? 128 : 100;
-        sp.set(x, y, S.TRUNK, sh, S.TRUNK);
+      let t = (base - y) / th, half = t < 0.05 ? 4 : t < 0.14 ? 3 : 2.5, xa = Math.round(cx - half), xb = Math.round(cx + half) - 1;
+      for (let x = xa; x <= xb; x++) {
+        let rel = (x - xa) / Math.max(1, xb - xa), sh = rel < 0.25 ? 150 : rel < 0.6 ? 126 : 98;
+        hash2i(x, y >> 2, seed + 5) < 0.2 && (sh -= 22), spec.camo && hash2i(x >> 1, (y >> 1) + 3, seed + 6) > 0.6 && (sh += 30), sp.set(x, y, S.TRUNK, clamp(sh, 56, 210), S.TRUNK);
       }
     }
     let tips = [], branch = (x, y, ang, len, depth) => {
-      let x2 = x + Math.cos(ang) * len, y2 = y - Math.sin(ang) * len, steps = Math.ceil(len), thick = depth === 0 ? 3 : depth <= 2 ? 2 : 1;
+      let x2 = x + Math.cos(ang) * len, y2 = y - Math.sin(ang) * len, steps = Math.ceil(len), thick = depth === 0 ? 4 : depth === 1 ? 3 : depth <= 3 ? 2 : 1;
       for (let i = 0; i <= steps; i++) {
         let px = Math.round(x + (x2 - x) * i / steps), py = Math.round(y + (y2 - y) * i / steps);
         for (let k = 0; k < thick; k++) {
           let slot = sp.get(px + k, py - 1) < 0 && depth >= 1 ? S.BR_TOP : S.BRANCH;
-          sp.set(px + k, py, slot, k ? 100 : 128, slot);
+          sp.set(px + k, py, slot, k === 0 ? 138 : k === thick - 1 ? 98 : 118, slot);
         }
       }
-      if (depth >= 4 || len < 2.2) {
+      if (depth >= 5 || len < 4) {
         tips.push([x2, y2]);
-        for (let k = 0; k < 2; k++) {
-          let ta = ang + rng.range(-0.9, 0.9), tl = rng.range(1.5, 3), tx = Math.round(x2 + Math.cos(ta) * tl), ty = Math.round(y2 - Math.sin(ta) * tl), steps2 = Math.max(Math.abs(tx - x2), Math.abs(ty - y2));
-          for (let i = 0; i <= steps2; i++) {
-            let qx = Math.round(x2 + (tx - x2) * i / Math.max(1, steps2)), qy = Math.round(y2 + (ty - y2) * i / Math.max(1, steps2));
-            sp.set(qx, qy, S.BR_TOP, 120, S.BR_TOP);
+        for (let k = 0; k < 3; k++) {
+          let ta = ang + rng.range(-1, 1), tl = rng.range(3, 6), tx = Math.round(x2 + Math.cos(ta) * tl), ty = Math.round(y2 - Math.sin(ta) * tl), n2 = Math.max(1, Math.abs(tx - x2), Math.abs(ty - y2));
+          for (let i = 0; i <= n2; i++) {
+            let qx = Math.round(x2 + (tx - x2) * i / n2), qy = Math.round(y2 + (ty - y2) * i / n2);
+            sp.get(qx, qy) < 0 && sp.set(qx, qy, S.BR_TOP, 116, S.BR_TOP);
           }
         }
         return;
       }
-      let n = depth === 0 || rng.chance(0.3) ? 3 : 2;
+      let n = depth === 0 || rng.chance(0.35) ? 3 : 2;
       for (let k = 0; k < n; k++) {
-        let spread = spec.vase ? 0.55 : 0.7, na = ang + (k - (n - 1) / 2) * spread + rng.range(-0.25, 0.25);
-        branch(x2, y2, na, len * rng.range(0.62, 0.8), depth + 1);
+        let spread = spec.vase ? 0.5 : 0.66, na = ang + (k - (n - 1) / 2) * spread + rng.range(-0.25, 0.25);
+        branch(x2, y2, na, len * rng.range(0.64, 0.8), depth + 1);
       }
     }, topY = base - th, L0 = spec.canopy[1] * 0.75;
-    branch(cx, topY + 1, Math.PI / 2 + rng.range(-0.15, 0.15), L0 * 0.7, 0), spec.vase && (branch(cx, topY + 4, Math.PI / 2 + 0.6, L0 * 0.8, 1), branch(cx, topY + 4, Math.PI / 2 - 0.6, L0 * 0.8, 1));
+    branch(cx - 2, topY + 2, Math.PI / 2 + rng.range(-0.15, 0.15), L0 * 0.7, 0), spec.vase && (branch(cx - 1, topY + 8, Math.PI / 2 + 0.6, L0 * 0.8, 1), branch(cx - 1, topY + 8, Math.PI / 2 - 0.6, L0 * 0.8, 1));
     let [rx, ry] = spec.canopy, ccy = topY - ry * 0.55, blobs = [];
-    for (let t of tips) blobs.push([t[0], t[1], rng.range(3.5, 6)]);
+    for (let t of tips) blobs.push([t[0], t[1], rng.range(5, 9)]);
     for (let i = 0; i < spec.blobs; i++) {
       let a = rng.range(0, Math.PI * 2), r = Math.sqrt(rng.next());
-      blobs.push([cx + Math.cos(a) * r * rx * 0.75, ccy + Math.sin(a) * r * ry * 0.7, rng.range(4, 7)]);
+      blobs.push([cx + Math.cos(a) * r * rx * 0.75, ccy + Math.sin(a) * r * ry * 0.7, rng.range(7, 12)]);
     }
     let leafPix = (x, y, nx, ny) => {
-      let prev = sp.get(x, y), alt = prev === S.BRANCH || prev === S.BR_TOP || prev === S.TRUNK ? prev : 0, l = -nx * 0.6 - ny * 0.8 + (hash2i(x, y, seed) - 0.5) * 0.7, slot = l > 0.45 ? S.LEAF_L : l > -0.25 ? S.LEAF_M : S.LEAF_D;
-      spec.small && hash2i(x, y, seed + 3) < 0.25 && (slot = S.LEAF_D), hash2i(x, y, seed + 9) < 0.11 && (slot = S.BLOSSOM), sp.set(x, y, slot, 128, alt);
+      let prev = sp.get(x, y), alt = prev === S.BRANCH || prev === S.BR_TOP || prev === S.TRUNK ? prev : 0, n = (hash2i(x >> 1, y >> 1, seed) - 0.5) * 0.6 + (hash2i(x >> 2, y >> 2, seed + 7) - 0.5) * 0.5, l = -nx * 0.6 - ny * 0.8 + n, slot = l > 0.42 ? S.LEAF_L : l > -0.26 ? S.LEAF_M : S.LEAF_D;
+      spec.small && hash2i(x, y, seed + 3) < 0.22 && (slot = S.LEAF_D), hash2i(x >> 1, y >> 1, seed + 9) < 0.08 && (slot = S.BLOSSOM);
+      let sh = slot === S.LEAF_L && hash2i(x, y, seed + 11) < 0.12 ? 146 : 128;
+      sp.set(x, y, slot, sh, alt);
     };
     for (let [bx, by, br] of blobs)
       for (let y = Math.floor(by - br); y <= Math.ceil(by + br); y++)
         for (let x = Math.floor(bx - br); x <= Math.ceil(bx + br); x++) {
-          let dx = (x + 0.5 - bx) / br, dy = (y + 0.5 - by) / (br * 0.85), d = dx * dx + dy * dy, edge = d > 0.75 && hash2i(x, y, seed + 1) < 0.5;
-          if (d <= 1 && !edge && x >= 0 && y >= 0 && x < w && y < h) {
-            let nx = (x - cx) / rx, ny = (y - ccy) / ry;
-            leafPix(x, y, nx * 0.6 + dx * 0.4, ny * 0.6 + dy * 0.4);
-          }
+          if (x < 0 || y < 0 || x >= w || y >= h) continue;
+          let dx = (x + 0.5 - bx) / br, dy = (y + 0.5 - by) / (br * 0.85), d = dx * dx + dy * dy;
+          if (d > 1 || d > 0.66 && hash2i(x >> 1, y >> 1, seed + 1) < 0.42) continue;
+          let nx = (x - cx) / rx, ny = (y - ccy) / ry;
+          leafPix(x, y, nx * 0.6 + dx * 0.4, ny * 0.6 + dy * 0.4);
         }
     for (let y = 0; y < h; y++)
       for (let x = 0; x < w; x++) {
         let s = sp.get(x, y);
-        (s === S.LEAF_M || s === S.LEAF_L) && sp.get(x, y + 1) < 0 && sp.set(x, y, S.LEAF_D, 128, 0);
+        (s === S.LEAF_M || s === S.LEAF_L || s === S.BLOSSOM) && (sp.get(x, y + 1) < 0 || sp.get(x, y + 2) < 0) && sp.set(x, y, S.LEAF_D, 118, 0);
       }
   }
-  function paintPine(sp, spec, rng) {
+  function paintPine(sp, spec, rng, seed) {
     let { w, h } = spec, cx = Math.floor(w / 2), base = h - 1;
-    for (let y = base; y > base - spec.trunkH - 4; y--)
-      sp.set(cx, y, S.TRUNK, 128, S.TRUNK), sp.set(cx - 1, y, S.TRUNK, 150, S.TRUNK);
-    let layers = spec.xmas ? 7 : 5, top = 1, bottom = base - spec.trunkH;
+    for (let y = base; y > base - spec.trunkH - 8; y--) for (let x = cx - 2; x < cx + 2; x++) sp.set(x, y, S.TRUNK, x === cx - 2 ? 150 : x === cx + 1 ? 96 : 124, S.TRUNK);
+    let layers = spec.xmas ? 9 : 7, top = 3, bottom = base - spec.trunkH;
     for (let l = 0; l < layers; l++) {
-      let ly = top + (bottom - top) * (l + 1) / layers, lw = (w / 2 - 1) * (0.35 + 0.65 * (l + 1) / layers), lh = (bottom - top) / layers + 5;
+      let ly = top + (bottom - top) * (l + 1) / layers, lw = (w / 2 - 2) * (0.3 + 0.7 * (l + 1) / layers), lh = (bottom - top) / layers + 10;
       for (let y = Math.floor(ly - lh); y <= ly; y++) {
-        let t = clamp((y - (ly - lh)) / lh, 0, 1), half = lw * Math.pow(t, 0.75);
+        let t = clamp((y - (ly - lh)) / lh, 0, 1), half = lw * Math.pow(t, 0.8);
         for (let x = Math.floor(cx - half); x <= Math.ceil(cx + half); x++) {
-          if (x < 0 || x >= w || y < 0 || y > ly - 2 && hash2i(x, y, 5) < 0.35) continue;
-          let edgeTop = sp.get(x, y - 1) < 0, slot = x < cx - half * 0.25 ? S.LEAF_L : x > cx + half * 0.35 ? S.LEAF_D : S.LEAF_M;
-          y > ly - 1.5 && (slot = S.LEAF_D), edgeTop && (slot = S.BR_TOP), sp.set(x, y, slot, 128, slot === S.BR_TOP ? S.BR_TOP : 0);
+          if (x < 0 || x >= w || y < 0) continue;
+          let edge = Math.abs(x + 0.5 - cx) / Math.max(1, half);
+          if (y > ly - 4 && hash2i(x >> 1, y, seed + 5) < 0.3 + (y - (ly - 4)) * 0.15 || edge > 0.82 && hash2i(x, y >> 1, seed + 6) < 0.5) continue;
+          let n = (hash2i(x >> 1, y >> 1, seed) - 0.5) * 0.5, rel = (x - cx) / Math.max(1, half) + n, slot = rel < -0.3 ? S.LEAF_L : rel > 0.35 ? S.LEAF_D : S.LEAF_M;
+          y > ly - 3 && (slot = S.LEAF_D), (sp.get(x, y - 1) < 0 || sp.get(x, y - 2) < 0) && (slot = S.BR_TOP), sp.set(x, y, slot, 128, slot === S.BR_TOP ? S.BR_TOP : 0);
         }
       }
     }
     if (spec.xmas) {
-      for (let i = 0; i < 70; i++) {
-        let y = rng.int(6, bottom - 1), x = rng.int(1, w - 2), s = sp.get(x, y);
-        (s === S.LEAF_M || s === S.LEAF_D || s === S.LEAF_L) && sp.set(x, y, rng.pick([S.LIGHT1, S.LIGHT2, S.LIGHT3]), 128, 0);
+      for (let i = 0; i < 240; i++) {
+        let y = rng.int(10, bottom - 2), x = rng.int(2, w - 3), s = sp.get(x, y);
+        if (s === S.LEAF_M || s === S.LEAF_D || s === S.LEAF_L) {
+          let L = rng.pick([S.LIGHT1, S.LIGHT2, S.LIGHT3]);
+          sp.set(x, y, L, 128, 0), rng.chance(0.3) && sp.get(x + 1, y) > 0 && sp.set(x + 1, y, L, 100, 0);
+        }
       }
-      for (let [dx, dy] of [[0, 0], [-1, 1], [1, 1], [0, 1], [0, 2], [-2, 1], [2, 1]]) sp.set(cx + dx, top - 1 + dy, S.STAR, 128, 0);
+      for (let [dx, dy] of [[0, -3], [0, -2], [-1, -1], [0, -1], [1, -1], [-3, 0], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [3, 0], [-1, 1], [0, 1], [1, 1], [-2, 2], [2, 2], [-2, 3], [2, 3]]) sp.set(cx + dx, top + dy, S.STAR, 128, 0);
     }
   }
   var TREE_PALETTES = {
@@ -3857,18 +4309,18 @@ void main() {
     skate: 2,
     phone: 1,
     lie: 1
-  };
+  }, BACK_POSES = { walk: 1, run: 1, idle: 1, sit: 1 }, PW = 26, PH = 42, SIT_EXT = 10;
   function poseParams(anim, f) {
-    let P = { lx: 0, rx: 0, ll: 0, rl: 0, la: "down", ra: "down", bob: 0, sit: !1, crouch: !1, jump: 0, lean: 0 };
+    let P = { lx: 0, rx: 0, ll: 0, rl: 0, la: "down", ra: "down", bob: 0, sit: !1, crouch: !1, jump: 0, lean: 0, dip: 0 };
     switch (anim) {
       case "walk": {
-        let ph = [[-1, 1, "fwd", "back", 0], [0, 0, "down", "down", 1], [1, -1, "back", "fwd", 0], [0, 0, "down", "down", 1]][f];
-        P.lx = ph[0], P.rx = ph[1], P.la = ph[2], P.ra = ph[3], P.bob = ph[4], f === 1 && (P.rl = 1), f === 3 && (P.ll = 1);
+        let ph = [[-3, 3, "fwd", "back", 0], [0, 0, "down", "down", 1], [3, -3, "back", "fwd", 0], [0, 0, "down", "down", 1]][f];
+        P.lx = ph[0], P.rx = ph[1], P.la = ph[2], P.ra = ph[3], P.bob = ph[4], f === 1 && (P.rl = 2), f === 3 && (P.ll = 2);
         break;
       }
       case "run": {
-        let ph = [[-2, 2, "fwdb", "backb", 0], [0, 0, "bent", "bent", 1], [2, -2, "backb", "fwdb", 0], [0, 0, "bent", "bent", 1]][f];
-        P.lx = ph[0], P.rx = ph[1], P.la = ph[2], P.ra = ph[3], P.bob = ph[4], P.lean = 1, f === 1 && (P.rl = 2), f === 3 && (P.ll = 2);
+        let ph = [[-5, 5, "fwdb", "backb", 0], [0, 0, "bent", "bent", 2], [5, -5, "backb", "fwdb", 0], [0, 0, "bent", "bent", 2]][f];
+        P.lx = ph[0], P.rx = ph[1], P.la = ph[2], P.ra = ph[3], P.bob = ph[4], P.lean = 1, f === 1 && (P.rl = 4), f === 3 && (P.ll = 4);
         break;
       }
       case "idle":
@@ -3878,13 +4330,13 @@ void main() {
         P.sit = !0, P.la = "lap", P.ra = "lap";
         break;
       case "dribble":
-        P.ra = f ? "low" : "fwd", P.la = "down", P.lx = -1, P.rx = 1, P.bob = f;
+        P.ra = f ? "low" : "fwdlow", P.la = "back", P.lx = -3, P.rx = 3, P.dip = 2 - f;
         break;
       case "shoot":
-        P.la = "up", P.ra = "up", P.jump = f ? 3 : 0, P.ll = f, P.rl = f;
+        P.la = "up", P.ra = "up", P.jump = f ? 6 : 0, P.ll = f * 2, P.rl = f * 2, P.dip = f ? 0 : 2;
         break;
       case "throw":
-        P.ra = f ? "fwd" : "upback", P.la = f ? "back" : "fwd", P.lx = -1, P.rx = 1;
+        P.ra = f ? "fwd" : "upback", P.la = f ? "back" : "fwd", P.lx = -3, P.rx = 4;
         break;
       case "crouch":
         P.crouch = !0, P.la = "low", P.ra = "low";
@@ -3893,7 +4345,7 @@ void main() {
         P.ra = "up";
         break;
       case "skate":
-        P.la = "out", P.ra = "out", P.lx = f ? -1 : 1, P.rx = f ? 2 : -2, P.lean = 1;
+        P.la = "out", P.ra = "out", P.lx = f ? -3 : 3, P.rx = f ? 5 : -5, P.lean = 1;
         break;
       case "phone":
         P.ra = "phone";
@@ -3904,163 +4356,255 @@ void main() {
     }
     return P;
   }
-  function paintPerson(sp, tpl, anim, f, view) {
-    let P = poseParams(anim, f), kid = tpl.body === "kid", elder = tpl.body === "elder", W = sp.w, ax = Math.floor(W / 2) - 1, ground = sp.h - 1;
+  var HEADS = {
+    adult: [".XXXXX.", "XXXXXXX", "XXXXXXX", "XXXXXXX", "XXXXXXX", "XXXXXXX", ".XXXXXX", "..XXXX."],
+    kid: [".XXXX.", "XXXXXX", "XXXXXX", "XXXXXX", "XXXXXX", ".XXXXX", "..XXX."]
+  }, ARMS = {
+    down: [[0, 4], [0, 8]],
+    fwd: [[1, 4], [3, 7]],
+    back: [[-1, 4], [-3, 7]],
+    fwdb: [[2, 3], [5, 1]],
+    backb: [[-3, 3], [-4, 6]],
+    bent: [[0, 4], [3, 3]],
+    up: [[1, -4], [2, -8]],
+    upback: [[-2, -3], [-4, -6]],
+    low: [[1, 4], [3, 9]],
+    fwdlow: [[2, 4], [5, 6]],
+    lap: [[0, 4], [4, 5]],
+    phone: [[1, 4], [3, 1]]
+  };
+  function paintPerson(sp, tpl, anim, f, view, ext = 0) {
+    let P = poseParams(anim, f);
     if (P.lie) return paintLying(sp, tpl);
-    let legH = kid ? 3 : 5, torsoH = kid ? 4 : 5, headH = 4, y0 = ground - P.jump, crouchDrop = P.crouch ? 3 : 0, sitDrop = P.sit ? legH - 1 : 0, hipY = y0 - 1 - legH + (P.bob ? -1 : 0) + crouchDrop + sitDrop, shoulderY = hipY - torsoH + 1 + (elder ? 1 : 0), headY = shoulderY - headH, front = view === "front", coat = tpl.coat, longCoat = coat === "long", puffer = coat === "puffer", topSlot = coat ? S.COAT : S.TOP, sleeveSlot = coat ? S.COAT : tpl.top === "tee" || tpl.top === "tank" || tpl.top === "jersey" ? S.SKIN : S.TOP, upperArmSlot = coat ? S.COAT : tpl.top === "tank" || tpl.top === "jersey" ? S.SKIN : S.TOP, legSlotUpper = (tpl.bottom === "shorts" || tpl.bottom === "dress" || tpl.bottom === "skirt", S.BOTTOM), legSlotLower = tpl.bottom === "shorts" || tpl.bottom === "skirt" || tpl.bottom === "dress" ? S.SKIN : S.BOTTOM;
-    if (P.sit) {
-      for (let x = ax; x <= ax + 3; x++)
-        sp.set(x, hipY + 1, legSlotUpper, 120), sp.set(x, hipY + 2, legSlotUpper, 100);
-      for (let y = hipY + 2; y <= hipY + 3; y++)
-        sp.set(ax + 3, y, legSlotLower, 110), sp.set(ax + 4, y, legSlotLower, 100);
-      sp.set(ax + 4, hipY + 4, S.SHOES, 128), sp.set(ax + 5, hipY + 4, S.SHOES, 110);
-    } else {
-      let legs = [
-        { x: ax + P.lx, lift: P.ll, back: !0 },
-        { x: ax + 2 + P.rx, lift: P.rl, back: !1 }
-      ];
-      for (let L of legs) {
-        let top = hipY + 1, bottom = y0 - 1 - L.lift;
-        for (let y = top; y <= bottom; y++) {
-          let t = (y - top) / Math.max(1, bottom - top), xx = Math.round(ax + (L.x - ax) * t) + (L.x > ax + 1, 0), slot = t < 0.45 ? legSlotUpper : legSlotLower, sh = L.back ? 100 : 130;
-          sp.set(xx, y, slot, sh), sp.set(xx + 1, y, slot, sh - 12);
+    let kid = tpl.body === "kid", elder = tpl.body === "elder", shorts = tpl.bottom === "shorts", skirt = tpl.bottom === "skirt", dress = tpl.bottom === "dress", fem = skirt || dress, front = view === "front", coat = tpl.coat, puffer = coat === "puffer", longCoat = coat === "long", cx = Math.floor(sp.w / 2), ground = sp.h - 1 - ext, legH = kid ? 7 : 11, torsoH = kid ? 7 : 10, headRows = HEADS[kid ? "kid" : "adult"], headH = headRows.length, headW = headRows[0].length, tw = (kid ? 6 : fem ? 7 : 8) + (puffer ? 2 : 0), tx0 = cx - Math.ceil(tw / 2), y0 = ground - P.jump, hipY = y0 - 2 - legH - P.bob + (P.crouch ? 5 : P.dip) + (P.sit ? legH - 2 : 0), shoulderY = hipY - torsoH + 1 + (elder ? 1 : 0), lean = P.lean, headY = shoulderY - 1 - headH, hx0 = cx - Math.floor(headW / 2) + (elder ? 1 : 0) + lean, topSlot = coat ? S.COAT : S.TOP, bareArms = !coat && (tpl.top === "tank" || tpl.top === "jersey"), shortSleeve = !coat && tpl.top === "tee", upperArmSlot = bareArms ? S.SKIN : topSlot, foreArmSlot = bareArms || shortSleeve ? S.SKIN : topSlot, legW = kid ? 2 : 3, ls = (y) => lean && y < shoulderY + torsoH / 2 ? 1 : 0, tset = (x, y, slot, sh = 128) => sp.set(x + ls(y), y, slot, sh), limbShade = (base, k, n) => base + (k === 0 ? 14 : k === n - 1 ? -16 : 0), drawLeg = (hx, dx, lift, far) => {
+      let base = far ? 96 : 128;
+      if (P.sit) {
+        let kneeX = hx + (kid ? 5 : 7);
+        for (let x = hx; x <= kneeX; x++) for (let k = 0; k < legW; k++) sp.set(x, hipY + 1 + k, (skirt || dress) && x > hx + 3 ? S.SKIN : S.BOTTOM, limbShade(base, k, legW));
+        let shinTop = hipY + 1 + legW, shinBot = sp.h - 3, sx = kneeX - legW + 1;
+        for (let y = shinTop; y <= shinBot; y++) {
+          let slot = shorts || skirt || dress ? S.SKIN : S.BOTTOM;
+          shorts && y >= shinBot - 1 && (slot = S.SOCK);
+          for (let k = 0; k < legW; k++) sp.set(sx + k, y, slot, limbShade(base, k, legW));
         }
-        let fx = Math.round(L.x);
-        sp.set(fx, bottom + 1 - (P.crouch, 0), S.SHOES, L.back ? 100 : 128), sp.set(fx + 1, bottom + 1, S.SHOES, L.back ? 90 : 128), front && !L.back && sp.set(fx + 2, bottom + 1, S.SHOES, 110);
+        for (let k = 0; k <= legW; k++) sp.set(sx + k, shinBot + 1, S.SHOES, base + 8);
+        for (let k = -1; k <= legW + 1; k++) sp.set(sx + k, shinBot + 2, S.SHOES, base - 18);
+        return;
       }
-    }
-    if (tpl.bottom === "skirt" || tpl.bottom === "dress") {
-      let sy = hipY + 1;
-      for (let y = sy; y < sy + (kid ? 2 : 3); y++)
-        for (let x = ax - 1 - (y - sy > 1 ? 1 : 0); x <= ax + 4; x++) sp.set(x, y, S.BOTTOM, x <= ax ? 140 : 120);
-    }
-    if (longCoat && !P.sit)
-      for (let y = hipY + 1; y < hipY + 1 + (kid ? 2 : 3); y++)
-        for (let x = ax - 1; x <= ax + 3; x++) sp.set(x, y, S.COAT, x <= ax ? 140 : 115);
-    let tw = puffer ? 5 : 4, tx0 = ax - (puffer ? 1 : 0);
-    for (let y = shoulderY; y <= hipY; y++)
-      for (let x = tx0; x < tx0 + tw; x++) {
-        let sh = x === tx0 ? 150 : x === tx0 + tw - 1 ? 108 : 128, slot = tpl.bottom === "dress" ? S.BOTTOM : topSlot;
-        y === hipY && !coat && tpl.bottom !== "dress" && (slot = S.BOTTOM), sp.set(x + (P.lean && y < shoulderY + 2 ? 1 : 0), y, slot, sh);
+      let top = hipY + 1, bot = y0 - 2 - lift, n = Math.max(1, bot - top), kneeY = top + Math.round(n * 0.5), kx = hx + dx * 0.5 + lift * 0.8 + (P.crouch ? 3 : 0), fx = hx + dx - lift * 0.6, lastX = hx;
+      for (let y = top; y <= bot; y++) {
+        let x = Math.round(y <= kneeY ? hx + (kx - hx) * ((y - top) / Math.max(1, kneeY - top)) : kx + (fx - kx) * ((y - kneeY) / Math.max(1, bot - kneeY))), t = (y - top) / n, slot = S.BOTTOM;
+        shorts && t > 0.42 && (slot = S.SKIN), (skirt || dress) && t > 0.2 && (slot = S.SKIN), shorts && y >= bot - 1 && (slot = S.SOCK);
+        for (let k = 0; k < legW; k++) sp.set(x + k, y, slot, limbShade(base, k, legW));
+        lastX = x;
       }
-    if (tpl.top === "jersey" && !coat) for (let x = tx0; x < tx0 + tw; x++) sp.set(x, shoulderY + 1, S.TOP2, 128);
-    if (tpl.top === "stripe" && !coat) for (let y = shoulderY + 1; y < hipY; y += 2) for (let x = tx0; x < tx0 + tw; x++) sp.set(x, y, S.TOP2, x === tx0 ? 150 : 120);
-    if (tpl.top === "suit" && front && (sp.set(ax + 1, shoulderY, S.WHITE, 128), sp.set(ax + 2, shoulderY, S.WHITE, 128), sp.set(ax + 1, shoulderY + 1, S.TOP2, 128), sp.set(ax + 1, shoulderY + 2, S.TOP2, 110)), coat === "jacket" && front) for (let y = shoulderY + 1; y <= hipY; y++) sp.set(ax + 2, y, S.TOP, 128);
-    if (tpl.scarf && (sp.set(ax, shoulderY, S.SCARF, 128), sp.set(ax + 1, shoulderY, S.SCARF, 128), sp.set(ax + 2, shoulderY, S.SCARF, 110), front && sp.set(ax + 2, shoulderY + 1, S.SCARF, 110)), tpl.bag === "back")
-      if (front) for (let y = shoulderY + 1; y <= hipY - 1; y++) sp.set(tx0 - 1, y, S.BAG, 100);
-      else for (let y = shoulderY + 1; y <= hipY - 1; y++) for (let x = ax; x <= ax + 2; x++) sp.set(x, y, S.BAG, x === ax ? 140 : 115);
-    let arm = (side, state) => {
-      let bx = side === "back" ? tx0 - 1 : tx0 + tw, dir = side === "back" ? -1 : 1, sh = side === "back" ? 95 : 135, pts = [], len = kid ? 3 : 4;
-      switch (state) {
-        case "down":
-          for (let i = 0; i < len; i++) pts.push([bx, shoulderY + 1 + i]);
-          break;
-        case "fwd":
-          for (let i = 0; i < len; i++) pts.push([bx + (i >= 2 ? dir : 0), shoulderY + 1 + i]);
-          break;
-        case "back":
-          for (let i = 0; i < len; i++) pts.push([bx - (i >= 2 ? dir : 0), shoulderY + 1 + i]);
-          break;
-        case "fwdb":
-          pts.push([bx, shoulderY + 1], [bx + dir, shoulderY + 2], [bx + dir * 2, shoulderY + 2]);
-          break;
-        case "backb":
-          pts.push([bx, shoulderY + 1], [bx - dir, shoulderY + 2], [bx - dir, shoulderY + 3]);
-          break;
-        case "bent":
-          pts.push([bx, shoulderY + 1], [bx, shoulderY + 2], [bx + dir, shoulderY + 2]);
-          break;
-        case "up":
-          for (let i = 0; i < len; i++) pts.push([bx + (i > 1 ? dir : 0), shoulderY - i]);
-          break;
-        case "upback":
-          pts.push([bx, shoulderY], [bx - dir, shoulderY - 1], [bx - dir, shoulderY - 2]);
-          break;
-        case "out":
-          pts.push([bx, shoulderY + 1], [bx + dir, shoulderY + 1], [bx + dir * 2, shoulderY + 1]);
-          break;
-        case "low":
-          for (let i = 0; i < len; i++) pts.push([bx + (i >= 1 ? dir : 0), shoulderY + 1 + i + (i > 1 ? 1 : 0)]);
-          break;
-        case "lap":
-          pts.push([bx, shoulderY + 1], [bx, shoulderY + 2], [bx + dir, shoulderY + 3]);
-          break;
-        case "phone":
-          pts.push([bx, shoulderY + 1], [bx, shoulderY], [bx, shoulderY - 1]);
-          break;
-      }
-      return pts.forEach(([x, y], i) => {
-        let slot = i === pts.length - 1 ? S.SKIN : i === 0 ? upperArmSlot : sleeveSlot;
-        sp.set(x, y, slot, sh), puffer && i < pts.length - 1 && sp.set(x + dir * 0, y, S.COAT, sh);
-      }), state === "phone" && sp.set(bx + dir, shoulderY - 1, S.DARK, 128), pts[pts.length - 1];
+      for (let k = 0; k <= legW; k++) sp.set(lastX + k, bot + 1, S.SHOES, base + 8);
+      for (let k = -1; k <= legW + 1; k++) sp.set(lastX + k, bot + 2, S.SHOES, base - 18);
+    }, drawArm = (far, state) => {
+      let sx = (far ? tx0 - 1 : tx0 + tw - 1) + lean, sy = shoulderY + 1, e, hnd;
+      if (state === "out") {
+        let s = far ? -1 : 1;
+        e = [3 * s, 1], hnd = [6 * s, 2];
+      } else [e, hnd] = ARMS[state] || ARMS.down;
+      let k = kid ? 0.72 : 1, E = [sx + Math.round(e[0] * k), sy + Math.round(e[1] * k)], H2 = [sx + Math.round(hnd[0] * k), sy + Math.round(hnd[1] * k)], base = far ? 94 : 130, seg = (a, b, slot) => {
+        let n = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), 1);
+        for (let i = 0; i <= n; i++) {
+          let x = Math.round(a[0] + (b[0] - a[0]) * i / n), y = Math.round(a[1] + (b[1] - a[1]) * i / n);
+          sp.set(x, y, slot, base + 10), sp.set(x + 1, y, slot, base - 14);
+        }
+      };
+      return seg([sx, sy], E, upperArmSlot), puffer && seg([sx - 1, sy], [E[0] - 1, E[1]], S.COAT), seg(E, H2, foreArmSlot), !coat && !bareArms && !shortSleeve && sp.set(H2[0], H2[1] + (H2[1] >= E[1] ? -1 : 1), topSlot, base - 22), sp.set(H2[0], H2[1], S.SKIN, base + 6), sp.set(H2[0] + 1, H2[1], S.SKIN, base - 10), sp.set(H2[0], H2[1] + 1, S.SKIN, base - 4), sp.set(H2[0] + 1, H2[1] + 1, S.SKIN, base - 20), state === "phone" && (sp.set(H2[0] + 1, H2[1] - 1, S.DARK, 128), sp.set(H2[0] + 1, H2[1] - 2, S.DARK, 128), sp.set(H2[0] + 2, H2[1] - 2, S.DARK, 110), sp.set(H2[0] + 2, H2[1] - 1, S.WHITE, 120)), H2;
     };
-    arm("back", P.la);
-    let hand = arm("front", P.ra);
-    if (tpl.bag === "brief" && (P.ra === "down" || P.ra === "fwd" || P.ra === "back") && (sp.set(hand[0], hand[1] + 1, S.BAG, 128), sp.set(hand[0] + 1, hand[1] + 1, S.BAG, 110), sp.set(hand[0], hand[1] + 2, S.BAG, 110), sp.set(hand[0] + 1, hand[1] + 2, S.BAG, 90)), tpl.bag === "shoulder")
-      for (let y = shoulderY + 2; y <= hipY; y++) sp.set(front ? tx0 + tw : tx0 - 1, y, S.BAG, 110);
-    tpl.bag === "shopping" && (P.ra === "down" || P.ra === "fwd" || P.ra === "back") && (sp.set(hand[0], hand[1] + 1, S.BAG, 140), sp.set(hand[0] + 1, hand[1] + 1, S.BAG, 120), sp.set(hand[0], hand[1] + 2, S.BAG, 120), sp.set(hand[0] + 1, hand[1] + 2, S.BAG, 100), sp.set(hand[0], hand[1] + 3, S.BAG, 100));
-    let hx0 = ax;
-    for (let y = headY; y < headY + headH; y++)
-      for (let x = hx0; x < hx0 + 4; x++) {
-        let slot = S.SKIN, sh = x === hx0 ? 140 : x === hx0 + 3 ? 110 : 128;
-        y === headY + headH - 1 && (x === hx0 || x === hx0 + 3) || sp.set(x, y, slot, sh);
+    if (drawArm(!0, P.la), drawLeg(tx0 + 1, P.lx, P.ll, !0), drawLeg(cx, P.rx, P.rl, !1), skirt || dress) {
+      let len = kid ? 3 : dress ? 6 : 5;
+      for (let r = 0; r < len; r++) {
+        let flare = Math.floor(r / 2);
+        for (let x = tx0 - flare; x <= tx0 + tw - 1 + flare; x++) sp.set(x, hipY + 1 + r, S.BOTTOM, x <= tx0 - flare + 1 ? 146 : x >= tx0 + tw - 2 + flare ? 100 : (x + r) % 4 === 0 ? 112 : 124);
       }
-    sp.set(ax + 1, shoulderY - 0, tpl.scarf ? S.SCARF : sp.get(ax + 1, shoulderY) >= 0 ? sp.get(ax + 1, shoulderY) : S.SKIN, 110);
-    let hair = tpl.hair, H = (x, y, sh = 128) => sp.set(x, y, S.HAIR, sh);
+    }
+    if (longCoat && !P.sit) {
+      let len = kid ? 3 : 6;
+      for (let r = 0; r < len; r++) for (let x = tx0 - (r > 2 ? 1 : 0); x <= tx0 + tw - 1; x++) sp.set(x, hipY + 1 + r, S.COAT, x <= tx0 ? 146 : x >= tx0 + tw - 2 ? 100 : 122);
+    }
+    for (let y = shoulderY; y <= hipY; y++) {
+      let r = y - shoulderY, x0 = tx0, x1 = tx0 + tw - 1;
+      r === 0 && (x0++, x1--), fem && !coat && r > torsoH * 0.35 && r < torsoH * 0.75 && x0++;
+      for (let x = x0; x <= x1; x++) {
+        let rel = (x - tx0) / (tw - 1), sh = rel < 0.18 ? 150 : rel > 0.82 ? 98 : rel > 0.6 ? 114 : 130, slot = dress ? S.BOTTOM : topSlot;
+        y === hipY && !coat && !dress && (slot = S.BOTTOM), puffer && r % 3 === 2 && (sh -= 20), tset(x, y, slot, sh);
+      }
+    }
+    if (coat) {
+      if (coat === "jacket" && front) {
+        for (let y = shoulderY + 1; y <= hipY; y++)
+          tset(cx, y, S.TOP, 128), tset(cx + 1, y, S.TOP, 112);
+        tset(cx - 1, shoulderY, S.COAT, 150), tset(cx + 2, shoulderY, S.COAT, 150);
+      }
+      if (puffer) {
+        if (front) for (let y = shoulderY + 1; y <= hipY; y++) tset(cx + 1, y, S.COAT, 96);
+        for (let x = cx - 2; x <= cx + 2; x++) tset(x, shoulderY - 1, S.COAT, x === cx - 2 ? 146 : 124);
+      }
+      if (longCoat) {
+        if (front) for (let y of [shoulderY + 3, shoulderY + 6]) tset(cx + 1, y, S.DARK, 120);
+        for (let x = tx0; x < tx0 + tw; x++) tset(x, hipY - 2, S.COAT, 92);
+      }
+    } else {
+      if (front && (tpl.top === "tee" || tpl.top === "tank" || tpl.top === "jersey" || dress) && (tset(cx - 1, shoulderY, S.SKIN, 122), tset(cx, shoulderY, S.SKIN, 112), tpl.top === "tank" && tset(cx + 1, shoulderY, S.SKIN, 104)), tpl.top === "stripe" && !dress) {
+        for (let y = shoulderY + 1; y < hipY; y++) if ((y - shoulderY) % 3 === 1) for (let x = tx0; x < tx0 + tw; x++) sp.get(x + ls(y), y) === S.TOP && tset(x, y, S.TOP2, x === tx0 ? 146 : x >= tx0 + tw - 2 ? 100 : 124);
+      }
+      if (tpl.top === "jersey") {
+        for (let x = tx0 + 1; x < tx0 + tw - 1; x++) (!front || x < cx - 1 || x > cx) && tset(x, shoulderY, S.TOP2, 120);
+        (front ? ["XX", ".X", "X.", "XX"] : ["XXX", "..X", ".XX", "..X", "XXX"]).forEach((row, j) => [...row].forEach((c, i) => {
+          c === "X" && tset(cx - 1 + i, shoulderY + (kid ? 2 : 3) + j, S.TOP2, 140);
+        }));
+      }
+      if (tpl.top === "suit")
+        if (front) {
+          for (let j = 0; j < 4; j++) for (let x = cx - 1 + Math.floor(j / 2); x <= cx + 1 - Math.floor(j / 2); x++) tset(x, shoulderY + j, S.WHITE, 132);
+          for (let j = 1; j < 7; j++) tset(cx, shoulderY + j, S.TOP2, j === 1 ? 140 : 122);
+          tset(cx + 1, shoulderY + 1, S.TOP2, 110), tset(cx + 2, hipY - 3, S.DARK, 128), tset(cx + 2, hipY - 1, S.DARK, 128);
+        } else for (let y = shoulderY + 2; y < hipY; y++) tset(cx, y, S.TOP, 104);
+    }
+    if (tpl.bag === "back")
+      if (front) {
+        for (let y = shoulderY; y <= shoulderY + 3; y++)
+          tset(tx0 + 1, y, S.BAG, 104), tset(tx0 + tw - 2, y, S.BAG, 104);
+        for (let y = shoulderY + 1; y <= shoulderY + (kid ? 5 : 7); y++)
+          tset(tx0 - 1, y, S.BAG, 112), tset(tx0 - 2, y, S.BAG, 96);
+      } else {
+        let bh = kid ? 6 : 8;
+        for (let y = shoulderY + 1; y <= shoulderY + bh; y++) for (let x = tx0 + 1; x < tx0 + tw - 1; x++) tset(x, y, S.BAG, x === tx0 + 1 ? 146 : x >= tx0 + tw - 2 ? 100 : 124);
+        for (let x = tx0 + 2; x < tx0 + tw - 2; x++) tset(x, shoulderY + Math.round(bh * 0.6), S.BAG, 100);
+        tset(cx - 1, shoulderY, S.BAG, 110), tset(cx, shoulderY, S.BAG, 110);
+      }
+    if (tpl.bag === "shoulder") {
+      for (let j = 0; j < torsoH - 2; j++) tset(tx0 + 1 + Math.round(j * (tw - 3) / (torsoH - 3)), shoulderY + j, S.BAG, 100);
+      let bx = front ? tx0 + tw - 2 : tx0 - 2, by = hipY - 2;
+      for (let y = by; y < by + 4; y++) for (let x = bx; x < bx + 4; x++) sp.set(x, y, S.BAG, x === bx ? 146 : y === by + 3 ? 100 : 120);
+    }
+    if (tpl.scarf) {
+      for (let x = cx - 2; x <= cx + 2; x++)
+        tset(x, shoulderY - 1, S.SCARF, x === cx - 2 ? 146 : 124), tset(x, shoulderY, S.SCARF, x === cx - 2 ? 140 : 112);
+      if (front) for (let j = 1; j <= 4; j++)
+        tset(cx + 1, shoulderY + j, S.SCARF, 120), tset(cx + 2, shoulderY + j, S.SCARF, 100);
+      else for (let j = 1; j <= 3; j++) tset(cx - 2, shoulderY + j, S.SCARF, 112);
+    }
+    if (!tpl.scarf && !puffer) for (let x = cx - 1; x <= cx + 1; x++) sp.set(x + lean + (elder ? 1 : 0), shoulderY - 1, S.SKIN, x === cx + 1 ? 104 : 120);
+    headRows.forEach((row, r) => {
+      for (let c = 0; c < headW; c++) row[c] === "X" && sp.set(hx0 + c, headY + r, S.SKIN, c === 0 ? 144 : c >= headW - 2 ? 112 : 130);
+    });
+    let ey = headY + 3;
+    if (front && (sp.set(hx0 + headW - 2, ey, S.DARK, 128), sp.set(hx0 + headW - 4, ey, S.DARK, 128), sp.set(hx0 + headW, ey + 1, S.SKIN, 112), sp.set(hx0 + headW - 3, headY + headH - 2, S.SKIN, 92), sp.set(hx0 + 1, ey + 1, S.SKIN, 100), tpl.glasses)) {
+      for (let c = headW - 5; c < headW; c++) sp.set(hx0 + c, ey, S.DARK, 128);
+      sp.set(hx0 + headW - 4, ey, S.WHITE, 104), sp.set(hx0 + headW - 2, ey, S.WHITE, 104);
+    }
+    let H = (c, r, sh = 128) => sp.set(hx0 + c, headY + r, S.HAIR, sh), hair = tpl.hair;
     if (hair !== "bald") {
-      for (let x = hx0; x < hx0 + 4; x++) H(x, headY - 1, 140);
-      if (front)
-        H(hx0, headY, 120), H(hx0 + 1, headY, 128), H(hx0 + 2, headY, 120), H(hx0, headY + 1, 110);
-      else
-        for (let y = headY; y < headY + headH - 1; y++) for (let x = hx0; x < hx0 + 4; x++) H(x, y, x === hx0 ? 140 : 115);
-      if (hair === "long" || hair === "pony") {
-        let len = hair === "long" ? 4 : 3;
-        for (let y = headY; y < headY + len; y++) H(hx0 - 1, y + 1, 110);
-        if (!front) for (let y = headY + 3; y < headY + 3 + (hair === "long" ? 2 : 1); y++) for (let x = hx0; x < hx0 + 3; x++) H(x, y + 1, 105);
-        hair === "pony" && H(hx0 - 2, headY + 2, 100);
+      for (let c = 1; c < headW - 1; c++) H(c, -1, 146);
+      if (front) {
+        for (let c = 0; c < headW; c++) H(c, 0, c < 2 ? 142 : 126);
+        for (let c = 0; c < headW - 1; c++) H(c, 1, c < 2 ? 130 : 116);
+        for (let c = 0; c < 3; c++) H(c, 2, 112);
+        H(0, 3, 108), H(1, 3, 100), H(0, 4, 100);
+      } else
+        for (let r = 0; r < headH - 2; r++) for (let c = 0; c < headW; c++) headRows[r][c] === "X" && H(c, r, c === 0 ? 140 : c >= headW - 2 ? 104 : 122 - r * 2);
+      if (hair === "long")
+        if (front) for (let r = 1; r < headH + 3; r++)
+          H(-1, r, 110), H(0, r, 120), r < headH + 1 && H(1, r, r > 4 ? 112 : 120);
+        else for (let r = headH - 2; r < headH + 3; r++) for (let c = 0; c < headW - 1; c++) H(c, r, c === 0 ? 136 : 112);
+      if (hair === "pony") {
+        let pts = front ? [[-1, 1], [-2, 2], [-2, 3], [-2, 4], [-1, 5], [-2, 6]] : [[2, headH - 2], [3, headH - 2], [2, headH - 1], [3, headH - 1], [3, headH], [3, headH + 1]];
+        for (let [c, r] of pts)
+          H(c, r, 124), H(c + 1, r, 104);
       }
       if (hair === "afro") {
-        for (let x = hx0 - 1; x < hx0 + 5; x++) H(x, headY - 1, 130);
-        for (let x = hx0; x < hx0 + 4; x++) H(x, headY - 2, 140);
-        H(hx0 - 1, headY, 115), H(hx0 - 1, headY + 1, 110), front || H(hx0 + 4, headY, 100);
+        let ccx = headW / 2 - (front ? 0.5 : 0), ccy = 1.5;
+        for (let r = -4; r < (front ? 5 : headH - 1); r++)
+          for (let c = -2; c < headW + 2; c++) {
+            let dx = (c + 0.5 - ccx) / (headW / 2 + 1.6), dy = (r + 0.5 - ccy) / 4.6;
+            dx * dx + dy * dy > 1 || front && c >= 3 && r >= 2 || H(c, r, (c * 3 + r * 5) % 7 === 0 ? 108 : dx < -0.3 || dy < -0.5 ? 146 : 124);
+          }
       }
-      hair === "bun" && (H(hx0 + 1, headY - 2, 140), H(hx0 + 2, headY - 2, 120)), hair === "spiky" && (H(hx0, headY - 2, 140), H(hx0 + 2, headY - 2, 140));
-    } else if (!front)
-      for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY + 1, S.HAIR, 110);
-    front && (sp.set(hx0 + 3, headY + 1, S.DARK, 128), tpl.glasses && (sp.set(hx0 + 2, headY + 1, S.DARK, 128), sp.set(hx0 + 3, headY + 1, S.DARK, 128)));
-    let hat = tpl.hat;
+      if (hair === "bun") for (let [c, r] of [[1, -3], [2, -3], [0, -2], [1, -2], [2, -2], [3, -2]]) H(c + (front ? 0 : 1), r, r === -3 ? 146 : 124);
+      if (hair === "spiky") {
+        for (let c of [1, 3, 5]) H(c, -2, 140);
+        H(3, -3, 146), H(1, -3, 120);
+      }
+    } else if (front)
+      H(0, 3, 110), H(0, 4, 104), H(1, 3, 100);
+    else for (let c = 0; c < headW; c++)
+      H(c, 3, 108), H(c, 4, 100);
+    let hat = tpl.hat, HT = (c, r, sh = 128, slot = S.HAT) => sp.set(hx0 + c, headY + r, slot, sh);
     if (hat === "beanie") {
-      for (let x = hx0; x < hx0 + 4; x++)
-        sp.set(x, headY - 1, S.HAT, 140), sp.set(x, headY, S.HAT, 115);
-      sp.set(hx0 + 1, headY - 2, S.HAT, 150), sp.set(hx0 + 2, headY - 2, S.HAT, 130), sp.set(hx0 + 1, headY - 3, S.WHITE, 128);
+      for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : 0; c < headW - (r === -2 ? 1 : 0); c++) HT(c, r, r <= -1 ? 146 - c * 3 : 122 - c * 2);
+      for (let c = 0; c < headW; c++) HT(c, 2, c === 0 ? 128 : 104);
+      for (let [c, r] of [[2, -4], [3, -4], [4, -4], [2, -3], [3, -3], [4, -3]]) HT(c, r, r === -4 ? 150 : 120, S.WHITE);
     } else if (hat === "cap") {
-      for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY - 1, S.HAT, 140);
-      sp.set(hx0, headY, S.HAT, 120), front ? (sp.set(hx0 + 4, headY, S.HAT, 110), sp.set(hx0 + 3, headY, S.HAT, 110)) : sp.set(hx0 - 1, headY, S.HAT, 110);
+      for (let r = -2; r <= 0; r++) for (let c = r === -2 ? 1 : 0; c < headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 148 : 128 - c * 2);
+      if (front) for (let c = 3; c <= headW + 1; c++) HT(c, 1, c > headW - 1 ? 104 : 112);
+      else
+        HT(2, 0, 90, S.DARK), HT(3, 0, 90, S.DARK);
+      HT(3, -3, 150);
     } else if (hat === "fedora") {
-      for (let x = hx0 - 1; x < hx0 + 5; x++) sp.set(x, headY, S.HAT, 110);
-      for (let x = hx0; x < hx0 + 4; x++)
-        sp.set(x, headY - 1, S.HAT, 140), sp.set(x, headY - 2, S.HAT, 128);
+      for (let c = -2; c <= headW + 1; c++) HT(c, 0, c < 0 ? 120 : 104);
+      for (let r = -4; r <= -1; r++) for (let c = r === -4 ? 1 : 0; c < headW - (r === -4 ? 1 : 0); c++) HT(c, r, r === -4 ? 146 : c === 0 ? 140 : 122);
+      for (let c = 0; c < headW; c++) HT(c, -1, 100, S.DARK);
+      HT(3, -4, 110);
     } else if (hat === "hood") {
-      for (let x = hx0 - 1; x < hx0 + 4; x++) sp.set(x, headY - 1, S.TOP, 130);
-      if (sp.set(hx0 - 1, headY, S.TOP, 115), sp.set(hx0 - 1, headY + 1, S.TOP, 110), !front) for (let y = headY; y < headY + 3; y++) for (let x = hx0; x < hx0 + 4; x++) sp.set(x, y, S.TOP, 120);
+      let hs = coat ? S.COAT : S.TOP;
+      for (let c = 0; c < headW; c++) HT(c, -1, 140, hs);
+      for (let r = 0; r < headH + 1; r++) HT(-1, r, 124, hs);
+      if (front) {
+        for (let r = 0; r < headH; r++)
+          for (let c = 0; c < headW; c++)
+            headRows[r][c] === "X" && (c >= 3 && r >= 2 || HT(c, r, c === 0 ? 136 : 118, hs));
+        HT(headW - 1, 1, 104, hs), HT(headW, 1, 96, hs);
+      } else for (let r = 0; r < headH + 1; r++) for (let c = 0; c < headW; c++) HT(c, r, c === 0 ? 136 : c >= headW - 2 ? 104 : 120, hs);
     } else if (hat === "witch") {
-      for (let x = hx0 - 2; x < hx0 + 6; x++) sp.set(x, headY, S.HAT, 110);
-      for (let k = 0; k < 4; k++) for (let x = hx0 + k * 0.5; x < hx0 + 4 - k * 0.5; x++) sp.set(Math.round(x), headY - 1 - k, S.HAT, 130);
+      for (let c = -3; c <= headW + 2; c++) HT(c, 0, c < 0 ? 120 : 104);
+      for (let k = 0; k < 8; k++) {
+        let half = Math.max(0, 3 - k * 0.4), ccx = 3 - k * 0.35;
+        for (let c = Math.round(ccx - half); c <= Math.round(ccx + half); c++) HT(c, -1 - k, c < ccx ? 140 : 118);
+      }
+      for (let c = 0; c < headW; c++) HT(c, -1, 128, S.ITEM);
     } else if (hat === "helmet") {
-      for (let x = hx0 - 1; x < hx0 + 5; x++) sp.set(x, headY, S.HAT, 120);
-      for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY - 1, S.HAT, 140);
+      for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : -1; c <= headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 150 : c < 2 ? 140 : 118);
+      if (front) for (let c = headW - 1; c <= headW + 1; c++) HT(c, 2, 100);
+      HT(1, -1, 170, S.WHITE);
     }
-    if (elder && tpl.cane) for (let y = hipY - 1; y <= y0; y++) sp.set(tx0 + tw + 1, y, S.DARK, 110);
+    let hand = drawArm(!1, P.ra), carrying = P.ra === "down" || P.ra === "fwd" || P.ra === "back";
+    if (tpl.bag === "brief" && carrying) {
+      let [hx, hy] = hand;
+      sp.set(hx, hy + 2, S.BAG, 96), sp.set(hx + 1, hy + 2, S.BAG, 96);
+      for (let y = hy + 3; y < hy + 7; y++) for (let x = hx - 2; x < hx + 4; x++) sp.set(x, y, S.BAG, x === hx - 2 ? 140 : y === hy + 6 ? 96 : 120);
+      sp.set(hx, hy + 4, S.ITEM2, 150);
+    }
+    if (tpl.bag === "shopping" && carrying) {
+      let [hx, hy] = hand;
+      sp.set(hx - 1, hy + 2, S.BAG, 100), sp.set(hx + 2, hy + 2, S.BAG, 100);
+      for (let y = hy + 3; y < hy + 9; y++) for (let x = hx - 1; x < hx + 4; x++) sp.set(x, y, S.BAG, x === hx - 1 ? 146 : x === hx + 3 ? 100 : y === hy + 3 ? 136 : 122);
+    }
+    if (elder && tpl.cane) {
+      let [hx, hy] = hand;
+      sp.set(hx + 1, hy - 1, S.DARK, 120), sp.set(hx + 2, hy - 1, S.DARK, 110);
+      for (let y = hy; y <= y0; y++) sp.set(hx + 2, y, S.DARK, 110);
+    }
   }
   function paintLying(sp, tpl) {
-    let y = sp.h - 3;
-    for (let x = 1; x < sp.w - 1; x++) sp.set(x, y + 1, S.ITEM2, x % 2 ? 128 : 110);
-    for (let x = 2; x < 6; x++) sp.set(x, y, S.SKIN, 128);
-    for (let x = 6; x < 10; x++) sp.set(x, y, S.TOP, 128);
-    for (let x = 10; x < 14 && x < sp.w - 1; x++) sp.set(x, y, S.BOTTOM, 128);
-    sp.set(2, y - 1, S.HAIR, 128), sp.set(3, y - 1, S.HAIR, 128), sp.set(4, y - 1, S.SKIN, 128);
+    let g = sp.h - 1;
+    for (let x = 1; x < sp.w - 1; x++) for (let y2 = g - 2; y2 <= g; y2++) sp.set(x, y2, S.ITEM2, (x >> 2) % 2 ? 128 : 100);
+    let y = g - 6, legC = tpl.bottom === "pants" ? S.BOTTOM : S.SKIN;
+    sp.ellipse(5.5, y + 2, 3, 2.6, S.SKIN, 128);
+    for (let x = 3; x <= 6; x++) sp.set(x, y - 1, S.HAIR, 128);
+    sp.set(2, y, S.HAIR, 120), sp.set(2, y + 1, S.HAIR, 110), sp.set(2, y + 2, S.HAIR, 104), sp.set(6, y + 1, S.DARK, 128), sp.set(7, y + 1, S.DARK, 128), sp.set(8, y + 2, S.SKIN, 110);
+    for (let x = 9; x <= 17; x++) for (let r = 0; r < 4; r++) sp.set(x, y + r, S.TOP, r === 0 ? 146 : r === 3 ? 100 : 124);
+    for (let x = 18; x <= 21; x++) for (let r = 0; r < 4; r++) sp.set(x, y + r, S.BOTTOM, r === 0 ? 140 : 110);
+    for (let x = 22; x <= 28; x++)
+      sp.set(x, y + 1, legC, 136), sp.set(x, y + 2, legC, 116), sp.set(x, y + 3, legC, 100);
+    sp.set(29, y, S.SKIN, 128), sp.set(29, y + 1, S.SKIN, 116);
+    for (let x = 10; x <= 16; x++) sp.set(x, y + 3, S.SKIN, 112);
   }
-  var TEMPLATE_BUDGET = 190;
+  var TEMPLATE_BUDGET = 110;
   function personTemplate(atlas, tpl) {
     let key = "p:" + JSON.stringify(tpl), cached = atlas.frames.get(key);
     if (cached) return cached;
@@ -4072,205 +4616,405 @@ void main() {
       }
       if (best) return best.out;
     }
-    let out = { front: {}, back: {} }, w = 14, h = 22;
+    let out = { front: {}, back: {} };
     for (let anim in POSES)
       for (let view of ["front", "back"]) {
-        if (anim === "lie" && view === "back") {
-          out.back.lie = out.front.lie;
+        if (view === "back" && !BACK_POSES[anim]) {
+          out.back[anim] = out.front[anim];
           continue;
         }
         let arr = [];
         for (let f = 0; f < POSES[anim]; f++) {
-          let fw = anim === "lie" ? 16 : w;
-          arr.push(atlas.add(null, fw, h, (sp) => paintPerson(sp, tpl, anim, f, view), Math.floor(fw / 2), h - 1));
+          let fw = anim === "lie" ? 32 : PW, ext = anim === "sit" ? SIT_EXT : 0;
+          arr.push(atlas.add(null, fw, PH + ext, (sp) => {
+            paintPerson(sp, tpl, anim, f, view, ext), selOut(sp);
+          }, Math.floor(fw / 2), PH - 1));
         }
         out[view][anim] = arr;
       }
     return atlas.frames.set(key, out), atlas.templates.push({ tpl, out }), out;
   }
   var DOG_BREEDS = {
-    small: { len: 5, hgt: 3, leg: 2, head: 3, ears: "up", tail: "up" },
-    terrier: { len: 6, hgt: 3, leg: 2, head: 3, ears: "up", tail: "up" },
-    medium: { len: 7, hgt: 4, leg: 3, head: 3, ears: "flop", tail: "up" },
-    large: { len: 9, hgt: 4, leg: 4, head: 4, ears: "flop", tail: "out" },
-    dachshund: { len: 9, hgt: 3, leg: 1, head: 3, ears: "flop", tail: "out" },
-    poodle: { len: 6, hgt: 4, leg: 3, head: 3, ears: "flop", tail: "pom", fluffy: !0 },
-    husky: { len: 8, hgt: 4, leg: 3, head: 4, ears: "up", tail: "curl" }
+    small: { len: 10, hgt: 6, leg: 4, head: 6, ears: "up", tail: "up" },
+    terrier: { len: 12, hgt: 6, leg: 4, head: 6, ears: "up", tail: "up", wiry: !0 },
+    medium: { len: 14, hgt: 7, leg: 6, head: 6, ears: "flop", tail: "up" },
+    large: { len: 18, hgt: 8, leg: 8, head: 7, ears: "flop", tail: "out" },
+    dachshund: { len: 18, hgt: 6, leg: 2, head: 6, ears: "flop", tail: "out" },
+    poodle: { len: 12, hgt: 7, leg: 6, head: 6, ears: "flop", tail: "pom", fluffy: !0 },
+    husky: { len: 16, hgt: 8, leg: 6, head: 7, ears: "up", tail: "curl", mask: !0 }
+  }, dogFrameSize = (breed) => {
+    let B2 = DOG_BREEDS[breed];
+    return [B2.len + 16, B2.hgt + B2.leg + B2.head + 6];
   };
   function paintDog(sp, breed, anim, f) {
-    let B2 = DOG_BREEDS[breed], ground = sp.h - 1, x0 = 2, legY = ground - B2.leg + 1, bodyTop = legY - B2.hgt, sit = anim === "sit", sniff = anim === "sniff", run = anim === "run";
-    for (let y = bodyTop; y < legY; y++)
-      for (let x = x0; x < x0 + B2.len; x++) {
-        if (sit && x < x0 + 2 && y < bodyTop + 1) continue;
-        let sh = y === bodyTop ? 145 : y === legY - 1 ? 105 : 128, slot = y === legY - 1 && x > x0 + 1 && x < x0 + B2.len - 1 ? S.BODY_L : S.BODY;
-        sp.set(x, y + (sit && x < x0 + 3 ? 1 : 0), slot, sh), B2.fluffy && (x + y) % 2 === 0 && sp.set(x, y - 1, S.BODY, 150);
+    let B2 = DOG_BREEDS[breed], g = sp.h - 1, x0 = 5, legTop = g - B2.leg + 1, bodyTop = legTop - B2.hgt, sit = anim === "sit", sniff = anim === "sniff", run = anim === "run", walk = anim === "walk", xEnd = x0 + B2.len - 1, drop = (x) => sit ? Math.round((1 - (x - x0) / B2.len) * (B2.leg + 1)) : 0, legs = [
+      { x: x0 + 1, far: !0, ph: 0 },
+      { x: xEnd - 4, far: !0, ph: 1 },
+      { x: x0 + 3, far: !1, ph: 2 },
+      { x: xEnd - 2, far: !1, ph: 3 }
+    ], drawLeg = (L) => {
+      if (sit && L.x < x0 + B2.len / 2) return;
+      let dx = 0, lift = 0;
+      if (walk) {
+        let p = (f + L.ph) % 4;
+        dx = [1, 0, -1, 0][p], lift = p === 1 ? 1 : 0;
       }
-    let legsX = [x0, x0 + 1, x0 + B2.len - 2, x0 + B2.len - 1], phase = anim === "walk" || run ? f % 2 : -1;
-    if (legsX.forEach((lx, i) => {
-      if (sit && i < 2) return;
-      let off = phase >= 0 ? (i + phase) % 2 === 0 ? run ? 1 : 0 : run ? -1 : 0 : 0, lift = phase >= 0 && (i + phase) % 2 === 0 ? 1 : 0;
-      for (let y = legY; y < ground + 1 - lift; y++) sp.set(lx + off * (y === ground - lift ? 1 : 0), y, i % 2 ? S.BODY : S.BODY_D, i % 2 ? 128 : 100);
-    }), sit) for (let x = x0; x < x0 + 3; x++) sp.set(x, ground, S.BODY_D, 100);
-    let hx = x0 + B2.len - 1, hy = (sniff ? legY - 1 : bodyTop - B2.head + 2) + (sit ? -1 : 0);
+      if (run) {
+        let p = (f + (L.ph >> 1)) % 2;
+        dx = p ? 2 : -2, lift = p ? 1 : 0;
+      }
+      let sh = L.far ? 96 : 124, slot = L.far ? S.BODY_D : S.BODY;
+      for (let y = legTop - 1; y <= g - lift; y++) {
+        let t = (y - legTop) / Math.max(1, g - legTop), xx = L.x + Math.round(dx * Math.max(0, t));
+        sp.set(xx, y, slot, sh + 10), sp.set(xx + 1, y, slot, sh - 12);
+      }
+      sp.set(L.x + dx + 2, g - lift, slot, sh - 6);
+    };
+    legs.filter((L) => L.far).forEach(drawLeg);
+    for (let x = x0; x <= xEnd; x++)
+      for (let y = bodyTop; y < legTop; y++) {
+        let ry = (y - bodyTop) / Math.max(1, B2.hgt - 1);
+        if ((x === x0 || x === xEnd) && (y === bodyTop || y === legTop - 1)) continue;
+        let slot = ry > 0.72 && x > x0 + 2 && x < xEnd - 2 ? S.BODY_L : S.BODY;
+        B2.mask && ry > 0.6 && (slot = S.BODY_L);
+        let sh = ry < 0.2 ? 148 : ry > 0.8 ? 104 : 126;
+        (B2.fluffy || B2.wiry) && (sh += hash2i(x, y, 3) < 0.35 ? 16 : hash2i(x, y, 4) < 0.25 ? -14 : 0), sp.set(x, y + drop(x), slot, sh);
+      }
+    if (B2.fluffy) for (let x = x0 + 1; x < xEnd; x++) hash2i(x, 0, 5) < 0.6 && sp.set(x, bodyTop - 1 + drop(x), S.BODY, 150);
+    if (sit) for (let x = x0; x < x0 + 5; x++) sp.set(x, g, S.BODY_D, 100);
+    legs.filter((L) => !L.far).forEach(drawLeg);
+    let hw = B2.head + 1, hx = xEnd - 2, hy = (sniff ? legTop - 2 : bodyTop - B2.head + 3) - (sit ? 2 : 0);
     for (let y = hy; y < hy + B2.head; y++)
-      for (let x = hx; x < hx + 3; x++) sp.set(x, y, S.BODY, y === hy ? 145 : 128);
-    sp.set(hx + 3, hy + B2.head - 2, S.BODY, 120), sp.set(hx + 3, hy + B2.head - 2 - 0, S.NOSE, 128), sp.set(hx + 2, hy + 1, S.EYE, 128), B2.ears === "up" ? (sp.set(hx, hy - 1, S.BODY_D, 128), sp.set(hx + 1, hy - 1, S.BODY_D, 110)) : (sp.set(hx, hy, S.BODY_D, 100), sp.set(hx, hy + 1, S.BODY_D, 100)), sp.set(hx, hy + B2.head - 1, S.COLLAR, 128);
-    let ty = bodyTop, wag = f % 2;
-    B2.tail === "up" ? (sp.set(x0 - 1, ty - 1 - wag, S.BODY, 128), sp.set(x0 - 1, ty, S.BODY, 128)) : B2.tail === "out" ? (sp.set(x0 - 1, ty + wag, S.BODY, 128), sp.set(x0 - 2, ty + wag, S.BODY, 110)) : B2.tail === "pom" ? (sp.set(x0 - 1, ty - 1, S.BODY, 150), sp.set(x0 - 2, ty - 1 - wag, S.BODY, 150)) : (sp.set(x0 - 1, ty - 1, S.BODY_L, 128), sp.set(x0, ty - 2, S.BODY_L, 128), sp.set(x0 + 1, ty - 2 + wag, S.BODY_L, 128));
+      for (let x = hx; x < hx + hw; x++)
+        (x === hx || x === hx + hw - 1) && (y === hy || y === hy + B2.head - 1) || sp.set(x, y, B2.mask && y > hy + 2 ? S.BODY_L : S.BODY, y === hy ? 148 : x === hx + hw - 1 ? 110 : 130);
+    let sy = hy + B2.head - 3;
+    for (let x = hx + hw - 1; x < hx + hw + 2; x++)
+      sp.set(x, sy, S.BODY, 132), sp.set(x, sy + 1, S.BODY_L, 116);
+    if (sp.set(hx + hw + 2, sy, S.NOSE, 128), sp.set(hx + hw + 1, sy - 1, S.BODY, 120), sp.set(hx + hw - 2, hy + 2, S.EYE, 128), run && sp.set(hx + hw, sy + 2, S.COLLAR, 150), B2.ears === "up")
+      sp.set(hx + 1, hy - 1, S.BODY_D, 128), sp.set(hx + 2, hy - 1, S.BODY_D, 116), sp.set(hx + 1, hy - 2, S.BODY_D, 110);
+    else for (let y = hy + 1; y < hy + 5; y++)
+      sp.set(hx, y, S.BODY_D, 104), sp.set(hx + 1, y, S.BODY_D, 116);
+    for (let y = hy + B2.head - 2; y < Math.min(legTop, hy + B2.head + 2); y++)
+      sp.set(hx - 1, y, S.COLLAR, 128), sp.set(hx, y, S.COLLAR, 110);
+    let ty = bodyTop + drop(x0), wag = f % 2;
+    if (B2.tail === "up") for (let k = 0; k < 4; k++)
+      sp.set(x0 - 1 - (k >> 1) + (k === 3 ? wag : 0), ty - k, S.BODY, 134), sp.set(x0 - (k >> 1), ty - k, S.BODY, 116);
+    else if (B2.tail === "out") for (let k = 0; k < 5; k++) sp.set(x0 - 1 - k, ty + 1 + (k > 2 ? wag : 0), S.BODY, 128 - k * 4);
+    else if (B2.tail === "pom")
+      sp.set(x0 - 1, ty, S.BODY, 128), sp.set(x0 - 2, ty - 1, S.BODY, 128), sp.ellipse(x0 - 3, ty - 3 - wag, 1.6, 1.6, S.BODY, 150);
+    else for (let [dx, dy] of [[-1, 0], [-1, -1], [0, -2], [1, -3], [2, -3], [3, -2 + wag]])
+      sp.set(x0 + dx, ty + dy, S.BODY_L, 140), sp.set(x0 + dx, ty + dy + 1, S.BODY, 120);
   }
   function paintPigeon(sp, anim, f) {
     let g = sp.h - 1;
     if (anim === "fly") {
-      let up = f % 2 === 0;
-      for (let x = 2; x < 6; x++) sp.set(x, g - 3, S.BODY, 128);
-      sp.set(6, g - 4, S.BODY_D, 128), sp.set(7, g - 4, S.BEAK, 128), sp.set(1, g - 3, S.BODY_D, 110), up ? (sp.set(3, g - 4, S.BODY_L, 140), sp.set(3, g - 5, S.BODY_L, 150), sp.set(4, g - 6, S.BODY_L, 150), sp.set(2, g - 6, S.BODY_L, 150)) : (sp.set(3, g - 2, S.BODY_L, 120), sp.set(3, g - 1, S.BODY_L, 110), sp.set(4, g - 1, S.BODY_D, 110));
+      let up = f % 2 === 0, by2 = g - 7;
+      sp.ellipse(8.5, by2, 5, 2.2, S.BODY, 128);
+      for (let x = 5; x < 12; x++) sp.set(x, by2 + 2, S.BODY_L, 112);
+      for (let [x, y] of [[3, by2 - 1], [2, by2 - 1], [2, by2], [1, by2], [2, by2 + 1], [3, by2 + 1]]) sp.set(x, y, S.BODY_D, 110);
+      if (sp.ellipse(14, by2 - 1, 1.8, 1.6, S.BODY_D, 124), sp.set(12, by2, S.ACCENT, 128), sp.set(13, by2, S.ACCENT, 112), sp.set(15, by2 - 2, S.EYE, 128), sp.set(16, by2 - 1, S.BEAK, 128), sp.set(17, by2 - 1, S.BEAK, 110), up) {
+        for (let k = 0; k < 6; k++) {
+          let x = 8 - (k >> 1);
+          sp.set(x - 1, by2 - 2 - k, S.BODY_L, 150 - k * 4), sp.set(x, by2 - 2 - k, S.BODY_L, 136), sp.set(x + 1, by2 - 2 - k, S.BODY_D, 116);
+        }
+        sp.set(4, by2 - 8, S.BODY_D, 110), sp.set(5, by2 - 8, S.BODY_D, 110);
+      } else
+        for (let k = 0; k < 5; k++) {
+          let x = 8 - (k >> 1);
+          sp.set(x - 1, by2 + 1 + k, S.BODY_L, 124), sp.set(x, by2 + 1 + k, S.BODY_D, 110);
+        }
       return;
     }
-    let peck = anim === "peck" && f === 1, bob = anim === "walk" && f === 1 ? 1 : 0;
-    for (let x = 1; x < 5; x++) sp.set(x, g - 2, S.BODY, 128);
-    for (let x = 2; x < 5; x++) sp.set(x, g - 3, S.BODY_L, 140);
-    sp.set(0, g - 3, S.BODY_D, 110), sp.set(1, g - 3, S.BODY_D, 120);
-    let hx = 4 + bob, hy = peck ? g - 2 : g - 4;
-    sp.set(4, g - 3, S.ACCENT, 128), sp.set(hx, hy, S.BODY_D, 128), sp.set(hx + 1, hy, S.BODY_D, 128), sp.set(hx + 2, hy + (peck ? 1 : 0), S.BEAK, 128), sp.set(hx + 1, hy, S.EYE, 128), sp.set(2, g - 1, S.BEAK, 110), sp.set(3 + (anim === "walk" ? f % 2 : 0), g - 1, S.BEAK, 110);
+    let peck = anim === "peck" && f === 1, bob = anim === "walk" && f === 1 ? 1 : 0, by = g - 4;
+    sp.ellipse(6.5, by, 4.6, 2.6, S.BODY, 128);
+    for (let x = 4; x <= 9; x++)
+      sp.set(x, by - 1, S.BODY_L, 140), sp.set(x, by, S.BODY_L, 126);
+    sp.set(6, by, S.BODY_D, 104), sp.set(8, by, S.BODY_D, 104), sp.set(7, by - 1, S.BODY_D, 112);
+    for (let x = 4; x <= 9; x++) sp.set(x, by + 2, S.BODY_L, 104);
+    sp.set(1, by - 1, S.BODY_D, 120), sp.set(2, by - 1, S.BODY_D, 120), sp.set(1, by, S.BODY_D, 104), sp.set(0, by - 1, S.BODY_D, 100);
+    let hx = 10 + bob, hy = peck ? by + 1 : by - 3;
+    sp.set(10, by - 1, S.ACCENT, 136), sp.set(10, by - 2, S.ACCENT, 120), sp.set(11, by - 1, S.ACCENT, 112), sp.ellipse(hx + 1.5, hy, 1.9, 1.7, S.BODY_D, 126), sp.set(hx + 2, hy - 1, S.EYE, 128), sp.set(hx + 3, hy + (peck ? 1 : 0), S.BEAK, 128), sp.set(hx + 4, hy + (peck ? 1 : 0), S.BEAK, 108), sp.set(hx + 3, hy - 1 + (peck ? 1 : 0), S.BODY_L, 150);
+    let st = anim === "walk" ? f % 2 : 0;
+    sp.set(5, by + 3, S.BEAK, 110), sp.set(5 - st, by + 4, S.BEAK, 104), sp.set(6 - st, by + 4, S.BEAK, 96), sp.set(8, by + 3, S.BEAK, 120), sp.set(8 + st, by + 4, S.BEAK, 110), sp.set(9 + st, by + 4, S.BEAK, 100);
   }
   function paintCat(sp, anim, f) {
     let g = sp.h - 1;
     if (anim === "sit") {
-      for (let y = g - 4; y <= g; y++) for (let x = 1; x < 4; x++) sp.set(x, y, S.BODY, x === 1 ? 140 : 120);
-      sp.set(3, g - 5, S.BODY, 128), sp.set(4, g - 5, S.BODY, 128), sp.set(3, g - 6, S.BODY_D, 128), sp.set(4, g - 6, S.BODY_D, 128), sp.set(4, g - 5, S.EYE, 128), sp.set(0, g, S.BODY, 120), sp.set(0, g - 1 - f % 2, S.BODY, 120);
+      sp.ellipse(5, g - 4, 3.6, 4.2, S.BODY, 124), sp.ellipse(5.5, g - 1.5, 3.2, 1.8, S.BODY, 116);
+      for (let y = g - 7; y <= g - 2; y++) sp.set(2, y, S.BODY, 146);
+      sp.ellipse(7, g - 10, 2.6, 2.3, S.BODY, 130), sp.set(5, g - 13, S.BODY_D, 128), sp.set(5, g - 12, S.BODY, 128), sp.set(6, g - 12, S.BODY, 120), sp.set(8, g - 13, S.BODY_D, 128), sp.set(8, g - 12, S.BODY, 128), sp.set(8, g - 10, S.EYE, 128), sp.set(6, g - 10, S.EYE, 110), sp.set(9, g - 9, S.BODY_L, 140);
+      for (let y = g - 3; y <= g; y++) sp.set(7, y, S.BODY_L, 122);
+      sp.set(8, g, S.BODY_L, 116);
+      let w = f % 2;
+      for (let x = 1; x <= 6; x++) sp.set(x, g, S.BODY_D, 104);
+      sp.set(0, g - 1 - w, S.BODY_D, 110), sp.set(1, g - 1, S.BODY_D, 110), sp.set(0, g - 2 - w, S.BODY_D, 104);
       return;
     }
-    for (let x = 1; x < 6; x++)
-      sp.set(x, g - 2, S.BODY, 128), sp.set(x, g - 3, S.BODY, 145);
-    sp.set(6, g - 3, S.BODY, 128), sp.set(6, g - 4, S.BODY, 128), sp.set(7, g - 4, S.BODY, 128), sp.set(6, g - 5, S.BODY_D, 128), sp.set(7, g - 5, S.BODY_D, 128), sp.set(7, g - 4, S.EYE, 128);
-    let ph = f % 2;
-    sp.set(1 + ph, g - 1, S.BODY_D, 110), sp.set(2 - ph, g, S.BODY_D, 110), sp.set(5 - ph, g - 1, S.BODY_D, 110), sp.set(5 + ph, g, S.BODY_D, 110), sp.set(1, g, S.BODY_D, 100), sp.set(5, g, S.BODY_D, 100), sp.set(0, g - 4, S.BODY, 120), sp.set(0, g - 5, S.BODY, 120);
+    let ph = f % 2, by = g - 6;
+    sp.ellipse(8, by, 6, 2.6, S.BODY, 126);
+    for (let x = 4; x <= 12; x++) sp.set(x, by - 2, S.BODY, 146);
+    for (let x = 5; x <= 11; x++) sp.set(x, by + 2, S.BODY_L, 112);
+    [[4, -1], [6, 1], [10, 1], [12, -1]].forEach(([lx, s], i) => {
+      let off = ph ? s : -s;
+      for (let y = by + 2; y <= g; y++) sp.set(lx + (y === g ? off : 0), y, i % 2 ? S.BODY : S.BODY_D, i % 2 ? 124 : 100);
+    }), sp.ellipse(14, by - 2, 2.6, 2.2, S.BODY, 130), sp.set(12, by - 5, S.BODY_D, 128), sp.set(12, by - 4, S.BODY, 128), sp.set(15, by - 5, S.BODY_D, 128), sp.set(15, by - 4, S.BODY, 128), sp.set(15, by - 2, S.EYE, 128), sp.set(13, by - 2, S.EYE, 110), sp.set(16, by - 1, S.BODY_L, 140);
+    for (let k = 0; k < 6; k++) sp.set(2 - (k > 3 ? k - 3 : 0), by - 1 - k, S.BODY, 122 - k * 2);
+    sp.set(0, by - 6, S.BODY_D, 110);
   }
   function paintSquirrel(sp, anim, f) {
-    let g = sp.h - 1, hop = anim === "run" && f === 1 ? 1 : 0;
-    for (let x = 2; x < 5; x++) sp.set(x, g - 1 - hop, S.BODY, 128);
-    sp.set(3, g - 2 - hop, S.BODY, 140), sp.set(4, g - 2 - hop, S.BODY, 128), sp.set(5, g - 2 - hop, S.BODY, 128), sp.set(5, g - 3 - hop, S.BODY_D, 128), sp.set(5, g - 2 - hop, S.EYE, 128), sp.set(1, g - 2 - hop, S.BODY_L, 140), sp.set(0, g - 3 - hop, S.BODY_L, 150), sp.set(1, g - 3 - hop, S.BODY_L, 150), sp.set(1, g - 4 - hop, S.BODY_L, 150), sp.set(2, g - 4 - hop, S.BODY_L, 140), sp.set(2, g, S.BODY_D, 100), sp.set(4, g, S.BODY_D, 100), anim === "stand" && (sp.set(4, g - 3, S.BODY, 128), sp.set(4, g - 4, S.BODY, 128));
+    let g = sp.h - 1;
+    if (anim === "stand") {
+      sp.ellipse(7, g - 4, 2.4, 3.6, S.BODY, 126), sp.ellipse(8, g - 9, 2, 1.8, S.BODY, 132), sp.set(7, g - 11, S.BODY_D, 120), sp.set(9, g - 9, S.EYE, 128), sp.set(9, g - 6, S.BODY_L, 130), sp.set(9, g - 7, S.BODY_L, 130);
+      for (let y = g - 4; y <= g - 1; y++) sp.set(8, y, S.BODY_L, 112);
+      for (let k = 0; k < 9; k++) {
+        let x = 4 - Math.round(Math.sin(k / 8 * Math.PI) * 2.5), y = g - 1 - k;
+        sp.set(x, y, S.BODY_L, 146), sp.set(x - 1, y, S.BODY_L, 126), sp.set(x + 1, y, S.BODY_D, 112);
+      }
+      sp.set(7, g, S.BODY_D, 100), sp.set(8, g, S.BODY_D, 100);
+      return;
+    }
+    let hop = anim === "run" && f === 1 ? 2 : 0, by = g - 3 - hop;
+    sp.ellipse(7, by, 3.4, 2, S.BODY, 126), sp.ellipse(10.5, by - 1.5, 1.9, 1.7, S.BODY, 132), sp.set(10, by - 3, S.BODY_D, 120), sp.set(11, by - 2, S.EYE, 128);
+    for (let k = 0; k < 7; k++) {
+      let x = 3 - Math.round(Math.sin(k / 6 * Math.PI) * 2), y = by - k;
+      sp.set(x, y, S.BODY_L, 146), sp.set(x + 1, y, S.BODY_L, 124);
+    }
+    sp.set(5 - f, by + 2, S.BODY_D, 104), sp.set(5 - f, by + 3, S.BODY_D, 96), sp.set(9 + f, by + 2, S.BODY_D, 104), sp.set(9 + f, by + 3, S.BODY_D, 96);
   }
   function paintDuck(sp, anim, f) {
+    let g = sp.h - 1, by = g - 3;
+    sp.ellipse(7, by, 5, 2.4, S.BODY, 126);
+    for (let x = 4; x <= 10; x++) sp.set(x, by - 2, S.BODY_L, 142);
+    for (let x = 5; x <= 9; x++) sp.set(x, by - 1, S.BODY_L, 126);
+    if (sp.set(1, by - 2, S.BODY_D, 120), sp.set(2, by - 2, S.BODY_D, 110), sp.set(1, by - 1, S.BODY_D, 104), sp.set(11, by - 2, S.ACCENT, 120), sp.set(11, by - 3, S.ACCENT, 128), sp.ellipse(12.5, by - 5, 2, 1.8, S.ACCENT, 130), sp.set(13, by - 6, S.EYE, 128), sp.set(14, by - 5, S.BEAK, 128), sp.set(15, by - 5, S.BEAK, 116), sp.set(14, by - 4, S.BEAK, 104), anim === "swim") for (let x = 0; x < sp.w; x++) (x + f * 2) % 5 < 2 && sp.set(x, g, S.WHITE, 120);
+  }
+  function paintRat(sp, f) {
     let g = sp.h - 1;
-    for (let x = 1; x < 5; x++) sp.set(x, g - 1, S.BODY, x === 1 ? 110 : 128);
-    for (let x = 2; x < 5; x++) sp.set(x, g - 2, S.BODY_L, 140);
-    if (sp.set(0, g - 2, S.BODY_D, 120), sp.set(4, g - 3 + (f % 2 && anim === "swim", 0), S.ACCENT, 128), sp.set(5, g - 3, S.ACCENT, 128), sp.set(5, g - 4, S.ACCENT, 128), sp.set(6, g - 3, S.BEAK, 128), sp.set(5, g - 4, S.EYE, 128), anim === "swim") for (let x = 0; x < 6; x++) (x + f) % 3 === 0 && sp.set(x, g, S.WHITE, 120);
+    sp.ellipse(6.5, g - 2.5, 3.6, 1.8, S.BODY, 124);
+    for (let x = 4; x <= 8; x++) sp.set(x, g - 4, S.BODY, 140);
+    sp.ellipse(10.5, g - 2.5, 1.6, 1.3, S.BODY, 130), sp.set(12, g - 2, S.BODY_L, 128), sp.set(10, g - 4, S.BODY_L, 120), sp.set(11, g - 3, S.EYE, 128);
+    for (let k = 0; k < 4; k++) sp.set(2 - k, g - 2 + (k > 1 ? f : 0), S.BODY_L, 110);
+    sp.set(4 + f, g, S.BODY_D, 100), sp.set(8 - f, g, S.BODY_D, 100);
   }
   function buildPropSprites(atlas) {
     let A = atlas;
-    A.add("dish", 8, 9, (sp) => {
-      for (let y = 1; y < 6; y++) for (let x = 1 + Math.abs(3 - y) * 0; x < 6; x++) (x - 3.5) ** 2 / 9 + (y - 3.5) ** 2 / 6 <= 1 && sp.set(x, y, x < 3 ? S.C1 : S.C2, 128);
-      sp.set(6, 3, S.C3, 128), sp.set(7, 3, S.C3, 128);
-      for (let y = 6; y < 9; y++) sp.set(4, y, S.C3, 110);
-    }), A.add("antenna", 9, 18, (sp) => {
-      for (let y = 2; y < 18; y++) sp.set(4, y, S.C3, 120);
-      for (let k = 0; k < 4; k++) for (let x = 1 + k; x < 8 - k; x++) sp.set(x, 2 + k * 3, S.C3, 140);
-    }), A.add("deckchair", 9, 6, (sp) => {
-      for (let x = 0; x < 7; x++) sp.set(x, 3, S.C5, x % 2 ? 128 : 150);
-      for (let y = 0; y < 3; y++) sp.set(6 + Math.floor(y / 2), y, S.C5, 140);
-      sp.set(0, 4, S.C3, 110), sp.set(0, 5, S.C3, 110), sp.set(5, 4, S.C3, 110), sp.set(5, 5, S.C3, 110);
-    }), A.add("bush", 12, 9, (sp) => {
-      for (let y = 0; y < 9; y++) for (let x = 0; x < 12; x++) {
-        let d = ((x - 5.5) / 6) ** 2 + ((y - 5) / 4.5) ** 2;
-        d <= 1 && hash2i(x, y, 9) > 0.08 && sp.set(x, y, d < 0.3 && x < 6 || x + y < 10 ? S.C8 : x > 7 ? S.C10 : S.C9, 128);
+    A.add("dish", 16, 18, (sp) => {
+      for (let y = 1; y < 12; y++) for (let x = 1; x < 13; x++) {
+        let d = ((x - 6.5) / 5.6) ** 2 + ((y - 6) / 4.8) ** 2;
+        d <= 1 && sp.set(x, y, x + y < 11 ? S.C1 : S.C4, d > 0.7 ? 110 : 140 - Math.round(d * 30));
       }
-    }), A.add("grill", 6, 7, (sp) => {
-      for (let x = 0; x < 6; x++)
-        sp.set(x, 1, S.C4, 128), sp.set(x, 2, S.C4, 110);
-      for (let x = 1; x < 5; x++) sp.set(x, 0, S.C4, 140);
-      sp.set(1, 3, S.C4, 100), sp.set(4, 3, S.C4, 100), sp.set(1, 4, S.C3, 100), sp.set(4, 4, S.C3, 100), sp.set(0, 6, S.C3, 100), sp.set(5, 6, S.C3, 100), sp.set(1, 5, S.C3, 100), sp.set(4, 5, S.C3, 100);
-    }), A.add("laundry", 26, 16, (sp) => {
-      for (let y = 2; y < 16; y++)
-        sp.set(0, y, S.C3, 110), sp.set(25, y, S.C3, 110);
-      for (let x = 0; x < 26; x++) sp.set(x, 2 + Math.round(Math.sin(x / 25 * Math.PI) * 2), S.C4, 128);
-      let cols = [S.C5, S.C6, S.C7, S.C1, S.C5];
+      for (let k = 0; k < 4; k++) sp.set(9 + k, 6 - (k >> 1), S.C3, 120);
+      sp.set(13, 4, S.C3, 140), sp.set(14, 4, S.C3, 128), sp.set(13, 5, S.C3, 110);
+      for (let y = 11; y < 18; y++)
+        sp.set(7, y, S.C3, 124), sp.set(8, y, S.C3, 96);
+      sp.set(6, 17, S.C3, 110), sp.set(9, 17, S.C3, 100);
+    }), A.add("antenna", 18, 36, (sp) => {
+      for (let y = 3; y < 36; y++)
+        sp.set(9, y, S.C3, 124), sp.set(10, y, S.C3, 96);
       for (let k = 0; k < 5; k++) {
-        let x0 = 2 + k * 5, sag = Math.round(Math.sin((x0 + 1) / 25 * Math.PI) * 2), hgt = 4 + k % 2 * 2;
-        for (let y = 3 + sag; y < 3 + sag + hgt; y++) for (let x = x0; x < x0 + 3; x++) sp.set(x, y, cols[k], x === x0 ? 140 : 120);
+        let half = 7 - k, yy = 4 + k * 5;
+        for (let x = 9 - half; x <= 10 + half; x++) sp.set(x, yy, S.C3, 140 - k * 4);
+        sp.set(9 - half, yy + 1, S.C3, 110), sp.set(10 + half, yy + 1, S.C3, 110);
       }
-    }), A.add("statue", 12, 24, (sp) => {
-      let c = S.C9;
-      for (let y = 8; y < 24; y++) for (let x = 3; x < 8; x++) sp.set(x, y, c, x === 3 ? 150 : x === 7 ? 100 : 128);
-      for (let y = 20; y < 24; y++) for (let x = 2; x < 9; x++) sp.set(x, y, c, 110);
-      for (let y = 4; y < 8; y++) for (let x = 4; x < 7; x++) sp.set(x, y, c, 140);
-      for (let y = 0; y < 8; y++) sp.set(8, y + 1, c, 120);
-      sp.set(8, 0, S.C10, 150), sp.set(9, 0, S.C10, 128);
-    }), A.add("xmas", 40, 76, (sp) => paintTree(sp, TREE_SPECIES.xmas, 77), 20, 75), A.add("snowman", 9, 13, (sp) => {
-      sp.ellipse(4.5, 10, 4, 3, S.C1, 128), sp.ellipse(4.5, 5.5, 3, 2.5, S.C1, 140), sp.ellipse(4.5, 2, 2, 2, S.C1, 150), sp.set(5, 2, S.C3, 128), sp.set(6, 2, S.C7, 128), sp.set(4, 5, S.C3, 128), sp.set(4, 7, S.C3, 128), sp.set(1, 5, S.C4, 110), sp.set(0, 4, S.C4, 110), sp.set(8, 5, S.C4, 110);
-      for (let x = 3; x < 7; x++) sp.set(x, 3, S.C5, 128);
-      for (let x = 3; x < 6; x++) sp.set(x, 0, S.C3, 128);
-    }, 4, 12), A.add("umbrella", 11, 6, (sp) => {
-      for (let y = 0; y < 4; y++) for (let x = 5 - (y + 2); x <= 5 + (y + 2); x++) x >= 0 && x < 11 && sp.set(x, y, S.ITEM, x < 5 ? 150 : 115);
-      for (let x = 0; x < 11; x += 2) sp.set(x, 3, S.ITEM, 90);
-      sp.set(5, 4, S.DARK, 128), sp.set(5, 5, S.DARK, 128);
-    }, 5, 5), A.add("ball", 2, 2, (sp) => {
-      sp.set(0, 0, S.C1, 150), sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 100);
-    }, 1, 1), A.add("snowball", 2, 2, (sp) => {
-      sp.set(0, 0, S.C2, 150), sp.set(1, 0, S.C2, 128), sp.set(0, 1, S.C2, 128), sp.set(1, 1, S.C2, 110);
-    }, 1, 1), A.add("frisbee", 3, 1, (sp) => {
-      sp.set(0, 0, S.C6, 128), sp.set(1, 0, S.C6, 150), sp.set(2, 0, S.C6, 110);
-    }, 1, 0);
-    for (let [n, w, h] of [["puff1", 5, 4], ["puff2", 8, 6], ["puff3", 11, 8], ["puff4", 14, 10]])
+      sp.set(9, 2, S.C2, 150), sp.set(10, 2, S.C2, 128);
+    }), A.add("deckchair", 18, 12, (sp) => {
+      for (let x = 1; x < 13; x++) {
+        let y = 7 - Math.floor(x / 6);
+        sp.set(x, y, S.C5, (x >> 1) % 2 ? 128 : 150), sp.set(x, y + 1, S.C5, 104);
+      }
+      for (let k = 0; k < 6; k++)
+        sp.set(13 + (k >> 1), 6 - k, S.C5, 140), sp.set(14 + (k >> 1), 6 - k, S.C5, 112);
+      for (let k = 0; k < 4; k++)
+        sp.set(2, 8 + k, S.C3, 110), sp.set(11, 8 + k, S.C3, 110), sp.set(15, 7 + k, S.C3, 100);
+    }), A.add("bush", 24, 18, (sp) => {
+      let blobs = [[7, 11, 6], [15, 10, 7], [11, 7, 6], [19, 12, 4.5], [4, 13, 4]];
+      for (let [bx, by, r] of blobs)
+        for (let y = 0; y < 18; y++)
+          for (let x = 0; x < 24; x++) {
+            let d = ((x + 0.5 - bx) / r) ** 2 + ((y + 0.5 - by) / (r * 0.85)) ** 2;
+            if (d > 1 || d > 0.7 && hash2i(x >> 1, y >> 1, 9) < 0.4) continue;
+            let l = -(x - 12) / 12 * 0.5 - (y - 9) / 9 * 0.7 + (hash2i(x >> 1, y >> 1, 4) - 0.5) * 0.6;
+            sp.set(x, y, l > 0.3 ? S.C8 : l > -0.25 ? S.C9 : S.C10, 128);
+          }
+      for (let x = 0; x < 24; x++) for (let y = 17; y >= 10; y--) sp.get(x, y) >= 0 && (sp.get(x, y + 1) < 0 || sp.get(x, y + 2) < 0) && sp.set(x, y, S.C10, 110);
+    }), A.add("grill", 12, 14, (sp) => {
+      for (let y = 1; y < 9; y++) for (let x = 0; x < 12; x++)
+        ((x + 0.5 - 6) / 5.6) ** 2 + ((y + 0.5 - 5) / 4) ** 2 <= 1 && sp.set(x, y, S.C3, x < 4 ? 150 : x > 8 ? 100 : 124);
+      for (let x = 1; x < 11; x++) sp.set(x, 5, S.C4, 120);
+      sp.set(5, 0, S.C4, 140), sp.set(6, 0, S.C4, 128);
+      for (let k = 0; k < 5; k++)
+        sp.set(3 - (k >> 1), 9 + k, S.C4, 110), sp.set(8 + (k >> 1), 9 + k, S.C4, 100), sp.set(6, 9 + k, S.C4, 96);
+    }), A.add("laundry", 52, 32, (sp) => {
+      for (let y = 3; y < 32; y++)
+        sp.set(0, y, S.C3, 128), sp.set(1, y, S.C3, 100), sp.set(50, y, S.C3, 128), sp.set(51, y, S.C3, 100);
+      let sag = (x2) => 4 + Math.round(Math.sin(x2 / 51 * Math.PI) * 4);
+      for (let x2 = 1; x2 < 51; x2++) sp.set(x2, sag(x2), S.C4, 128);
+      let cols = [S.C5, S.C6, S.C7, S.C1, S.C2], widths = [8, 6, 7, 3, 9], heights = [10, 11, 13, 5, 14], x = 4;
+      for (let k = 0; k < 5; k++) {
+        let c = cols[k], wdt = widths[k], hgt = heights[k], top = sag(x + wdt / 2) + 1;
+        for (let yy = 0; yy < hgt; yy++)
+          for (let xx = 0; xx < wdt; xx++)
+            k === 0 && yy > 3 && (xx < 2 || xx > wdt - 3) || k === 2 && yy < 4 && (xx < 1 || xx > wdt - 2) || sp.set(x + xx, top + yy, c, xx === 0 ? 146 : xx === wdt - 1 ? 104 : (xx + yy) % 5 === 0 ? 116 : 128);
+        sp.set(x + 1, top - 1, S.C4, 150), sp.set(x + wdt - 2, top - 1, S.C4, 150), x += wdt + 2;
+      }
+    }), A.add("statue", 32, 40, (sp) => {
+      let c = S.C9, shadeAt = (x, y, cx, cy) => x + y < cx + cy - 4 ? 150 : x > cx + 3 || y > cy + 2 ? 100 : 126;
+      for (let y = 20; y < 32; y++) for (let x = 5; x < 26; x++)
+        ((x + 0.5 - 15) / 9.5) ** 2 + ((y + 0.5 - 26) / 4.6) ** 2 <= 1 && sp.set(x, y, c, shadeAt(x, y, 15, 26));
+      for (let k = 0; k < 10; k++) for (let w = 0; w < 4; w++) sp.set(21 + Math.round(k * 0.45) + w, 24 - k, c, w === 0 ? 146 : w === 3 ? 100 : 126);
+      for (let y = 12; y < 18; y++) for (let x = 25; x < 31; x++) ((x + 0.5 - 27.5) / 3.2) ** 2 + ((y + 0.5 - 14.5) / 2.4) ** 2 <= 1 && sp.set(x, y, c, x < 27 ? 144 : 118);
+      sp.set(26, 11, c, 140), sp.set(27, 10, c, 132), sp.set(30, 16, c, 104);
+      for (let k = 0; k < 6; k++) sp.set(22 + (k >> 1), 22 - k, c, 92);
+      for (let y = 30; y < 38; y++)
+        sp.set(8, y, c, 120), sp.set(9, y, c, 100), sp.set(11, y, c, 110), sp.set(12, y, c, 96), sp.set(21, y, c, 120), sp.set(22, y, c, 100);
+      for (let k = 0; k < 5; k++)
+        sp.set(23 + (k >> 1), 30 + k - (k > 2 ? 2 : 0), c, 126), sp.set(24 + (k >> 1), 30 + k - (k > 2 ? 2 : 0), c, 104);
+      for (let k = 0; k < 8; k++)
+        sp.set(5 - (k >> 2), 23 + k, c, 112), sp.set(4 - (k >> 2), 23 + k, c, 130);
+      for (let y = 13; y < 22; y++) for (let x = 13; x < 18; x++) sp.set(x, y, c, x === 13 ? 148 : x === 17 ? 100 : 126);
+      for (let y = 21; y < 25; y++)
+        sp.set(12, y, c, 120), sp.set(13, y, c, 110);
+      sp.ellipse(15.5, 10, 2.2, 2.4, c, 136);
+      for (let x = 12; x < 20; x++) sp.set(x, 8, c, 116);
+      for (let x = 13; x < 18; x++) sp.set(x, 7, c, 132);
+      for (let k = 0; k < 7; k++)
+        sp.set(17 + k, 15 - (k >> 1), c, 136), sp.set(17 + k, 16 - (k >> 1), c, 108);
+      sp.set(24, 12, S.C10, 150);
+      for (let x = 14; x < 18; x++) sp.set(x, 18, S.C10, 128);
+      for (let x = 3; x < 29; x++)
+        sp.set(x, 38, c, 116), sp.set(x, 39, c, 94);
+    });
+    let X = TREE_SPECIES.xmas;
+    A.add("xmas", X.w, X.h, (sp) => paintTree(sp, X, 77), X.w / 2, X.h - 1), A.add("snowman", 18, 26, (sp) => {
+      let balls = [[9, 20.5, 7, 5.5], [9, 11.5, 5.2, 4.4], [9, 4.8, 3.6, 3.4]];
+      for (let [bx, by, rx, ry] of balls)
+        for (let y = Math.floor(by - ry); y <= Math.ceil(by + ry); y++)
+          for (let x = Math.floor(bx - rx); x <= Math.ceil(bx + rx); x++) {
+            let dx = (x + 0.5 - bx) / rx, dy = (y + 0.5 - by) / ry;
+            dx * dx + dy * dy > 1 || sp.set(x, y, S.C1, dx + dy * 0.6 < -0.4 ? 150 : dx > 0.45 || dy > 0.6 ? 104 : 128);
+          }
+      for (let x = 6; x <= 12; x++) sp.set(x, 2, S.C3, 110);
+      for (let y = -1; y < 2; y++) for (let x = 7; x <= 11; x++) sp.set(x, y, S.C3, x === 7 ? 140 : 120);
+      sp.set(8, 4, S.C3, 128), sp.set(10, 4, S.C3, 128), sp.set(11, 5, S.C7, 140), sp.set(12, 5, S.C7, 120), sp.set(13, 6, S.C7, 110);
+      for (let x = 6; x <= 12; x++) sp.set(x, 8, S.C5, x === 6 ? 140 : 120);
+      sp.set(11, 9, S.C5, 120), sp.set(11, 10, S.C5, 110), sp.set(12, 11, S.C5, 104), sp.set(9, 11, S.C3, 128), sp.set(9, 14, S.C3, 128), sp.set(9, 18, S.C3, 128);
+      for (let k = 0; k < 4; k++)
+        sp.set(4 - k, 11 - k, S.C4, 110), sp.set(14 + k, 11 - k, S.C4, 110);
+      sp.set(1, 6, S.C4, 100), sp.set(16, 6, S.C4, 100);
+    }, 9, 25), A.add("umbrella", 22, 12, (sp) => {
+      for (let y = 0; y < 7; y++)
+        for (let x = 0; x < 22; x++) {
+          let dx = (x + 0.5 - 11) / 10.8, dy = (y + 0.5 - 7) / 7;
+          if (dx * dx + dy * dy > 1 || y === 6 && x % 5 === 2) continue;
+          let panel = Math.floor((x + 0.5 - 11) / 3.6);
+          sp.set(x, y, S.ITEM, (x < 11 ? 146 : 112) + (panel % 2 ? -10 : 6));
+        }
+      for (let x = 2; x < 22; x += 5) sp.set(x, 6, S.DARK, 110);
+      for (let y = 7; y < 12; y++) sp.set(11, y, S.DARK, 128);
+      sp.set(10, 11, S.DARK, 110), sp.set(11, 0, S.DARK, 128);
+    }, 11, 11), A.add("ball", 4, 4, (sp) => {
+      for (let [x, y, sh] of [[1, 0, 150], [2, 0, 136], [0, 1, 146], [1, 1, 136], [2, 1, 120], [3, 1, 108], [0, 2, 128], [1, 2, 116], [2, 2, 104], [3, 2, 96], [1, 3, 100], [2, 3, 92]]) sp.set(x, y, S.C1, sh);
+      sp.set(1, 2, S.C3, 110), sp.set(2, 1, S.C3, 110);
+    }, 2, 3), A.add("snowball", 3, 3, (sp) => {
+      sp.set(1, 0, S.C2, 150), sp.set(0, 1, S.C2, 140), sp.set(1, 1, S.C2, 128), sp.set(2, 1, S.C2, 110), sp.set(1, 2, S.C2, 104);
+    }, 1, 2), A.add("frisbee", 6, 2, (sp) => {
+      for (let x = 0; x < 6; x++) sp.set(x, 0, S.C6, x < 2 ? 150 : 128);
+      for (let x = 1; x < 5; x++) sp.set(x, 1, S.C6, 100);
+    }, 3, 1);
+    for (let [n, w, h] of [["puff1", 10, 8], ["puff2", 16, 12], ["puff3", 22, 16], ["puff4", 28, 20]])
       A.add(n, w, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-          let d = ((x + 0.5 - w / 2) / (w / 2)) ** 2 + ((y + 0.5 - h / 2) / (h / 2)) ** 2;
-          d <= 1 && hash2i(x, y, w) > (d > 0.6 ? 0.35 : 0) && sp.set(x, y, S.C1, x + y < (w + h) / 2.2 ? 150 : d > 0.55 ? 108 : 128);
-        }
+        let rr = new RNG(w * 7 + 3), blobs = [[w / 2, h * 0.6, w * 0.3, h * 0.36]];
+        for (let k = 0; k < 4; k++) blobs.push([w * rr.range(0.28, 0.72), h * rr.range(0.38, 0.62), w * rr.range(0.18, 0.27), h * rr.range(0.22, 0.32)]);
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            let best = 0;
+            for (let [bx, by, rx, ry] of blobs) {
+              let d = 1 - (((x + 0.5 - bx) / rx) ** 2 + ((y + 0.5 - by) / ry) ** 2);
+              d > best && (best = d);
+            }
+            if (best <= 0 || best < 0.22 && hash2i(x, y, w) < 0.5) continue;
+            let lit = x + y < (w + h) * 0.42;
+            sp.set(x, y, S.C1, lit ? 150 : best < 0.3 ? 106 : 126);
+          }
       }, Math.floor(w / 2), h - 1);
-    A.add("leaf", 2, 1, (sp) => {
-      sp.set(0, 0, S.C1, 128), sp.set(1, 0, S.C1, 100);
-    }, 1, 0), A.add("glow", 3, 2, (sp) => {
-      sp.set(0, 0, S.C1, 110), sp.set(1, 0, S.C1, 150), sp.set(2, 0, S.C1, 110), sp.set(1, 1, S.C1, 120);
-    }, 1, 0), A.add("dot", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("dot2", 2, 2, (sp) => {
+    A.add("leaf", 3, 2, (sp) => {
+      sp.set(0, 0, S.C1, 140), sp.set(1, 0, S.C1, 128), sp.set(1, 1, S.C1, 110), sp.set(2, 1, S.C1, 96);
+    }, 1, 1), A.add("glow", 7, 3, (sp) => {
+      for (let x = 1; x < 6; x++)
+        sp.set(x, 0, S.C1, 110), sp.set(x, 2, S.C1, 110);
+      for (let x = 0; x < 7; x++) sp.set(x, 1, S.C1, x === 0 || x === 6 ? 110 : x >= 2 && x <= 4 ? 160 : 140);
+    }, 3, 0), A.add("dot", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("dot2", 2, 2, (sp) => {
       sp.set(0, 0, S.C1, 140), sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 110);
-    }, 1, 1), A.add("cartUmbrella", 20, 12, (sp) => {
-      for (let y = 0; y < 5; y++) for (let x = 9 - y * 2; x <= 10 + y * 2; x++) x >= 0 && x < 20 && sp.set(x, y, Math.floor(x / 3) % 2 ? S.C1 : S.C2, x < 10 ? 150 : 115);
-      for (let y = 5; y < 12; y++) sp.set(10, y, S.C3, 110);
-    }, 10, 11), A.add("bike", 11, 7, (sp) => {
+    }, 1, 1), A.add("flake", 3, 3, (sp) => {
+      sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 150), sp.set(2, 1, S.C1, 128), sp.set(1, 2, S.C1, 128);
+    }, 1, 1), A.add("cartUmbrella", 40, 24, (sp) => {
+      for (let y = 0; y < 10; y++)
+        for (let x = 0; x < 40; x++) {
+          let dx = (x + 0.5 - 20) / 19.5, dy = (y + 0.5 - 10) / 10;
+          if (dx * dx + dy * dy > 1 || y === 9 && x % 6 === 3) continue;
+          let seg = Math.floor((Math.atan2(x + 0.5 - 20, 10.5 - y) + Math.PI) / (Math.PI / 7));
+          sp.set(x, y, seg % 2 ? S.C1 : S.C2, x < 20 ? 146 : 112);
+        }
+      for (let y = 10; y < 24; y++)
+        sp.set(19, y, S.C3, 120), sp.set(20, y, S.C3, 96);
+      sp.set(19, 0, S.C3, 128);
+    }, 20, 23), A.add("bike", 22, 14, (sp) => {
       let wheel = (cx) => {
-        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [1, -1], [-1, 1]]) sp.set(cx + dx * 1, 4 + dy * 1, S.C3, 110);
+        for (let a = 0; a < 28; a++) {
+          let ang = a / 28 * Math.PI * 2;
+          sp.set(Math.round(cx + Math.cos(ang) * 4), Math.round(9 + Math.sin(ang) * 4), S.C3, 110);
+        }
+        sp.set(cx, 9, S.C4, 128);
       };
-      wheel(2), wheel(8);
-      for (let x = 2; x <= 8; x++) sp.set(x, 3, S.C5, 128);
-      sp.set(5, 2, S.C5, 128), sp.set(4, 1, S.C3, 110), sp.set(8, 1, S.C3, 110), sp.set(8, 2, S.C5, 128), sp.set(9, 1, S.C3, 110);
-    }, 5, 6), A.add("stroller", 7, 7, (sp) => {
-      for (let y = 1; y < 4; y++) for (let x = 1; x < 6; x++) sp.set(x, y, S.ITEM, x < 3 ? 150 : 120);
-      for (let x = 0; x < 3; x++) sp.set(x, 0, S.ITEM, 140);
-      sp.set(6, 0, S.DARK, 110), sp.set(6, 1, S.DARK, 110), sp.set(1, 5, S.DARK, 110), sp.set(5, 5, S.DARK, 110), sp.set(1, 6, S.DARK, 100), sp.set(5, 6, S.DARK, 100), sp.set(3, 4, S.DARK, 110);
-    }, 3, 6);
+      wheel(5), wheel(17), sp.line(5, 9, 10, 9, S.C5), sp.line(10, 9, 15, 4, S.C5), sp.line(8, 4, 15, 4, S.C5), sp.line(8, 4, 10, 9, S.C5), sp.line(5, 9, 8, 4, S.C5), sp.line(15, 4, 17, 9, S.C5), sp.set(7, 3, S.C3, 128), sp.set(8, 3, S.C3, 128), sp.set(9, 3, S.C3, 128), sp.set(15, 2, S.C3, 128), sp.set(16, 2, S.C3, 128), sp.set(15, 3, S.C3, 110);
+    }, 11, 13), A.add("stroller", 14, 14, (sp) => {
+      for (let y = 3; y < 9; y++) for (let x = 2; x < 11; x++) sp.set(x, y, S.ITEM, x < 4 ? 150 : y === 8 ? 100 : 122);
+      for (let y = 0; y < 5; y++) for (let x = 1; x < 6; x++) ((x + 0.5 - 6) / 5) ** 2 + ((y + 0.5 - 5) / 5) ** 2 <= 1 && sp.set(x, y, S.ITEM, 144);
+      sp.line(11, 4, 13, 0, S.DARK), sp.line(3, 9, 11, 9, S.DARK), sp.ellipse(3.5, 11.5, 2, 2, S.DARK, 120), sp.ellipse(10.5, 11.5, 2, 2, S.DARK, 120), sp.set(3, 11, S.C4, 140), sp.set(10, 11, S.C4, 140);
+    }, 6, 13);
     for (let f = 0; f < 4; f++)
-      A.add("flag_us" + f, 13, 10, (sp) => {
-        for (let y = 0; y < 8; y++) for (let x = 0; x < 12; x++) {
-          let wy = y + Math.round(Math.sin(x * 0.6 + f * 1.57) * 1), slot = x < 5 && y < 4 ? S.C7 : Math.floor(y / 1) % 2 ? S.C2 : S.C1, sh = 110 + Math.round(Math.sin(x * 0.6 + f * 1.57) * 25);
-          sp.set(x + 1, wy + 1, slot, sh), x < 5 && y < 4 && (x + y) % 2 === 0 && sp.set(x + 1, wy + 1, S.C2, sh);
-        }
-        for (let y = 0; y < 10; y++) sp.set(0, y, S.C3, 128);
-      }, 0, 9), A.add("flag_hotel" + f, 13, 10, (sp) => {
-        for (let y = 0; y < 8; y++) for (let x = 0; x < 12; x++) {
-          let wy = y + Math.round(Math.sin(x * 0.6 + f * 1.57) * 1);
-          sp.set(x + 1, wy + 1, S.C6, 110 + Math.round(Math.sin(x * 0.6 + f * 1.57) * 25));
-        }
-        for (let y = 0; y < 10; y++) sp.set(0, y, S.C3, 128);
-      }, 0, 9);
-    A.add("lamp2", 2, 2, (sp) => {
-      sp.set(0, 0, S.C1, 128), sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 128);
-    }, 0, 1), A.add("lamp1", 1, 2, (sp) => {
-      sp.set(0, 0, S.C1, 128), sp.set(0, 1, S.C1, 128);
-    }, 0, 1), A.add("beacon", 3, 3, (sp) => {
-      sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 160), sp.set(2, 1, S.C1, 128), sp.set(1, 2, S.C1, 128);
-    }, 1, 1), A.add("treeBundle", 8, 14, (sp) => {
-      for (let y = 0; y < 14; y++) {
-        let w = Math.floor(y / 3) + 1;
-        for (let x = 4 - w; x < 4 + w; x++) x >= 0 && x < 8 && sp.set(x, y, (x + y) % 3 ? S.C8 : S.C10, 128);
+      A.add("flag_us" + f, 26, 20, (sp) => {
+        for (let y = 0; y < 14; y++)
+          for (let x = 0; x < 24; x++) {
+            let wv = Math.sin(x * 0.32 + f * 1.57), wy = y + Math.round(wv * 1.6 * (x / 24)), canton = x < 10 && y < 7, slot = canton ? S.C7 : y % 2 ? S.C2 : S.C1;
+            canton && x % 2 === 1 && y % 2 === 1 && (slot = S.C2), sp.set(x + 2, wy + 2, slot, 116 + Math.round(wv * 24));
+          }
+        for (let y = 0; y < 20; y++)
+          sp.set(0, y, S.C3, 128), sp.set(1, y, S.C3, 100);
+        sp.set(0, 0, S.C6, 150), sp.set(1, 0, S.C6, 128);
+      }, 0, 19), A.add("flag_hotel" + f, 26, 20, (sp) => {
+        for (let y = 0; y < 14; y++)
+          for (let x = 0; x < 24; x++) {
+            let wv = Math.sin(x * 0.32 + f * 1.57), wy = y + Math.round(wv * 1.6 * (x / 24));
+            sp.set(x + 2, wy + 2, y === 2 || y === 11 ? S.C2 : S.C6, 116 + Math.round(wv * 24));
+          }
+        for (let y = 0; y < 20; y++)
+          sp.set(0, y, S.C3, 128), sp.set(1, y, S.C3, 100);
+      }, 0, 19);
+    A.add("lamp2", 4, 4, (sp) => {
+      for (let [x, y] of [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2], [1, 3], [2, 3]]) sp.set(x, y, S.C1, x === 1 && y === 1 ? 160 : 128);
+    }, 2, 3), A.add("lamp1", 2, 4, (sp) => {
+      for (let y = 0; y < 4; y++)
+        sp.set(0, y, S.C1, 128), sp.set(1, y, S.C1, 128);
+    }, 0, 3), A.add("pedHand", 5, 6, (sp) => {
+      for (let [x, y] of [[0, 0], [2, 0], [4, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [1, 3], [2, 3], [3, 3], [1, 4], [2, 4], [3, 4], [1, 5], [2, 5], [3, 5]]) sp.set(x, y, S.C1, 128);
+    }, 2, 5), A.add("pedWalk", 5, 7, (sp) => {
+      for (let [x, y] of [[2, 0], [1, 1], [2, 1], [3, 1], [0, 2], [2, 2], [4, 2], [2, 3], [1, 4], [3, 4], [1, 5], [4, 5], [0, 6], [4, 6]]) sp.set(x, y, S.C1, 128);
+    }, 2, 6), A.add("beacon", 5, 5, (sp) => {
+      for (let [x, y, s] of [[2, 0, 128], [1, 1, 140], [2, 1, 160], [3, 1, 140], [0, 2, 128], [1, 2, 160], [2, 2, 180], [3, 2, 160], [4, 2, 128], [1, 3, 140], [2, 3, 160], [3, 3, 140], [2, 4, 128]]) sp.set(x, y, S.C1, s);
+    }, 2, 2), A.add("treeBundle", 16, 28, (sp) => {
+      for (let y = 0; y < 26; y++) {
+        let half = Math.min(7, 1 + y / 3.5);
+        for (let x = Math.round(8 - half); x < Math.round(8 + half); x++) sp.set(x, y, (x * 3 + y * 2) % 7 < 3 ? S.C10 : S.C8, x < 8 ? 140 : 110);
       }
-      sp.set(3, 13, S.C4, 100), sp.set(4, 13, S.C4, 100);
-    }, 4, 13), A.add("firefly", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("pumpkinSmall", 4, 3, (sp) => {
-      for (let x = 0; x < 4; x++)
-        sp.set(x, 1, S.C5, 128), sp.set(x, 2, S.C5, 110);
-      sp.set(1, 0, S.C5, 140), sp.set(2, 0, S.C8, 128);
-    }), A.add("coffee", 2, 3, (sp) => {
-      sp.set(0, 0, S.C2, 128), sp.set(1, 0, S.C2, 128), sp.set(0, 1, S.C4, 128), sp.set(1, 1, S.C4, 110), sp.set(0, 2, S.C4, 128), sp.set(1, 2, S.C4, 110);
+      for (let y = 4; y < 26; y += 6) for (let x = 2; x < 14; x++) sp.get(x, y) >= 0 && sp.set(x, y, S.C4, 120);
+      sp.set(7, 26, S.C4, 100), sp.set(8, 26, S.C4, 100), sp.set(7, 27, S.C4, 90), sp.set(8, 27, S.C4, 90);
+    }, 8, 27), A.add("firefly", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("pumpkinSmall", 8, 6, (sp) => {
+      sp.ellipse(4, 3.5, 3.8, 2.5, S.C5, 128), sp.set(2, 2, S.C5, 150), sp.set(3, 1, S.C5, 146), sp.set(4, 0, S.C8, 128);
+    }), A.add("coffee", 4, 6, (sp) => {
+      for (let x = 0; x < 4; x++) sp.set(x, 0, S.C2, 128);
+      for (let y = 1; y < 6; y++) for (let x = 0; x < 4; x++) sp.set(x, y, S.C4, x === 0 ? 140 : x === 3 ? 104 : 124);
+      sp.set(1, 3, S.C3, 110), sp.set(2, 3, S.C3, 110);
     });
   }
   var PROP_COLORS = {
@@ -4288,7 +5032,7 @@ void main() {
   };
 
   // src/render/spriteLayer.js
-  var HEAD2 = `#version 300 es
+  var TX = 32 .toFixed(1), HEAD2 = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2DShadow;
@@ -4315,7 +5059,7 @@ void main() {
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
   vInfo = vec4(iA.z, flags, iB.x, 0.0);
-  vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / 16.0);
+  vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
   gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y, 1.0);
 }`, FS = HEAD2 + `
 in vec2 vUV;
@@ -4398,7 +5142,7 @@ void main() {
   if (noShadow) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec3 right = normalize(vec3(-uSunDir.y, uSunDir.x, 0.0) + vec3(1e-4, 0.0, 0.0));
   float w = iRect.z, h = iRect.w;
-  vec3 wp = iPos + right * ((aCorner.x * w - iA.x) / 16.0) + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / 16.0);
+  vec3 wp = iPos + right * ((aCorner.x * w - iA.x) / ${TX}) + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
   vUV = iRect.xy + vec2(aCorner.x * w, aCorner.y * h);
   gl_Position = uShadowVP * vec4(wp, 1.0);
 }`, SHADOW_FS2 = HEAD2 + `
@@ -4506,6 +5250,41 @@ void main() {
   };
 
   // src/render/carLayer.js
+  var sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross32 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v, bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]], cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
+  function bboxOf(st) {
+    let bb = { x0: 1 / 0, x1: -1 / 0, y0: 1 / 0, y1: -1 / 0, z0: 1 / 0, z1: -1 / 0 };
+    for (let s of st) {
+      bb.x0 = Math.min(bb.x0, s.x), bb.x1 = Math.max(bb.x1, s.x);
+      for (let [y, z] of s.pts)
+        bb.y0 = Math.min(bb.y0, y), bb.y1 = Math.max(bb.y1, y), bb.z0 = Math.min(bb.z0, z), bb.z1 = Math.max(bb.z1, z);
+    }
+    return bb;
+  }
+  function face(mb, q, tx, bb, c, force, mat = 0) {
+    let pts = [];
+    for (let p of q) pts.some((r) => Math.abs(r[0] - p[0]) + Math.abs(r[1] - p[1]) + Math.abs(r[2] - p[2]) < 1e-6) || pts.push(p);
+    if (pts.length < 3) return;
+    let n = pts.length === 4 ? cross32(sub3(pts[2], pts[0]), sub3(pts[3], pts[1])) : cross32(sub3(pts[1], pts[0]), sub3(pts[2], pts[0])), l = Math.hypot(n[0], n[1], n[2]);
+    if (l < 1e-9) return;
+    n = [n[0] / l, n[1] / l, n[2] / l];
+    let cen = [0, 0, 0];
+    for (let p of pts) for (let k = 0; k < 3; k++) cen[k] += p[k] / pts.length;
+    if (dot32(n, sub3(cen, c)) < 0 && (n = [-n[0], -n[1], -n[2]]), n[2] < -0.6) return;
+    let ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]), key = force || (az >= ax && az >= ay ? "top" : ay >= ax ? "side" : n[0] > 0 ? "front" : "back"), tex = tx[key] || tx.side, uv;
+    key === "top" ? uv = (p) => [(p[0] - bb.x0) * 32, (p[1] - bb.y0) * 32] : key === "side" ? uv = (p) => [(p[0] - bb.x0) * 32, (bb.z1 - p[2]) * 32] : key === "front" || key === "glassF" ? uv = (p) => [(bb.y1 - p[1]) * 32, (bb.z1 - p[2]) * 32] : uv = (p) => [(p[1] - bb.y0) * 32, (bb.z1 - p[2]) * 32], pts.length === 4 ? mb.quad(pts[0], pts[1], pts[2], pts[3], pts.map(uv), tex, n, mat) : mb.tri(pts[0], pts[1], pts[2], pts.map(uv), tex, n, mat);
+  }
+  function loft2(mb, st, tx, o = {}) {
+    let bb = o.bb || bboxOf(st), c = [(bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2, (bb.z0 + bb.z1) / 2], P = (s, j) => [s.x, s.pts[j][0], s.pts[j][1]];
+    for (let i = 0; i < st.length - 1; i++)
+      for (let j = 0; j < st[i].pts.length - 1; j++)
+        face(mb, [P(st[i], j), P(st[i + 1], j), P(st[i + 1], j + 1), P(st[i], j + 1)], tx, bb, c, o.faceKey ? o.faceKey(i, j) : null, o.mat);
+    if (o.caps !== !1)
+      for (let [s, key] of [[st[0], "back"], [st[st.length - 1], "front"]]) {
+        let pts = s.pts.map((p) => [s.x, p[0], p[1]]);
+        for (let k = 1; k < pts.length - 1; k++) face(mb, [pts[0], pts[k], pts[k + 1]], tx, bb, c, key, o.mat);
+      }
+    return bb;
+  }
   var HEAD3 = `#version 300 es
 precision highp float;
 precision highp int;
@@ -4573,7 +5352,7 @@ float faceShade(vec3 n) {
 }
 void main() {
   if (vB.y < 0.999 && bayer4(gl_FragCoord.xy) >= vB.y) discard;
-  ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+  ivec2 tc = ivec2(vRect.xy) + ivec2(clamp(floor(vUV), vec2(0.0), vec2(vRect.zw) - 1.0));
   vec4 t = texelFetch(uSprites, tc, 0);
   if (t.a < 0.5) discard;
   int row = int(vB.x + 0.5);
@@ -4589,7 +5368,7 @@ void main() {
   }
   // snow on roofs of parked cars
   if (vB.z > 0.0 && n.z > 0.6) {
-    float h = fract(sin(dot(floor(vWorld.xy * 16.0), vec2(12.9898, 78.233))) * 43758.5453);
+    float h = fract(sin(dot(floor(vWorld.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
     float nn = texture(uNoise, vWorld.xy * 0.35).r;
     if (nn * 0.85 + h * 0.15 < vB.z * 1.35) albedo = mix(vec3(0.86, 0.9, 0.97), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nn));
   }
@@ -4638,13 +5417,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return { x: f.x, y: f.y, w, h, layer: 0 };
     }
     buildMeshes() {
-      let A = this, solid = (slot, shade2 = 128) => A.reg(2, 2, (sp) => sp.rect(0, 0, 2, 2, slot, shade2));
+      let A = this, reg = (w, h, paint) => A.reg(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)), paint), solid = (slot, shade2 = 128) => reg(2, 2, (sp) => sp.rect(0, 0, 2, 2, slot, shade2));
       this.solid = {
         body: solid(CS.BODY),
         bodyTop: solid(CS.BODY, 140),
         trim: solid(CS.TRIM),
         glass: solid(CS.GLASS),
-        tire: solid(CS.TIRE),
+        tire: solid(CS.TIRE, 90),
         chrome: solid(CS.CHROME),
         sign: solid(CS.SIGN),
         accent: solid(CS.ACCENT),
@@ -4652,165 +5431,354 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         blue: solid(CS.SIREN_B),
         white: solid(CS.WHITE),
         black: solid(CS.BLACK),
-        led: solid(CS.LED)
+        led: solid(CS.LED),
+        plastic: solid(CS.TRIM, 110),
+        cargo: solid(CS.WHITE, 120)
       };
-      let T2 = 16, bodySide = (len, h, wheels, opts = {}) => A.reg(len, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < len; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : y >= h - 3 ? 108 : 128);
-        if (opts.stripe != null) for (let x = 0; x < len; x++) sp.set(x, opts.stripe, CS.ACCENT, 128);
-        if (opts.checker) for (let x = 0; x < len; x += 2)
-          sp.set(x, opts.checker, CS.BLACK, 128), sp.set(x + 1, opts.checker + 1, CS.BLACK, 128);
-        for (let wx of wheels) {
-          for (let x = wx - 3; x <= wx + 3; x++) sp.set(x, h - 3, CS.BLACK, 100);
-          for (let y = h - 3; y < h; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-          sp.set(wx, h - 2, CS.CHROME, 128);
-        }
-        if (opts.door) for (let dx of opts.door) for (let y = 1; y < h - 3; y++) sp.set(dx, y, CS.BODY, 96);
-        for (let x = 0; x < len; x++) sp.set(x, h - 1, CS.TRIM, 80);
-      }), cabinSide = (len, h, opts = {}) => A.reg(len, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < len; x++) sp.set(x, y, CS.BODY, 135);
-        let gx0 = 2, gx1 = len - 2;
-        for (let y = 1; y < h; y++) for (let x = gx0 + (y < 2 ? 1 : 0); x < gx1 - (y < 2 ? 1 : 0); x++) sp.set(x, y, CS.GLASS, y < 2 ? 140 : 118);
-        for (let px of opts.pillars || [Math.floor(len / 2)]) for (let y = 1; y < h; y++) sp.set(px, y, CS.BODY, 120);
-      }), front = (w, h, opts = {}) => A.reg(w, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : 125);
-        for (let x = 3; x < w - 3; x++) for (let y = 2; y < h - 3; y++) sp.set(x, y, CS.BLACK, x % 2 ? 110 : 90);
-        for (let hx of [1, w - 3])
-          sp.set(hx, 2, CS.HEAD, 128), sp.set(hx + 1, 2, CS.HEAD, 128), sp.set(hx, 3, CS.HEAD, 110), sp.set(hx + 1, 3, CS.HEAD, 110);
-        for (let x = 0; x < w; x++) sp.set(x, h - 2, CS.CHROME, 120);
-        for (let x = 0; x < w; x++) sp.set(x, h - 1, CS.TRIM, 80);
-        if (opts.plate) for (let x = (w >> 1) - 2; x < (w >> 1) + 2; x++) sp.set(x, h - 3, CS.PLATE, 128);
-      }), back = (w, h) => A.reg(w, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : 118);
-        for (let tx of [0, w - 3]) for (let x = tx; x < tx + 3; x++)
-          sp.set(x, 2, CS.TAIL, 128), sp.set(x, 3, CS.TAIL, 110);
-        for (let x = (w >> 1) - 2; x < (w >> 1) + 2; x++) sp.set(x, h - 3, CS.PLATE, 128);
-        for (let x = 0; x < w; x++) sp.set(x, h - 2, CS.CHROME, 110);
-        for (let x = 0; x < w; x++) sp.set(x, h - 1, CS.TRIM, 80);
-      }), glassFace = (w, h) => A.reg(w, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, 135);
-        for (let y = 1; y < h; y++) for (let x = 1; x < w - 1; x++) sp.set(x, y, CS.GLASS, y === 1 ? 145 : 120);
-      }), top = (w, h, opts = {}) => A.reg(w, h, (sp) => {
-        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, 140 + (y === 1 || y === h - 2 ? -12 : 0));
-        if (opts.lines) for (let x = 0; x < w; x += opts.lines) for (let y = 0; y < h; y++) sp.set(x, y, CS.BODY, 118);
-      }), box = (mb, x0, y0, z0, x1, y1, z1, F, mat = 0) => {
-        mb.box(x0, y0, z0, x1, y1, z1, F, { topMat: mat || MAT.SNOW, mat: 0 });
-      }, faces = (side, fr, bk, tp) => ({ px: fr, nx: bk, py: side, ny: side, pz: tp }), sedan = (o = {}) => {
-        let mb = new MeshBuilder(), L = o.len ?? 2.25, W = o.wid ?? 0.875, bh = o.bodyH ?? 0.5, ch = o.cabH ?? 0.3125, cl = o.cabLen ?? 1.25, cw = W - 0.125, coff = o.cabOff ?? -0.125, Lt = Math.round(L * T2), Wt = Math.round(W * T2), bht = Math.round(bh * T2), side = bodySide(Lt, bht, [Math.round(Lt * 0.2), Math.round(Lt * 0.8)], { door: [Math.round(Lt * 0.42), Math.round(Lt * 0.62)], stripe: o.stripe, checker: o.checker });
-        box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, bh, faces(side, front(Wt, bht, { plate: !0 }), back(Wt, bht), top(Lt, Wt)));
-        let clt = Math.round(cl * T2), cwt = Math.round(cw * T2), cht = Math.round(ch * T2);
-        return box(mb, coff - cl / 2, -cw / 2, bh, coff + cl / 2, cw / 2, bh + ch, faces(cabinSide(clt, cht, { pillars: [Math.round(clt * 0.48)] }), glassFace(cwt, cht), glassFace(cwt, cht), top(clt, cwt))), o.taxiSign && box(mb, coff - 0.19, -0.19, bh + ch, coff + 0.19, 0.19, bh + ch + 0.15, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), o.lightBar && (box(mb, coff - 0.12, -0.32, bh + ch, coff + 0.12, -0.02, bh + ch + 0.1, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red)), box(mb, coff - 0.12, 0.02, bh + ch, coff + 0.12, 0.32, bh + ch + 0.1, faces(this.solid.blue, this.solid.blue, this.solid.blue, this.solid.blue))), mb.finish();
+      let S2 = this.solid, all = (t) => ({ px: t, nx: t, py: t, ny: t, pz: t }), box = (mb, x0, y0, z0, x1, y1, z1, F) => mb.box(x0, y0, z0, x1, y1, z1, F.px ? F : all(F), { topMat: MAT.SNOW, mat: 0 }), wheelTex = (r, rim = CS.CHROME) => {
+        let D = Math.round(2 * r * 32);
+        return reg(D, D, (sp) => {
+          let c = (D - 1) / 2;
+          for (let y = 0; y < D; y++)
+            for (let x = 0; x < D; x++) {
+              let d = Math.hypot(x - c, y - c) / (D / 2), slot = CS.TIRE, sh = d > 0.86 ? 96 : 112;
+              d < 0.6 && (slot = rim, sh = x + y < D - 2 ? 150 : 112), d >= 0.6 && d < 0.68 && (sh = 74), d < 0.2 && (slot = CS.TIRE, sh = 100), sp.set(x, y, slot, sh);
+            }
+          for (let k = 0; k < 5; k++) {
+            let a = k / 5 * Math.PI * 2 - 0.4;
+            sp.set(Math.round(c + Math.cos(a) * D * 0.2), Math.round(c + Math.sin(a) * D * 0.2), CS.BLACK, 90);
+          }
+        });
+      }, paintBodySide = (sp, Lt, Ht, o) => {
+        let vs = o.vs;
+        for (let y = 0; y < Ht; y++)
+          for (let x = 0; x < Lt; x++) {
+            let sh = y < vs ? 146 : y === vs ? 160 : y >= Ht - 2 ? 100 : 130 - Math.round((y - vs) / Ht * 24);
+            sp.set(x, y, o.slot ?? CS.BODY, sh);
+          }
+        for (let [cu, cv, R2] of o.arches || [])
+          for (let y = 0; y < Ht; y++)
+            for (let x = Math.floor(cu - R2 - 2); x <= Math.ceil(cu + R2 + 2); x++) {
+              let d = Math.hypot(x + 0.5 - cu, y + 0.5 - cv);
+              d < R2 ? sp.set(x, y, CS.BLACK, d > R2 - 1.2 ? 64 : 48) : d < R2 + 1.2 && y + 0.5 < cv && sp.set(x, y, o.slot ?? CS.BODY, 160);
+            }
+        for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
+      }, glassPanel = (W, H, o = {}) => reg(W, H, (sp) => {
+        for (let y = 0; y < H; y++)
+          for (let x = 0; x < W; x++) {
+            let frame = x < (o.fx ?? 1) || x >= W - (o.fx ?? 1) || y < (o.ft ?? 1) || o.fb && y >= H - o.fb, streak = (x - y * 2 + 64) % 15 < 3;
+            sp.set(x, y, frame ? o.frame ?? CS.BODY : CS.GLASS, frame ? 132 : streak ? 158 : 126 - Math.round(y / H * 18) + (o.dark ? -14 : 0));
+          }
+        if (o.wipers) for (let x = 3; x < W - 3; x++) x % 10 < 6 && sp.set(x, H - 1 - (x % 10 < 3 ? 0 : 1), CS.BLACK, 90);
+        if (o.brake) for (let x = (W >> 1) - 3; x < (W >> 1) + 3; x++) sp.set(x, o.ft ?? 1, CS.TAIL, 128);
+      }), wheelsAt = (mb, xs, yOff, r, wdt, tex) => {
+        for (let x of xs)
+          for (let s of [-1, 1]) {
+            let ring = [];
+            for (let k = 0; k < 10; k++) {
+              let a = k / 10 * Math.PI * 2;
+              ring.push([x + Math.cos(a) * r, r + Math.sin(a) * r]);
+            }
+            let ya = s * yOff - wdt / 2, yb = s * yOff + wdt / 2;
+            for (let k = 0; k < 10; k++) {
+              let a = ring[k], b = ring[(k + 1) % 10], am = (k + 0.5) / 10 * Math.PI * 2, n = [Math.cos(am), 0, Math.sin(am)];
+              n[2] < -0.5 || mb.quad([a[0], ya, a[1]], [b[0], ya, b[1]], [b[0], yb, b[1]], [a[0], yb, a[1]], [[0, 0], [1, 0], [1, 1], [0, 1]], S2.tire, n, 0);
+            }
+            let yo = s > 0 ? yb : ya, D = 2 * r, uv = (p) => [(p[0] - (x - r)) * 32, (D - p[1]) * 32];
+            for (let k = 0; k < 10; k++) {
+              let a = ring[k], b = ring[(k + 1) % 10];
+              mb.tri([x, yo, r], [a[0], yo, a[1]], [b[0], yo, b[1]], [uv([x, r]), uv(a), uv(b)], tex, [0, s, 0], 0);
+            }
+          }
+      }, mirrors = (mb, x, w, z) => {
+        for (let s of [-1, 1]) box(mb, x - 0.04, s > 0 ? w - 0.01 : -w - 0.06, z, x + 0.04, s > 0 ? w + 0.06 : -w + 0.01, z + 0.06, S2.body);
+      }, sedan = (o = {}) => {
+        let mb = new MeshBuilder(), L = o.len ?? 2.25, W = o.wid ?? 0.875, w = W / 2, zb = 0.13, zt = o.zt ?? 0.48, zs = zt - 0.06, drop = o.hoodDrop ?? 0.07, xr = -L / 2, xf = L / 2, cabR = o.cabR ?? -0.62, cabF = o.cabF ?? 0.5, roofR = o.roofR ?? -0.36, roofF = o.roofF ?? 0.13, zr = zt + (o.cabH ?? 0.31), r = 0.17, wheelX = [xr + L * 0.2, xf - L * 0.19], st = [
+          { x: xr, pts: bodySec(w - 0.05, zb + 0.03, zs - 0.07, zt - 0.06) },
+          { x: xr + 0.09, pts: bodySec(w, zb, zs - 0.01, zt - 0.01) },
+          { x: cabR, pts: bodySec(w, zb, zs, zt) },
+          { x: cabF, pts: bodySec(w, zb, zs - 5e-3, zt - 5e-3) },
+          { x: xf - 0.1, pts: bodySec(w, zb, zs - drop, zt - drop) },
+          { x: xf, pts: bodySec(w - 0.05, zb + 0.03, zs - drop - 0.07, zt - drop - 0.06) }
+        ], bb = bboxOf(st), Lt = (bb.x1 - bb.x0) * 32, Wt = (bb.y1 - bb.y0) * 32, Ht = (bb.z1 - bb.z0) * 32, U = (x) => (x - bb.x0) * 32, V = (z) => (bb.z1 - z) * 32, vs = Math.round(V(zs)), side = reg(Lt, Ht, (sp) => {
+          paintBodySide(sp, Math.round(Lt), Math.round(Ht), { vs, arches: wheelX.map((x) => [U(x), V(r), r * 32 + 1.5]) });
+          let doors = o.doors ?? [cabF - 0.04, (cabR + cabF) / 2 - 0.02, cabR + 0.08];
+          for (let dx of doors) for (let y = vs + 1; y < Ht - 2; y++) sp.set(Math.round(U(dx)), y, CS.BODY, 96);
+          for (let hx of o.handles ?? [cabF - 0.2, (cabR + cabF) / 2 - 0.18])
+            sp.set(Math.round(U(hx)), vs + 2, CS.CHROME, 156), sp.set(Math.round(U(hx)) + 1, vs + 2, CS.CHROME, 120);
+          if (o.stripe) for (let x = 0; x < Lt; x++)
+            sp.set(x, vs + 3, CS.ACCENT, 136), sp.set(x, vs + 4, CS.ACCENT, 112);
+          if (o.checker) for (let x = Math.round(U(cabR)); x < U(cabF); x++)
+            sp.set(x, vs + 2, (x >> 1) % 2 ? CS.BLACK : CS.WHITE, 128), sp.set(x, vs + 3, (x >> 1) % 2 ? CS.WHITE : CS.BLACK, 120);
+          if (o.text) for (let x = Math.round(U(cabR)) + 2; x < U(cabF) - 2; x += 2) sp.set(x, vs + 5, CS.ACCENT, 140);
+          sp.set(1, vs + 2, CS.TAIL, 128), sp.set(Math.round(Lt) - 2, vs + 2, CS.HEAD, 128);
+        }), top = reg(Lt, Wt, (sp) => {
+          for (let y = 0; y < Wt; y++)
+            for (let x = 0; x < Lt; x++) {
+              let e = Math.min(y, Wt - 1 - y);
+              sp.set(x, y, CS.BODY, e < 1 ? 118 : e < 3 ? 138 : Math.abs(y - Wt / 2) < 3 ? 156 : 148);
+            }
+          for (let y = 2; y < Wt - 2; y++)
+            sp.set(Math.round(U(cabF + 0.03)), y, CS.BLACK, 70), sp.set(Math.round(U(xr + 0.3)), y, CS.BODY, 106), sp.set(Math.round(U(xf - 0.12)), y, CS.BODY, 112);
+          for (let yy of [Math.round(Wt * 0.28), Math.round(Wt * 0.6)]) for (let k = 0; k < 7; k++) sp.set(Math.round(U(cabF + 0.05)) + (k >> 2), yy + k, CS.BLACK, 92);
+          if (o.hoodStripe) for (let x = Math.round(U(cabF)); x < Lt; x++) for (let yy of [Math.round(Wt / 2) - 2, Math.round(Wt / 2) + 1]) sp.set(x, yy, CS.ACCENT, 130);
+        }), vTop = Math.round(V(zt - drop - 0.06)), front = reg(Wt, Ht, (sp) => {
+          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, y <= vTop ? 150 : 124);
+          let gy0 = vTop + 2, gy1 = Math.round(Ht) - 3;
+          for (let y = gy0; y < gy1; y++) for (let x = 8; x < Wt - 8; x++) sp.set(x, y, CS.BLACK, (y - gy0) % 2 ? 76 : 108);
+          for (let x = 8; x < Wt - 8; x++) sp.set(x, gy0 - 1, CS.CHROME, 146);
+          for (let hx of [2, Math.round(Wt) - 7]) for (let x = hx; x < hx + 5; x++)
+            sp.set(x, gy0, CS.HEAD, 146), sp.set(x, gy0 + 1, CS.HEAD, 118);
+          for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 2, CS.CHROME, 126);
+          for (let x = Math.round(Wt / 2) - 3; x < Wt / 2 + 3; x++) sp.set(x, Math.round(Ht) - 3, CS.PLATE, 132);
+          for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 1, CS.TRIM, 80);
+        }), vTopB = Math.round(V(zt - 0.06)), back = reg(Wt, Ht, (sp) => {
+          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, y <= vTopB ? 150 : 120);
+          let ty = vTopB + 2;
+          for (let tx of [1, Math.round(Wt) - 7]) for (let x = tx; x < tx + 6; x++)
+            sp.set(x, ty, CS.TAIL, 146), sp.set(x, ty + 1, CS.TAIL, 116);
+          sp.set(8, ty + 1, CS.WHITE, 130), sp.set(Math.round(Wt) - 9, ty + 1, CS.WHITE, 130);
+          for (let x = 8; x < Wt - 8; x++) sp.set(x, ty - 1, CS.BODY, 104);
+          for (let x = Math.round(Wt / 2) - 3; x < Wt / 2 + 3; x++)
+            sp.set(x, ty + 3, CS.PLATE, 132), sp.set(x, ty + 4, CS.PLATE, 116);
+          for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 2, CS.TRIM, 110);
+          for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 1, CS.TRIM, 80);
+        });
+        loft2(mb, st, { side, top, front, back }, { bb });
+        let wb = w - 0.06, wr = w - 0.15, zc = zt - 0.01, cst = [
+          { x: cabR, pts: cabSec(wb, zc, wb, zc) },
+          { x: roofR, pts: cabSec(wb, zc, wr, zr) },
+          { x: roofF, pts: cabSec(wb, zc, wr, zr) },
+          { x: cabF, pts: cabSec(wb, zc, wb, zc) }
+        ], cb = bboxOf(cst), Lc = (cb.x1 - cb.x0) * 32, Wc = (cb.y1 - cb.y0) * 32, Hc = (cb.z1 - cb.z0) * 32, Uc = (x) => (x - cb.x0) * 32, cside = reg(Lc, Hc, (sp) => {
+          let H = Math.round(Hc);
+          for (let y = 0; y < H; y++) {
+            let t = y / Math.max(1, H - 1), xl = Uc(roofR + (cabR - roofR) * t), xr2 = Uc(roofF + (cabF - roofF) * t);
+            for (let x = 0; x < Lc; x++) {
+              let inside = x > xl + 1.5 && x < xr2 - 1.5 && y >= 1 && y < H - 1, slot = CS.BODY, sh = 134;
+              inside && (slot = CS.GLASS, sh = (x + y * 2) % 13 < 2 ? 156 : 118), y === H - 1 && (slot = CS.CHROME, sh = 118), sp.set(x, y, slot, sh);
+            }
+          }
+          let bx = Math.round(Uc((cabR + cabF) / 2 - 0.04));
+          for (let y = 1; y < H - 1; y++)
+            sp.set(bx, y, CS.BLACK, 72), sp.set(bx + 1, y, CS.BLACK, 72);
+        }), roof = reg(Lc, Wc, (sp) => {
+          for (let y = 0; y < Wc; y++) for (let x = 0; x < Lc; x++) {
+            let e = Math.min(y, Wc - 1 - y);
+            sp.set(x, y, CS.BODY, e < 1 ? 128 : e < 3 ? 146 : 158);
+          }
+          if (o.sunroof) for (let y = Math.round(Wc * 0.3); y < Wc * 0.7; y++) for (let x = Math.round(Uc(roofR + 0.12)); x < Uc(roofF - 0.1); x++) sp.set(x, y, CS.GLASS, 118);
+        }), glassF = glassPanel(Wc, Hc, { wipers: !0 }), glassB = glassPanel(Wc, Hc, { dark: !0, brake: !0 });
+        loft2(mb, cst, { side: cside, top: roof, glassF, glassB }, { bb: cb, caps: !1, faceKey: (i, j) => j !== 1 ? "side" : i === 0 ? "glassB" : i === 2 ? "glassF" : "top" }), box(mb, xf - 0.02, -w + 0.04, zb - 0.01, xf + 0.05, w - 0.04, zb + 0.08, o.chromeBumper ? S2.chrome : S2.plastic), box(mb, xr - 0.05, -w + 0.04, zb - 0.01, xr + 0.02, w - 0.04, zb + 0.08, o.chromeBumper ? S2.chrome : S2.plastic), mirrors(mb, cabF - 0.06, w, zt - 0.02), wheelsAt(mb, wheelX, w - 0.06, r, 0.14, wheelTex(r, o.darkRims ? CS.TRIM : CS.CHROME));
+        let rx = (roofR + roofF) / 2;
+        if (o.taxiSign && (box(mb, rx - 0.2, -0.17, zr, rx + 0.2, 0.17, zr + 0.03, S2.black), box(mb, rx - 0.18, -0.15, zr + 0.03, rx + 0.18, 0.15, zr + 0.16, S2.sign)), o.lightBar && (box(mb, rx - 0.08, -0.33, zr, rx + 0.08, 0.33, zr + 0.03, S2.black), box(mb, rx - 0.07, -0.32, zr + 0.03, rx + 0.07, -0.02, zr + 0.12, S2.red), box(mb, rx - 0.07, 0.02, zr + 0.03, rx + 0.07, 0.32, zr + 0.12, S2.blue)), o.rack) for (let s of [-1, 1]) box(mb, roofR + 0.05, s * (wr - 0.05) - 0.02, zr, roofF - 0.05, s * (wr - 0.05) + 0.02, zr + 0.05, S2.trim);
+        return mb.finish();
       }, van = (o = {}) => {
-        let mb = new MeshBuilder(), L = o.len ?? 2.75, W = o.wid ?? 1, H = o.h ?? 1.25, Lt = Math.round(L * T2), Wt = Math.round(W * T2), Ht = Math.round(H * T2), side = A.reg(Lt, Ht, (sp) => {
-          for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y < 2 ? 145 : 125);
-          for (let y = 2; y < 7; y++) for (let x = Lt - 10; x < Lt - 3; x++) sp.set(x, y, CS.GLASS, 125);
-          if (o.stripe != null) for (let x = 0; x < Lt; x++)
-            sp.set(x, o.stripe, CS.ACCENT, 128), sp.set(x, o.stripe + 1, CS.ACCENT, 115);
-          if (o.text) for (let x = 3; x < Lt - 14; x += 2) sp.set(x, 6, CS.ACCENT, 128);
-          if (o.window) for (let y = 3; y < 8; y++) for (let x = 6; x < 14; x++) sp.set(x, y, CS.INTERIOR, 128);
-          for (let wx of [Math.round(Lt * 0.18), Math.round(Lt * 0.82)]) for (let y = Ht - 3; y < Ht; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-          for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
-        }), fr = A.reg(Wt, Ht, (sp) => {
-          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 125);
-          for (let y = 2; y < 8; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, y < 3 ? 140 : 118);
-          for (let hx of [1, Wt - 3])
-            sp.set(hx, Ht - 6, CS.HEAD, 128), sp.set(hx + 1, Ht - 6, CS.HEAD, 128);
-          for (let x = 0; x < Wt; x++) sp.set(x, Ht - 2, CS.CHROME, 110);
-        }), bk = A.reg(Wt, Ht, (sp) => {
-          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 118);
-          sp.set(Wt >> 1, 2, CS.BODY, 90);
-          for (let y = 1; y < Ht - 2; y++) sp.set(Wt >> 1, y, CS.BODY, 96);
-          for (let tx of [0, Wt - 2]) for (let y = Ht - 8; y < Ht - 5; y++)
-            sp.set(tx, y, CS.TAIL, 128), sp.set(tx + 1, y, CS.TAIL, 128);
-        });
-        return box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, fr, bk, top(Lt, Wt, { lines: 6 }))), o.cone && (box(mb, -0.2, -0.15, H, 0.1, 0.15, H + 0.3, faces(this.solid.accent, this.solid.accent, this.solid.accent, this.solid.white)), box(mb, -0.22, -0.18, H + 0.3, 0.12, 0.18, H + 0.55, faces(this.solid.white, this.solid.white, this.solid.white, this.solid.white))), o.beacon && box(mb, 0.4, -0.12, H, 0.6, 0.12, H + 0.15, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), mb.finish();
+        let mb = new MeshBuilder(), L = o.len ?? 2.75, W = o.wid ?? 1, H = o.h ?? 1.25, w = W / 2, zb = 0.16, xr = -L / 2, xf = L / 2, xWin = xf - 0.82, xHood = xf - 0.4, zHood = 0.72, st = [
+          { x: xr, pts: bodySec(w - 0.04, zb + 0.02, H - 0.09, H - 0.03, 0.05) },
+          { x: xr + 0.06, pts: bodySec(w, zb, H - 0.07, H, 0.06) },
+          { x: xWin, pts: bodySec(w, zb, H - 0.07, H, 0.06) },
+          { x: xHood, pts: bodySec(w, zb, zHood - 0.04, zHood, 0.05) },
+          { x: xf - 0.06, pts: bodySec(w, zb, zHood - 0.12, zHood - 0.07, 0.05) },
+          { x: xf, pts: bodySec(w - 0.05, zb + 0.03, zHood - 0.2, zHood - 0.14, 0.05) }
+        ], bb = bboxOf(st), Lt = (bb.x1 - bb.x0) * 32, Wt = (bb.y1 - bb.y0) * 32, Ht = (bb.z1 - bb.z0) * 32, U = (x) => (x - bb.x0) * 32, V = (z) => (bb.z1 - z) * 32, r = 0.19, wheelX = [xr + 0.55, xf - 0.5], side = reg(Lt, Ht, (sp) => {
+          let HH = Math.round(Ht), LL = Math.round(Lt);
+          paintBodySide(sp, LL, HH, { vs: 2, arches: wheelX.map((x) => [U(x), V(r), r * 32 + 1.5]) });
+          let bpx = Math.round(U(xWin - 0.3));
+          for (let y = 4; y < V(zHood) + 1; y++) {
+            let z = bb.z1 - y / 32, ta = clamp01((H - z) / (H - zHood)), ax = U(xWin + (xHood - xWin) * ta) - 2;
+            for (let x = bpx + 2; x < ax; x++) sp.set(x, y, CS.GLASS, (x + y * 2) % 13 < 2 ? 156 : 118);
+          }
+          for (let y = 3; y < HH - 3; y++)
+            sp.set(bpx, y, CS.BODY, 96), sp.set(Math.round(U(xWin - 0.95)), y, CS.BODY, 96);
+          if (sp.set(bpx + 3, Math.round(V(zHood)) + 3, CS.CHROME, 150), o.stripe != null) for (let x = 0; x < LL; x++)
+            sp.set(x, o.stripe, CS.ACCENT, 136), sp.set(x, o.stripe + 1, CS.ACCENT, 116), sp.set(x, o.stripe + 3, CS.ACCENT, 126);
+          if (o.text) for (let x = 6; x < bpx - 10; x += 2)
+            sp.set(x, 10, CS.ACCENT, 136), x % 6 === 0 && sp.set(x, 11, CS.ACCENT, 120);
+          if (o.window) {
+            for (let y = 6; y < 17; y++) for (let x = 12; x < 34; x++) sp.set(x, y, CS.INTERIOR, y < 8 ? 150 : 124);
+            for (let x = 10; x < 36; x++)
+              sp.set(x, 5, CS.WHITE, 150), sp.set(x, 17, CS.CHROME, 140);
+            for (let k = 0; k < 4; k++) for (let y = 19; y < 25; y++) for (let x = 38 + k * 6; x < 42 + k * 6; x++) sp.set(x, y, [CS.ACCENT, CS.SIGN, CS.HEAD, CS.ACCENT][k], 136);
+          }
+        }), top = reg(Lt, Wt, (sp) => {
+          for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) {
+            let e = Math.min(y, Wt - 1 - y);
+            sp.set(x, y, CS.BODY, e < 1 ? 120 : x % 8 === 0 ? 128 : 148);
+          }
+        }), vF = Math.round(V(zHood - 0.14)), front = reg(Wt, Ht, (sp) => {
+          let HH = Math.round(Ht), WW = Math.round(Wt);
+          for (let y = 0; y < HH; y++) for (let x = 0; x < WW; x++) sp.set(x, y, CS.BODY, y <= vF ? 150 : 124);
+          for (let y = vF + 3; y < HH - 4; y++) for (let x = 8; x < WW - 8; x++) sp.set(x, y, CS.BLACK, (y - vF) % 2 ? 76 : 106);
+          for (let hx of [2, WW - 7]) for (let x = hx; x < hx + 5; x++)
+            sp.set(x, vF + 3, CS.HEAD, 146), sp.set(x, vF + 4, CS.HEAD, 120), sp.set(x, vF + 5, CS.HEAD, 104);
+          for (let x = 0; x < WW; x++)
+            sp.set(x, HH - 3, CS.TRIM, 118), sp.set(x, HH - 2, CS.TRIM, 104), sp.set(x, HH - 1, CS.TRIM, 80);
+          for (let x = (WW >> 1) - 3; x < (WW >> 1) + 3; x++) sp.set(x, HH - 4, CS.PLATE, 132);
+        }), back = reg(Wt, Ht, (sp) => {
+          let HH = Math.round(Ht), WW = Math.round(Wt);
+          for (let y = 0; y < HH; y++) for (let x = 0; x < WW; x++) sp.set(x, y, CS.BODY, y < 2 ? 148 : 120);
+          for (let y = 4; y < 14; y++) for (let [x0, x1] of [[3, (WW >> 1) - 2], [(WW >> 1) + 2, WW - 3]]) for (let x = x0; x < x1; x++) sp.set(x, y, CS.GLASS, y < 6 ? 146 : 112);
+          for (let y = 2; y < HH - 3; y++) sp.set(WW >> 1, y, CS.BLACK, 80);
+          for (let tx of [0, WW - 2]) for (let y = 16; y < 24; y++)
+            sp.set(tx, y, CS.TAIL, 140), sp.set(tx + 1, y, CS.TAIL, 116);
+          for (let x = (WW >> 1) - 3; x < (WW >> 1) + 3; x++) sp.set(x, HH - 5, CS.PLATE, 132);
+          for (let x = 0; x < WW; x++)
+            sp.set(x, HH - 3, CS.TRIM, 112), sp.set(x, HH - 2, CS.TRIM, 100), sp.set(x, HH - 1, CS.TRIM, 80);
+        }), glassF = glassPanel(Wt, V(zHood) + 1, { wipers: !0, fx: 2 });
+        return loft2(mb, st, { side, top, front, back, glassF }, { bb, faceKey: (i, j) => i === 2 && j === 2 ? "glassF" : null }), box(mb, xf - 0.02, -w + 0.03, zb - 0.01, xf + 0.05, w - 0.03, zb + 0.1, S2.plastic), box(mb, xr - 0.05, -w + 0.03, zb - 0.01, xr + 0.02, w - 0.03, zb + 0.1, S2.plastic), mirrors(mb, xHood - 0.04, w, zHood), wheelsAt(mb, wheelX, w - 0.07, r, 0.15, wheelTex(r)), o.cone && (box(mb, -0.25, -0.16, H, 0.09, 0.16, H + 0.04, S2.white), mb.cone(-0.08, 0, H + 0.38, H + 0.04, 0.15, 8, S2.accent, { mat: 0 }), mb.cylinder(-0.08, 0, H + 0.38, H + 0.5, 0.17, 8, S2.white, S2.white, { mat: 0 }), mb.cone(-0.08, 0, H + 0.5, H + 0.66, 0.15, 8, S2.white, { mat: 0 })), o.beacon && box(mb, 0.4, -0.12, H, 0.6, 0.12, H + 0.15, S2.sign), mb.finish();
       }, bus = () => {
-        let mb = new MeshBuilder(), L = 6.5, W = 1.25, H = 1.6, Lt = Math.round(L * T2), Wt = Math.round(W * T2), Ht = Math.round(H * T2), side = A.reg(Lt, Ht, (sp) => {
-          for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.WHITE, y < 2 ? 145 : 125);
-          for (let y = 4; y < 13; y++) for (let x = 4; x < Lt - 6; x++) sp.set(x, y, x % 11 === 0 ? CS.BLACK : CS.INTERIOR, y < 6 ? 135 : 118);
+        let mb = new MeshBuilder(), L = 6.5, W = 1.25, H = 1.6, w = W / 2, zb = 0.18, xr = -L / 2, xf = L / 2, st = [
+          { x: xr, pts: bodySec(w - 0.05, zb + 0.02, H - 0.1, H - 0.03, 0.06) },
+          { x: xr + 0.08, pts: bodySec(w, zb, H - 0.08, H, 0.07) },
+          { x: xf - 0.1, pts: bodySec(w, zb, H - 0.08, H, 0.07) },
+          { x: xf, pts: bodySec(w - 0.06, zb + 0.02, H - 0.12, H - 0.05, 0.06) }
+        ], bb = bboxOf(st), Lt = Math.round((bb.x1 - bb.x0) * 32), Wt = Math.round((bb.y1 - bb.y0) * 32), Ht = Math.round((bb.z1 - bb.z0) * 32), U = (x) => (x - bb.x0) * 32, V = (z) => (bb.z1 - z) * 32, r = 0.24, wheelX = [xr + 1.35, xf - 1.25], side = reg(Lt, Ht, (sp) => {
+          paintBodySide(sp, Lt, Ht, { vs: 2, slot: CS.WHITE, arches: wheelX.map((x) => [U(x), V(r), r * 32 + 1.5]) });
+          for (let y = 5; y < 22; y++)
+            for (let x = 4; x < Lt - 4; x++) {
+              let frame = (x - 4) % 22 < 2;
+              sp.set(x, y, frame ? CS.BLACK : CS.INTERIOR, frame ? 76 : y < 8 ? 146 : (x + y) % 17 < 2 ? 150 : 120);
+            }
+          for (let [d0, d1] of [[Lt - 26, Lt - 12], [Math.round(Lt * 0.52), Math.round(Lt * 0.52) + 14]])
+            for (let y = 5; y < Ht - 3; y++) for (let x = d0; x < d1; x++) sp.set(x, y, x === d0 || x === d1 - 1 || x === d0 + d1 >> 1 ? CS.BLACK : CS.GLASS, x === d0 || x === d1 - 1 ? 72 : y < 8 ? 150 : 118);
           for (let x = 0; x < Lt; x++)
-            sp.set(x, 15, CS.ACCENT, 128), sp.set(x, 16, CS.ACCENT, 115), sp.set(x, 17, CS.ACCENT, 128);
-          for (let y = 4; y < Ht - 3; y++) for (let x = Lt - 13; x < Lt - 9; x++) sp.set(x, y, CS.GLASS, 120);
-          for (let wx of [14, Lt - 22]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 3; x <= wx + 3; x++) sp.set(x, y, CS.TIRE, 110);
-          for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
-        }), fr = A.reg(Wt, Ht, (sp) => {
-          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 125);
-          for (let x = 1; x < Wt - 1; x++)
-            sp.set(x, 1, CS.BLACK, 110), sp.set(x, 2, CS.LED, 128);
-          for (let y = 4; y < 14; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, y < 6 ? 140 : 118);
-          for (let hx of [1, Wt - 3])
-            sp.set(hx, Ht - 6, CS.HEAD, 128), sp.set(hx + 1, Ht - 6, CS.HEAD, 128);
-          for (let x = 0; x < Wt; x++) sp.set(x, 17, CS.ACCENT, 128);
-        }), bk = A.reg(Wt, Ht, (sp) => {
+            sp.set(x, 24, CS.ACCENT, 140), sp.set(x, 25, CS.ACCENT, 124), sp.set(x, 26, CS.ACCENT, 140), sp.set(x, 28, CS.ACCENT, 110);
+          let ax0 = Math.round(U(wheelX[0]) + 14), ax1 = Math.round(Lt * 0.52) - 6;
+          for (let y = 30; y < Ht - 4; y++) for (let x = ax0; x < ax1; x++) sp.set(x, y, x < ax0 + 2 || x >= ax1 - 2 || y < 31 ? CS.BLACK : (x - ax0 >> 3) % 3 === 0 ? CS.SIGN : CS.HEAD, 118);
+        }), top = reg(Lt, Wt, (sp) => {
+          for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) {
+            let e = Math.min(y, Wt - 1 - y);
+            sp.set(x, y, CS.WHITE, e < 2 ? 124 : 146);
+          }
+          for (let x = 30; x < 50; x++) for (let y = 8; y < Wt - 8; y++) sp.set(x, y, CS.CHROME, 130);
+        }), front = reg(Wt, Ht, (sp) => {
+          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 128);
+          for (let x = 4; x < Wt - 4; x++)
+            sp.set(x, 2, CS.BLACK, 90), sp.set(x, 3, CS.LED, 140), sp.set(x, 4, CS.LED, 120), sp.set(x, 5, CS.BLACK, 90);
+          for (let y = 7; y < 27; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, (x - y * 2 + 60) % 17 < 3 ? 158 : y < 9 ? 146 : 122);
+          for (let y = 7; y < 27; y++) sp.set(Wt >> 1, y, CS.BLACK, 80);
+          for (let x = 0; x < Wt; x++) sp.set(x, 29, CS.ACCENT, 136);
+          for (let hx of [2, Wt - 7]) for (let x = hx; x < hx + 5; x++)
+            sp.set(x, Ht - 9, CS.HEAD, 146), sp.set(x, Ht - 8, CS.HEAD, 118);
+          for (let x = 0; x < Wt; x++)
+            sp.set(x, Ht - 3, CS.TRIM, 110), sp.set(x, Ht - 2, CS.TRIM, 96), sp.set(x, Ht - 1, CS.TRIM, 80);
+        }), back = reg(Wt, Ht, (sp) => {
           for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 118);
-          for (let y = 3; y < 9; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 118);
-          for (let tx of [0, Wt - 2]) for (let y = Ht - 9; y < Ht - 5; y++)
-            sp.set(tx, y, CS.TAIL, 128), sp.set(tx + 1, y, CS.TAIL, 128);
-        }), roof = A.reg(Lt, Wt, (sp) => {
-          for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.WHITE, 140);
+          for (let y = 5; y < 15; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, CS.GLASS, 112);
+          for (let y = 20; y < 32; y++) for (let x = 8; x < Wt - 8; x++) sp.set(x, y, CS.BLACK, y % 2 ? 80 : 104);
+          for (let tx of [1, Wt - 4]) for (let y = 18; y < 30; y++) for (let x = tx; x < tx + 3; x++) sp.set(x, y, CS.TAIL, y % 4 === 0 ? 110 : 136);
+          for (let x = 0; x < Wt; x++)
+            sp.set(x, Ht - 2, CS.TRIM, 100), sp.set(x, Ht - 1, CS.TRIM, 80);
         });
-        return box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, fr, bk, roof)), box(mb, -1.5, -0.4, H, 0.2, 0.4, H + 0.2, faces(this.solid.chrome, this.solid.chrome, this.solid.chrome, this.solid.chrome)), mb.finish();
+        return loft2(mb, st, { side, top, front, back }, { bb }), box(mb, -1.6, -0.42, H, 0.1, 0.42, H + 0.2, S2.chrome), box(mb, 1.4, -0.3, H, 2.2, 0.3, H + 0.08, S2.cargo), mirrors(mb, xf - 0.05, w, H - 0.6), wheelsAt(mb, wheelX, w - 0.08, r, 0.16, wheelTex(r)), mb.finish();
       }, truck = (o = {}) => {
-        let mb = new MeshBuilder(), L = o.len ?? 4, W = o.wid ?? 1.125, cabL = 1.1, cabH = 1.25, boxH = 1.75, Wt = Math.round(W * T2), cabT = Math.round(cabL * T2), cabHt = Math.round(cabH * T2), cabSide = A.reg(cabT, cabHt, (sp) => {
-          for (let y = 0; y < cabHt; y++) for (let x = 0; x < cabT; x++) sp.set(x, y, CS.BODY, y < 2 ? 145 : 125);
-          for (let y = 2; y < 8; y++) for (let x = 4; x < cabT - 2; x++) sp.set(x, y, CS.GLASS, 120);
-          for (let y = cabHt - 3; y < cabHt; y++) for (let x = 4; x < 9; x++) sp.set(x, y, CS.TIRE, 110);
-        }), cabFr = A.reg(Wt, cabHt, (sp) => {
-          for (let y = 0; y < cabHt; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 125);
-          for (let y = 2; y < 8; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, 120);
-          for (let y = 10; y < cabHt - 3; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, CS.BLACK, x % 2 ? 110 : 90);
-          for (let hx of [1, Wt - 3])
-            sp.set(hx, 11, CS.HEAD, 128), sp.set(hx + 1, 11, CS.HEAD, 128);
-        }), bodyL = L - cabL - 0.1, bLt = Math.round(bodyL * T2), bHt = Math.round((boxH - 0.2) * T2), boxSide = A.reg(bLt, bHt, (sp) => {
-          for (let y = 0; y < bHt; y++) for (let x = 0; x < bLt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, y < 1 ? 145 : 122);
-          if (o.ladder) for (let x = 0; x < bLt; x++)
-            sp.set(x, 3, CS.CHROME, 128), x % 3 === 0 && sp.set(x, 4, CS.CHROME, 110), sp.set(x, 5, CS.CHROME, 128);
-          if (o.stripe != null) for (let x = 0; x < bLt; x++)
-            sp.set(x, o.stripe, CS.ACCENT, 128), sp.set(x, o.stripe + 1, CS.ACCENT, 110);
-          if (o.hopper) for (let y = 4; y < bHt - 2; y++) for (let x = 0; x < 6; x++) sp.set(x, y, CS.BLACK, 100);
-          for (let wx of [8, bLt - 8]) for (let y = bHt - 4; y < bHt; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-          for (let x = 0; x < bLt; x++) sp.set(x, bHt - 1, CS.TRIM, 80);
-        }), boxBack = A.reg(Wt, bHt, (sp) => {
-          for (let y = 0; y < bHt; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, 115);
-          for (let y = 1; y < bHt - 3; y++) sp.set(Wt >> 1, y, CS.TRIM, 90);
-          for (let tx of [0, Wt - 2]) for (let y = bHt - 6; y < bHt - 3; y++)
-            sp.set(tx, y, CS.TAIL, 128), sp.set(tx + 1, y, CS.TAIL, 128);
-        }), boxTop = A.reg(bLt, Wt, (sp) => {
-          for (let y = 0; y < Wt; y++) for (let x = 0; x < bLt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, 138);
+        let mb = new MeshBuilder(), L = o.len ?? 4, W = o.wid ?? 1.125, w = W / 2, cabL = 1.15, cabH = 1.32, boxH = o.boxH ?? 1.8, zb = 0.2, xf = L / 2, xc = xf - cabL, xr = -L / 2, st = [
+          { x: xc, pts: bodySec(w, zb, cabH - 0.06, cabH, 0.06) },
+          { x: xf - 0.5, pts: bodySec(w, zb, cabH - 0.06, cabH, 0.06) },
+          { x: xf - 0.2, pts: bodySec(w, zb, 0.8, 0.85, 0.05) },
+          { x: xf, pts: bodySec(w - 0.05, zb + 0.02, 0.72, 0.77, 0.05) }
+        ], bb = bboxOf(st), Lt = Math.round((bb.x1 - bb.x0) * 32), Wt = Math.round((bb.y1 - bb.y0) * 32), Ht = Math.round((bb.z1 - bb.z0) * 32), U = (x) => (x - bb.x0) * 32, V = (z) => (bb.z1 - z) * 32, r = 0.22, cabSlot = o.cabSlot ?? CS.BODY, side = reg(Lt, Ht, (sp) => {
+          paintBodySide(sp, Lt, Ht, { vs: 2, slot: cabSlot, arches: [[U(xf - 0.45), V(r), r * 32 + 1.5]] });
+          for (let y = 4; y < V(0.86); y++) {
+            let z = bb.z1 - y / 32, ta = clamp01((cabH - z) / (cabH - 0.85)), ax = U(xf - 0.5 + 0.3 * ta) - 2;
+            for (let x = 5; x < ax; x++) sp.set(x, y, CS.GLASS, (x + y * 2) % 13 < 2 ? 156 : 118);
+          }
+          for (let y = 3; y < Ht - 3; y++) sp.set(3, y, cabSlot, 96);
+          sp.set(7, Math.round(V(0.86)) + 3, CS.CHROME, 150);
+          for (let y = Math.round(V(0.6)); y < Math.round(V(0.6)) + 4; y++) for (let x = 2; x < 6; x++) sp.set(x, y, CS.CHROME, 130);
+        }), top = reg(Lt, Wt, (sp) => {
+          for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, cabSlot, Math.min(y, Wt - 1 - y) < 2 ? 122 : 146);
+        }), vF = Math.round(V(0.77)), front = reg(Wt, Ht, (sp) => {
+          for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, cabSlot, y <= vF ? 148 : 122);
+          for (let y = vF + 2; y < Ht - 5; y++) for (let x = 7; x < Wt - 7; x++) sp.set(x, y, CS.CHROME, (y - vF) % 2 ? 96 : 140);
+          for (let hx of [1, Wt - 6]) for (let x = hx; x < hx + 5; x++) for (let y = vF + 2; y < vF + 5; y++) sp.set(x, y, CS.HEAD, 150 - (y - vF) * 10);
+          for (let x = 0; x < Wt; x++)
+            sp.set(x, Ht - 4, CS.CHROME, 140), sp.set(x, Ht - 3, CS.CHROME, 118), sp.set(x, Ht - 2, CS.TRIM, 96), sp.set(x, Ht - 1, CS.TRIM, 80);
+        }), glassF = glassPanel(Wt, V(0.85) + 1, { wipers: !0, fx: 2 });
+        loft2(mb, st, { side, top, front, back: S2.black, glassF }, { bb, faceKey: (i, j) => i === 1 && j === 2 ? "glassF" : null });
+        let bst = [
+          { x: xr, pts: bodySec(w + 0.02, 0.36, boxH - 0.04, boxH, 0.04) },
+          { x: xc - 0.08, pts: bodySec(w + 0.02, 0.36, boxH - 0.04, boxH, 0.04) }
+        ], cbb = bboxOf(bst), BL = Math.round((cbb.x1 - cbb.x0) * 32), BW = Math.round((cbb.y1 - cbb.y0) * 32), BH = Math.round((cbb.z1 - cbb.z0) * 32), cargo = o.cargo ?? CS.WHITE, bside = reg(BL, BH, (sp) => {
+          for (let y = 0; y < BH; y++) for (let x = 0; x < BL; x++) sp.set(x, y, cargo, y < 2 ? 148 : x % 16 === 0 ? 112 : 126);
+          for (let x = 0; x < BL; x++)
+            sp.set(x, BH - 1, CS.TRIM, 90), sp.set(x, BH - 2, cargo, 104);
+          if (o.stripe != null) for (let x = 0; x < BL; x++)
+            sp.set(x, o.stripe, CS.ACCENT, 140), sp.set(x, o.stripe + 1, CS.ACCENT, 120), sp.set(x, o.stripe + 3, CS.ACCENT, 130);
+          if (o.ladder) for (let x = 0; x < BL; x++)
+            sp.set(x, 4, CS.CHROME, 146), x % 4 === 0 && (sp.set(x, 5, CS.CHROME, 120), sp.set(x, 6, CS.CHROME, 120)), sp.set(x, 7, CS.CHROME, 146);
+          if (o.lockers) for (let k = 0; k < 5; k++) {
+            let x0 = 4 + k * Math.floor((BL - 8) / 5);
+            for (let y = 12; y < BH - 4; y++) for (let x = x0; x < x0 + Math.floor((BL - 8) / 5) - 2; x++) sp.set(x, y, CS.CHROME, (x + y) % 3 === 0 ? 150 : y === 12 ? 160 : 124);
+          }
+          if (o.hopper) for (let y = 6; y < BH - 3; y++) for (let x = 0; x < 12; x++) sp.set(x, y, CS.BLACK, x === 11 ? 70 : 100 + (x + y) % 4 * 4);
+          if (o.logo) for (let y = 10; y < 18; y++) for (let x = Math.round(BL * 0.45); x < BL * 0.45 + 16; x++) sp.set(x, y, CS.ACCENT, (x + y) % 5 === 0 ? 150 : 128);
+        }), btop = reg(BL, BW, (sp) => {
+          for (let y = 0; y < BW; y++) for (let x = 0; x < BL; x++) sp.set(x, y, cargo, Math.min(y, BW - 1 - y) < 2 ? 118 : x % 12 === 0 ? 124 : 140);
+        }), bback = reg(BW, BH, (sp) => {
+          for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) sp.set(x, y, cargo, 116);
+          for (let y = 2; y < BH - 4; y++)
+            if (sp.set(BW >> 1, y, CS.TRIM, 86), y % 8 === 0) for (let x = 2; x < BW - 2; x++) sp.set(x, y, CS.CHROME, 120);
+          for (let tx of [1, BW - 4]) for (let y = BH - 10; y < BH - 4; y++) for (let x = tx; x < tx + 3; x++) sp.set(x, y, CS.TAIL, 136);
+          for (let x = 0; x < BW; x++)
+            sp.set(x, BH - 2, CS.TRIM, 100), sp.set(x, BH - 1, CS.TRIM, 80);
+        }), bfront = reg(BW, BH, (sp) => {
+          for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) sp.set(x, y, cargo, y < 2 ? 146 : x < 2 || x >= BW - 2 ? 108 : 122);
+          for (let mx of [3, BW - 5])
+            sp.set(mx, 3, CS.TAIL, 140), sp.set(mx + 1, 3, CS.TAIL, 140);
         });
-        return box(mb, L / 2 - cabL, -W / 2, 0, L / 2, W / 2, cabH, faces(cabSide, cabFr, this.solid.body, top(cabT, Wt))), box(mb, -L / 2, -W / 2, 0.2, L / 2 - cabL - 0.1, W / 2, boxH, faces(boxSide, this.solid.trim, boxBack, boxTop)), box(mb, -L / 2, -W / 2 + 0.1, 0, L / 2 - cabL, W / 2 - 0.1, 0.2, faces(this.solid.black, this.solid.black, this.solid.black, this.solid.black)), o.lightBar && (box(mb, L / 2 - 0.7, -0.4, cabH, L / 2 - 0.5, -0.02, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red)), box(mb, L / 2 - 0.7, 0.02, cabH, L / 2 - 0.5, 0.4, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red))), o.beacon && box(mb, L / 2 - 0.65, -0.12, cabH, L / 2 - 0.45, 0.12, cabH + 0.16, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), o.plow && box(mb, L / 2 + 0.05, -0.75, 0, L / 2 + 0.3, 0.75, 0.55, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign)), o.ladderTop && box(mb, -L / 2 + 0.2, -0.25, boxH, L / 2 - cabL, 0.25, boxH + 0.12, faces(this.solid.chrome, this.solid.chrome, this.solid.chrome, this.solid.chrome)), mb.finish();
+        if (loft2(mb, bst, { side: bside, top: btop, back: bback, front: bfront }, { bb: cbb }), box(mb, xr + 0.1, -w + 0.12, 0.12, xc, w - 0.12, 0.36, S2.black), wheelsAt(mb, [xf - 0.45], w - 0.08, r, 0.16, wheelTex(r)), wheelsAt(mb, o.len >= 4.5 ? [xr + 0.7, xr + 1.25] : [xr + 0.75], w - 0.08, r, 0.18, wheelTex(r)), box(mb, xf - 0.02, -w + 0.02, zb - 0.02, xf + 0.06, w - 0.02, zb + 0.1, S2.chrome), mirrors(mb, xf - 0.42, w, 0.95), o.lightBar && (box(mb, xf - 0.62, -0.42, cabH, xf - 0.48, -0.02, cabH + 0.12, S2.red), box(mb, xf - 0.62, 0.02, cabH, xf - 0.48, 0.42, cabH + 0.12, S2.blue)), o.beacon && box(mb, xf - 0.65, -0.12, cabH, xf - 0.45, 0.12, cabH + 0.16, S2.sign), o.plow) {
+          let b0 = [xf + 0.35, -0.8], b1 = [xf + 0.12, 0.8];
+          mb.quad([b0[0], b0[1], 0.6], [b1[0], b1[1], 0.6], [b1[0], b1[1], 0.02], [b0[0], b0[1], 0.02], [[0, 0], [2, 0], [2, 2], [0, 2]], S2.sign, null, MAT.SNOW), mb.quad([b1[0] - 0.04, b1[1], 0.6], [b0[0] - 0.04, b0[1], 0.6], [b0[0] - 0.04, b0[1], 0.02], [b1[0] - 0.04, b1[1], 0.02], [[0, 0], [2, 0], [2, 2], [0, 2]], S2.black, null, 0), box(mb, xf, -0.1, 0.2, xf + 0.25, 0.1, 0.35, S2.black);
+        }
+        if (o.ladderTop) {
+          box(mb, xr + 0.25, -0.28, boxH, xc - 0.2, -0.2, boxH + 0.14, S2.chrome), box(mb, xr + 0.25, 0.2, boxH, xc - 0.2, 0.28, boxH + 0.14, S2.chrome);
+          for (let x = xr + 0.35; x < xc - 0.25; x += 0.22) box(mb, x, -0.2, boxH + 0.06, x + 0.04, 0.2, boxH + 0.1, S2.chrome);
+        }
+        return mb.finish();
       }, defs = {
         subway: (() => {
-          let mb = new MeshBuilder(), L = 3.25, W = 1.125, H = 1.5, Lt = Math.round(L * T2), Wt = Math.round(W * T2), Ht = Math.round(H * T2), side = A.reg(Lt, Ht, (sp) => {
-            for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 6 === 0 ? 118 : 132) - (y > Ht - 5 ? 20 : 0));
-            for (let y = 4; y < 11; y++) for (let x = 3; x < Lt - 3; x++) {
-              let door = x > 9 && x < 15 || x > Lt - 16 && x < Lt - 10;
-              sp.set(x, y, door ? CS.BODY : x % 8 === 0 ? CS.BLACK : CS.INTERIOR, door ? 110 : y < 6 ? 140 : 120);
+          let mb = new MeshBuilder(), L = 3.25, W = 1.125, H = 1.5, w = W / 2, zb = 0.12, sec = [[-w, zb], [-w, H - 0.18], [-(w - 0.06), H - 0.06], [-(w - 0.2), H], [w - 0.2, H], [w - 0.06, H - 0.06], [w, H - 0.18], [w, zb]], st = [{ x: -L / 2, pts: sec }, { x: L / 2, pts: sec }], bb = bboxOf(st), Lt = Math.round((bb.x1 - bb.x0) * 32), Wt = Math.round((bb.y1 - bb.y0) * 32), Ht = Math.round((bb.z1 - bb.z0) * 32), side = reg(Lt, Ht, (sp) => {
+            for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 4 === 0 ? 116 : 134) - (y > Ht - 8 ? 22 : 0) + (y < 4 ? 12 : 0));
+            let doors = [[16, 30], [Lt - 30, Lt - 16]];
+            for (let y = 8; y < 21; y++)
+              for (let x = 4; x < Lt - 4; x++)
+                doors.some(([a, b]) => x >= a - 1 && x <= b) || sp.set(x, y, x % 14 < 2 ? CS.BLACK : CS.INTERIOR, x % 14 < 2 ? 80 : y < 10 ? 150 : 122);
+            for (let [a, b] of doors) {
+              for (let y = 6; y < Ht - 8; y++) for (let x = a; x < b; x++) sp.set(x, y, CS.BODY, x === a || x === b - 1 ? 92 : x === a + b >> 1 ? 96 : 140);
+              for (let y = 9; y < 19; y++) for (let x0 of [a + 2, (a + b >> 1) + 2]) for (let x = x0; x < x0 + 4; x++) sp.set(x, y, CS.INTERIOR, 128);
             }
-            for (let dx of [9, 15, Lt - 16, Lt - 10]) for (let y = 3; y < Ht - 5; y++) sp.set(dx, y, CS.BLACK, 100);
             for (let x = 0; x < Lt; x++)
-              sp.set(x, 13, CS.ACCENT, 128), sp.set(x, 14, CS.ACCENT, 110);
-            for (let wx of [8, Lt - 9]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 4; x <= wx + 4; x++) sp.set(x, y, CS.TIRE, 100);
-          }), end = A.reg(Wt, Ht, (sp) => {
-            for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 120);
-            for (let y = 4; y < 10; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 125);
-            for (let x = 5; x < Wt - 5; x++) sp.set(x, 2, CS.LED, 128);
-            sp.set(2, Ht - 6, CS.HEAD, 128), sp.set(Wt - 3, Ht - 6, CS.HEAD, 128), sp.set(3, Ht - 6, CS.HEAD, 128), sp.set(Wt - 4, Ht - 6, CS.HEAD, 128);
-          }), roof = A.reg(Lt, Wt, (sp) => {
-            for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y === 0 || y === Wt - 1 ? 110 : 140);
+              sp.set(x, 25, CS.ACCENT, 140), sp.set(x, 26, CS.ACCENT, 118);
+            for (let y = Ht - 6; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.TIRE, x % 6 === 0 ? 70 : 96);
+          }), top = reg(Lt, Wt, (sp) => {
+            for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, Math.min(y, Wt - 1 - y) < 3 ? 118 : x % 20 < 2 ? 120 : 140);
+          }), end = reg(Wt, Ht, (sp) => {
+            for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 122);
+            for (let y = 8; y < 20; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, x > 13 && x < 22 ? CS.BODY : CS.GLASS, x > 13 && x < 22 ? 110 : y < 10 ? 150 : 120);
+            for (let y = 9; y < 26; y++) for (let x = 15; x < 21; x++) sp.set(x, y, CS.INTERIOR, 120);
+            for (let x = 6; x < Wt - 6; x++)
+              sp.set(x, 4, CS.LED, 146), sp.set(x, 5, CS.LED, 120);
+            for (let hx of [3, Wt - 6]) for (let x = hx; x < hx + 3; x++)
+              sp.set(x, 30, CS.HEAD, 146), sp.set(x, 31, CS.HEAD, 120);
+            for (let y = Ht - 6; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.TIRE, 90);
           });
-          return box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, end, end, roof)), mb.finish();
+          loft2(mb, st, { side, top, front: end, back: end }, { bb });
+          for (let x of [-L / 2 + 0.55, L / 2 - 0.55]) box(mb, x - 0.35, -w + 0.1, 0, x + 0.35, w - 0.1, zb + 0.02, S2.black);
+          return mb.finish();
         })(),
         sedan: sedan(),
-        taxi: sedan({ taxiSign: !0, checker: 3 }),
-        suv: sedan({ len: 2.375, wid: 1, bodyH: 0.5625, cabH: 0.375, cabLen: 1.5, cabOff: -0.25 }),
-        police: sedan({ len: 2.375, lightBar: !0, stripe: 3 }),
+        taxi: sedan({ taxiSign: !0, checker: !0, chromeBumper: !1 }),
+        suv: sedan({ len: 2.375, wid: 1, zt: 0.6, cabH: 0.36, cabR: -0.98, roofR: -0.88, cabF: 0.42, roofF: 0.08, hoodDrop: 0.05, rack: !0, darkRims: !0 }),
+        police: sedan({ len: 2.375, lightBar: !0, stripe: !0, text: !0, darkRims: !0 }),
         van: van({ text: !0 }),
-        icecream: van({ len: 3.25, h: 1.375, stripe: 12, window: !0, cone: !0 }),
+        icecream: van({ len: 3.25, h: 1.375, stripe: 26, window: !0, cone: !0 }),
         bus: bus(),
-        truck: truck({ stripe: 4 }),
-        fire: truck({ len: 5, cargo: CS.BODY, ladder: !0, lightBar: !0, ladderTop: !0 }),
-        garbage: truck({ len: 4.25, hopper: !0, stripe: 8 }),
-        plow: truck({ len: 4.25, hopper: !0, stripe: 8, beacon: !0, plow: !0 })
+        truck: truck({ stripe: 12, logo: !0 }),
+        fire: truck({ len: 5, cargo: CS.BODY, cabSlot: CS.BODY, ladder: !0, lightBar: !0, ladderTop: !0, lockers: !0 }),
+        garbage: truck({ len: 4.25, hopper: !0, stripe: 20 }),
+        plow: truck({ len: 4.25, hopper: !0, stripe: 20, beacon: !0, plow: !0 })
       }, gl = this.gl;
       for (let k in defs) {
         let m = defs[k], vao = gl.createVertexArray();
@@ -4947,7 +5915,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }, this.xmasRow = pal.alloc(), treePalette(pal, "pine", 3, !0, 4863526, this.xmasRow), this.season = -1, this.snowy = null;
       let rng = new RNG(5);
       this.lampDelay = world.lamps.map(() => rng.range(0, 0.6)), this.lampFlicker = world.lamps.map(() => rng.chance(0.04) ? rng.range(0.5, 2) : 0), this.frames = {};
-      for (let n of ["dish", "antenna", "deckchair", "bush", "grill", "laundry", "statue", "xmas", "snowman", "glow", "lamp2", "lamp1", "beacon", "treeBundle", "cartUmbrella"]) this.frames[n] = atlas.get(n);
+      for (let n of ["dish", "antenna", "deckchair", "bush", "grill", "laundry", "statue", "xmas", "snowman", "glow", "lamp2", "lamp1", "beacon", "treeBundle", "cartUmbrella", "pedWalk", "pedHand"]) this.frames[n] = atlas.get(n);
       this.umbRows = {
         hotdog: pal.alloc({ [S.C1]: 15909424, [S.C2]: 2052e3, [S.C3]: 10132899 }),
         halal: pal.alloc({ [S.C1]: 15921902, [S.C2]: 13119532, [S.C3]: 10132899 }),
@@ -5021,7 +5989,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           } else {
             let w = s.axis === "x" ? st.walkEW : st.walkNS;
             if (w === "flash" && time % 1 > 0.5) continue;
-            L.push(s.x, s.y, s.z + (w === "walk" ? 0 : 0.12), this.frames.lamp2, this.glowRows[w === "walk" ? "walk" : "hand"], SF.EMISSIVE | SF.NOSHADOW, 1, 0.02);
+            L.push(s.x, s.y, s.z + 0.02, w === "walk" ? this.frames.pedWalk : this.frames.pedHand, this.glowRows[w === "walk" ? "walk" : "hand"], SF.EMISSIVE | SF.NOSHADOW, 1, 0.02);
           }
         }
       }
@@ -6440,19 +7408,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   var Animals = class {
     constructor(city) {
       this.city = city, this.rng = new RNG(99);
-      let A = city.atlas, mk = (name, w, h, fn) => A.add(name, w, h, fn);
+      let A = city.atlas, mk = (name, w, h, fn) => A.add(name, w, h, (sp) => {
+        fn(sp), selOut(sp, 0.8, 1.05);
+      });
       this.f = {
-        pigeon: { walk: [0, 1].map((f) => mk(null, 8, 7, (sp) => paintPigeon(sp, "walk", f))), peck: [0, 1].map((f) => mk(null, 8, 7, (sp) => paintPigeon(sp, "peck", f))), fly: [0, 1].map((f) => mk(null, 9, 8, (sp) => paintPigeon(sp, "fly", f))) },
-        cat: { walk: [0, 1].map((f) => mk(null, 9, 7, (sp) => paintCat(sp, "walk", f))), sit: [0, 1].map((f) => mk(null, 6, 8, (sp) => paintCat(sp, "sit", f))) },
-        squirrel: { run: [0, 1].map((f) => mk(null, 7, 7, (sp) => paintSquirrel(sp, "run", f))), stand: [mk(null, 7, 7, (sp) => paintSquirrel(sp, "stand", 0))] },
-        duck: { swim: [0, 1].map((f) => mk(null, 8, 6, (sp) => paintDuck(sp, "swim", f))) },
-        rat: { run: [0, 1].map((f) => mk(null, 7, 4, (sp) => {
-          for (let x = 1; x < 5; x++) sp.set(x, 2, S.BODY, 128);
-          sp.set(2, 1, S.BODY, 140), sp.set(3, 1, S.BODY, 140), sp.set(5, 2, S.BODY, 120), sp.set(5, 1, S.EYE, 128), sp.set(0, 2 + f, S.BODY_L, 110), sp.set(1 + f, 3, S.BODY_D, 100), sp.set(4 - f, 3, S.BODY_D, 100);
-        })) }
+        pigeon: { walk: [0, 1].map((f) => mk(null, 16, 14, (sp) => paintPigeon(sp, "walk", f))), peck: [0, 1].map((f) => mk(null, 16, 14, (sp) => paintPigeon(sp, "peck", f))), fly: [0, 1].map((f) => mk(null, 18, 16, (sp) => paintPigeon(sp, "fly", f))) },
+        cat: { walk: [0, 1].map((f) => mk(null, 18, 14, (sp) => paintCat(sp, "walk", f))), sit: [0, 1].map((f) => mk(null, 12, 16, (sp) => paintCat(sp, "sit", f))) },
+        squirrel: { run: [0, 1].map((f) => mk(null, 14, 14, (sp) => paintSquirrel(sp, "run", f))), stand: [mk(null, 14, 14, (sp) => paintSquirrel(sp, "stand", 0))] },
+        duck: { swim: [0, 1].map((f) => mk(null, 16, 12, (sp) => paintDuck(sp, "swim", f))) },
+        rat: { run: [0, 1].map((f) => mk(null, 14, 8, (sp) => paintRat(sp, f))) }
       }, this.dogFrames = {};
       for (let breed in DOG_BREEDS) {
-        let w = DOG_BREEDS[breed].len + 8, h = DOG_BREEDS[breed].hgt + DOG_BREEDS[breed].leg + DOG_BREEDS[breed].head + 2;
+        let [w, h] = dogFrameSize(breed);
         this.dogFrames[breed] = {
           walk: [0, 1, 2, 3].map((f) => mk(null, w, h, (sp) => paintDog(sp, breed, "walk", f))),
           run: [0, 1].map((f) => mk(null, w, h, (sp) => paintDog(sp, breed, "run", f))),
@@ -6474,11 +7441,19 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         red: city.pal.alloc({ [S.C1]: [16724016, 128] }),
         white: city.pal.alloc({ [S.C1]: [16777215, 128] }),
         green: city.pal.alloc({ [S.C1]: [3211104, 128] })
-      }, this.planeFrame = city.atlas.add("plane", 13, 5, (sp) => {
-        for (let x = 0; x < 12; x++) sp.set(x, 2, S.BODY, x < 3 ? 150 : 128);
-        for (let x = 3; x < 11; x++) sp.set(x, 3, S.BODY_D, 110);
-        sp.set(12, 2, S.BODY_L, 150), sp.set(1, 1, S.ACCENT, 128), sp.set(0, 0, S.ACCENT, 128), sp.set(1, 0, S.ACCENT, 110), sp.set(5, 1, S.BODY_L, 140), sp.set(6, 0, S.BODY_L, 140), sp.set(6, 4, S.BODY_D, 100), sp.set(7, 4, S.BODY_D, 100);
-        for (let x = 4; x < 10; x += 2) sp.set(x, 2, S.EYE, 128);
+      }, this.planeFrame = city.atlas.add("plane", 26, 10, (sp) => {
+        for (let x = 3; x < 23; x++)
+          sp.set(x, 4, S.BODY, x < 7 ? 150 : 136), sp.set(x, 5, S.BODY, 122), sp.set(x, 6, S.BODY_D, 100);
+        sp.set(23, 5, S.BODY_L, 150), sp.set(23, 4, S.BODY_L, 140), sp.set(24, 5, S.BODY_L, 128), sp.set(23, 6, S.BODY_D, 110);
+        for (let k = 0; k < 4; k++)
+          sp.set(3 + k, 3 - k, S.ACCENT, 136), sp.set(4 + k, 3 - k, S.ACCENT, 116);
+        sp.set(2, 4, S.ACCENT, 120), sp.set(2, 3, S.ACCENT, 128);
+        for (let k = 0; k < 5; k++)
+          sp.set(11 + k, 7 + (k >> 1), S.BODY_D, 110), sp.set(12 + k, 7 + (k >> 1), S.BODY_D, 96);
+        sp.set(13, 9, S.BODY_D, 90), sp.set(14, 9, S.BODY_D, 90);
+        for (let x = 8; x < 22; x += 2) sp.set(x, 4, S.EYE, 128);
+        sp.set(21, 4, S.EYE, 140), sp.set(22, 4, S.EYE, 140);
+        for (let x = 5; x < 22; x++) sp.set(x, 5, S.ACCENT, 96);
       }), this.initPigeons(), this.initOthers();
     }
     // ---- pigeons ---------------------------------------------------------------
@@ -6766,11 +7741,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     constructor(city) {
       this.city = city, this.rng = new RNG(1234);
       let A = city.atlas;
-      this.fr = { puff: [A.get("puff1"), A.get("puff2"), A.get("puff3"), A.get("puff4")], dot: A.get("dot"), dot2: A.get("dot2"), leaf: A.get("leaf"), glow: A.get("glow") }, this.fr.rain = A.add("rain", 1, 7, (sp) => {
-        for (let y = 0; y < 7; y++) sp.set(0, y, S.C2, 80 + y * 14);
-      }, 0, 6), this.fr.splash = A.add("splash", 3, 2, (sp) => {
-        sp.set(0, 0, S.C2, 128), sp.set(2, 0, S.C2, 128), sp.set(1, 1, S.C2, 150);
-      }, 1, 1);
+      this.fr = { puff: [A.get("puff1"), A.get("puff2"), A.get("puff3"), A.get("puff4")], dot: A.get("dot"), dot2: A.get("dot2"), flake: A.get("flake"), leaf: A.get("leaf"), glow: A.get("glow") }, this.fr.rain = A.add("rain", 1, 14, (sp) => {
+        for (let y = 0; y < 14; y++) sp.set(0, y, S.C2, 76 + y * 7);
+      }, 0, 13), this.fr.splash = A.add("splash", 5, 3, (sp) => {
+        sp.set(0, 0, S.C2, 120), sp.set(4, 0, S.C2, 120), sp.set(1, 1, S.C2, 136), sp.set(3, 1, S.C2, 136), sp.set(2, 2, S.C2, 150), sp.set(1, 2, S.C2, 120), sp.set(3, 2, S.C2, 120);
+      }, 2, 2);
       let pal = city.pal;
       this.row = pal.alloc({ [S.C1]: 15790838, [S.C2]: 13690104, [S.C3]: 16777215, [S.C4]: 14711328, [S.C5]: 13123626, [S.C6]: 15777840, [S.C7]: 16759e3, [S.C8]: 14217471, [S.C9]: 10132122 }), this.fwRows = [16728128, 4259712, 5275903, 16764992, 16740576, 16777215, 16748592, 6353151].map((c) => pal.alloc({ [S.C1]: [c, 128] })), this.flyRow = pal.alloc({ [S.C1]: [14221152, 128] }), this.p = [], this.emitters = [], this.rain = [], this.fireworkTimer = 3, this.flashes = [], this.fireflies = [], this.steamAcc = /* @__PURE__ */ new Map();
     }
@@ -6788,7 +7763,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // random point currently on screen at height z
     screenPoint(view, z) {
-      let cam = this.city.camera, sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2), sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2), a = sx / 16, b = (sy + z * 16) / 8, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(cam.angle), s = Math.sin(cam.angle);
+      let cam = this.city.camera, sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2), sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2), a = sx / 32, b = (sy + z * 32) / (32 / 2), xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(cam.angle), s = Math.sin(cam.angle);
       return [117 / 2 + c * xr + s * yr, 117 / 2 - s * xr + c * yr];
     }
     groundZ(x, y) {
@@ -6941,7 +7916,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         } else q.kind === "spark" || q.kind === "rocket" ? L.push(q.x, q.y, q.z, q.f || this.fr.dot, q.row, SF.EMISSIVE | SF.NOSHADOW, Math.min(1, t * 1.6), 1e-3) : q.kind === "leaf" || q.kind === "water" ? L.push(q.x, q.y, q.z, q.f, this.slotRow(q.slot), SF.NOSHADOW, q.kind === "leaf" ? Math.min(1, q.life) : 1, 1e-3) : L.push(q.x, q.y, q.z, q.f, q.row, SF.NOSHADOW, t, 1e-3);
       }
       for (let d of this.rain)
-        d.snow ? L.push(d.x, d.y, d.z, d.sp > 1.1 ? this.fr.dot2 : this.fr.dot, this.slotRow(S.C3), SF.NOSHADOW | SF.BRIGHT, 1, 0) : L.push(d.x, d.y, d.z, this.fr.rain, this.row, SF.NOSHADOW | SF.BRIGHT, 0.9, 0);
+        d.snow ? L.push(d.x, d.y, d.z, d.sp > 1.1 ? this.fr.flake : this.fr.dot2, this.slotRow(S.C3), SF.NOSHADOW | SF.BRIGHT, 1, 0) : L.push(d.x, d.y, d.z, this.fr.rain, this.row, SF.NOSHADOW | SF.BRIGHT, 0.9, 0);
       for (let f of this.fireflies)
         Math.sin(f.ph * 2.3) + Math.sin(f.ph * 1.1) < 0.6 || view.visible(f.x, f.y, f.z, 1) && L.push(f.x, f.y, f.z, this.fr.dot, this.flyRow, SF.EMISSIVE | SF.NOSHADOW, 1, 0);
     }
@@ -7076,7 +8051,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       v.bw = bw, v.bh = bh, v.tsx = t[0], v.tsy = t[1];
       let hw = bw / 2, hh = bh / 2;
       return v.visible = (x, y, z, m = 2) => {
-        let p = cam.project(x, y, z), mm = m * 16;
+        let p = cam.project(x, y, z), mm = m * 32;
         return Math.abs(p[0] - t[0]) < hw + mm && p[1] - t[1] < hh + mm && t[1] - p[1] < hh + mm * 2;
       }, v;
     }
@@ -7634,9 +8609,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     let t0 = performance.now(), world = buildWorld(1977, (m) => setMsg(m));
     setMsg("Waking up the city\u2026"), await nextFrame();
     let renderer = new Renderer(gl);
-    renderer.setStatic(world.mesh, world.atlas);
+    renderer.setStatic(world.mesh, world.atlas, world.groundPage);
     let q = new URLSearchParams(location.search), env = new Environment(), camera = new Camera(), dpr = window.devicePixelRatio || 1;
-    camera.scale = camera.scaleTo = Math.max(1, Math.round(2 * dpr)), camera.x = 60, camera.y = 70, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
+    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 60, camera.y = 70, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
     let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
     app.audio = audio, city.audio = audio, env.onEvent((ev, d) => {
       ev === "lightning" && audio.thunder(d.dist), ev === "season" && city.activities?.seed();

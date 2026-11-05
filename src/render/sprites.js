@@ -119,15 +119,38 @@ export const S = {
 };
 
 // ---------------------------------------------------------------------------
-// TREES
+// Shared helpers
+function shadeMul(sp, x, y, f) {
+  if (x < 0 || y < 0 || x >= sp.w || y >= sp.h) return;
+  const d = sp.page.data, i = ((sp.oy + y) * sp.page.w + sp.ox + x) * 4;
+  if (!d[i + 3] || !d[i]) return;
+  d[i + 1] = clamp(Math.round(d[i + 1] * f), 30, 255);
+}
+
+// Selective outline: silhouette pixels on the shadow side get darker, the lit rim a touch brighter.
+export function selOut(sp, dark = 0.74, lit = 1.08) {
+  const W = sp.w, H = sp.h;
+  const m = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) m[y * W + x] = sp.get(x, y) > 0 ? 1 : 0;
+  const at = (x, y) => (x < 0 || y < 0 || x >= W || y >= H ? 0 : m[y * W + x]);
+  for (let y = 0; y < H; y++)
+    for (let x = 0; x < W; x++) {
+      if (!m[y * W + x]) continue;
+      if (!at(x + 1, y) || !at(x, y + 1)) shadeMul(sp, x, y, dark);
+      else if (!at(x - 1, y) || !at(x, y - 1)) shadeMul(sp, x, y, lit);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TREES (2x density: 32 texels per world unit)
 export const TREE_SPECIES = {
-  plane: { w: 44, h: 58, trunkH: 20, canopy: [20, 17], blobs: 16, bark: 0x8a8a74 },
-  locust: { w: 38, h: 54, trunkH: 22, canopy: [17, 15], blobs: 22, small: true, bark: 0x5a4a3a },
-  oak: { w: 48, h: 56, trunkH: 18, canopy: [22, 18], blobs: 14, bark: 0x5a4636 },
-  elm: { w: 60, h: 70, trunkH: 26, canopy: [28, 20], blobs: 18, vase: true, bark: 0x5e5246 },
-  cherry: { w: 42, h: 44, trunkH: 14, canopy: [19, 13], blobs: 16, bark: 0x4a3030 },
-  pine: { w: 36, h: 54, trunkH: 6, pine: true, bark: 0x4a3626 },
-  xmas: { w: 40, h: 76, trunkH: 6, pine: true, xmas: true, bark: 0x4a3626 },
+  plane: { w: 88, h: 116, trunkH: 40, canopy: [40, 34], blobs: 30, bark: 0x8a8a74, camo: true },
+  locust: { w: 76, h: 108, trunkH: 44, canopy: [34, 30], blobs: 40, small: true, bark: 0x5a4a3a },
+  oak: { w: 96, h: 112, trunkH: 36, canopy: [44, 36], blobs: 26, bark: 0x5a4636 },
+  elm: { w: 120, h: 140, trunkH: 52, canopy: [56, 40], blobs: 34, vase: true, bark: 0x5e5246 },
+  cherry: { w: 84, h: 88, trunkH: 28, canopy: [38, 26], blobs: 30, bark: 0x4a3030 },
+  pine: { w: 72, h: 108, trunkH: 12, pine: true, bark: 0x4a3626 },
+  xmas: { w: 80, h: 152, trunkH: 12, pine: true, xmas: true, bark: 0x4a3626 },
 };
 
 export function paintTree(sp, spec, seed) {
@@ -135,127 +158,137 @@ export function paintTree(sp, spec, seed) {
   const { w, h } = spec;
   const cx = Math.floor(w / 2);
   const base = h - 1;
-  if (spec.pine) return paintPine(sp, spec, rng);
+  if (spec.pine) return paintPine(sp, spec, rng, seed);
   const th = spec.trunkH;
-  // trunk
+  // trunk: root flare, bark furrows, plane-tree camouflage patches
   for (let y = base; y > base - th; y--) {
     const t = (base - y) / th;
-    const half = t < 0.15 ? 2 : 1;
-    for (let x = cx - half; x <= cx + half - (half === 1 ? 0 : 1); x++) {
-      const sh = x < cx ? 150 : x === cx ? 128 : 100;
-      sp.set(x, y, S.TRUNK, sh, S.TRUNK);
+    const half = t < 0.05 ? 4 : t < 0.14 ? 3 : 2.5;
+    const xa = Math.round(cx - half), xb = Math.round(cx + half) - 1;
+    for (let x = xa; x <= xb; x++) {
+      const rel = (x - xa) / Math.max(1, xb - xa);
+      let sh = rel < 0.25 ? 150 : rel < 0.6 ? 126 : 98;
+      if (hash2i(x, y >> 2, seed + 5) < 0.2) sh -= 22;
+      if (spec.camo && hash2i(x >> 1, (y >> 1) + 3, seed + 6) > 0.6) sh += 30;
+      sp.set(x, y, S.TRUNK, clamp(sh, 56, 210), S.TRUNK);
     }
   }
-  // branches (recursive), drawn into alt + main; thicker near the trunk
+  // branches (recursive), drawn into alt + main so bare winter trees show their structure
   const tips = [];
   const branch = (x, y, ang, len, depth) => {
     const x2 = x + Math.cos(ang) * len, y2 = y - Math.sin(ang) * len;
     const steps = Math.ceil(len);
-    const thick = depth === 0 ? 3 : depth <= 2 ? 2 : 1;
+    const thick = depth === 0 ? 4 : depth === 1 ? 3 : depth <= 3 ? 2 : 1;
     for (let i = 0; i <= steps; i++) {
       const px = Math.round(x + ((x2 - x) * i) / steps), py = Math.round(y + ((y2 - y) * i) / steps);
       for (let k = 0; k < thick; k++) {
         const above = sp.get(px + k, py - 1);
         const slot = above < 0 && depth >= 1 ? S.BR_TOP : S.BRANCH;
-        sp.set(px + k, py, slot, k ? 100 : 128, slot);
+        sp.set(px + k, py, slot, k === 0 ? 138 : k === thick - 1 ? 98 : 118, slot);
       }
     }
-    if (depth >= 4 || len < 2.2) {
+    if (depth >= 5 || len < 4) {
       tips.push([x2, y2]);
-      // twigs
-      for (let k = 0; k < 2; k++) {
-        const ta = ang + rng.range(-0.9, 0.9), tl = rng.range(1.5, 3);
+      for (let k = 0; k < 3; k++) {
+        const ta = ang + rng.range(-1.0, 1.0), tl = rng.range(3, 6);
         const tx = Math.round(x2 + Math.cos(ta) * tl), ty = Math.round(y2 - Math.sin(ta) * tl);
-        const steps2 = Math.max(Math.abs(tx - x2), Math.abs(ty - y2));
-        for (let i = 0; i <= steps2; i++) {
-          const qx = Math.round(x2 + ((tx - x2) * i) / Math.max(1, steps2)), qy = Math.round(y2 + ((ty - y2) * i) / Math.max(1, steps2));
-          sp.set(qx, qy, S.BR_TOP, 120, S.BR_TOP);
+        const n = Math.max(1, Math.abs(tx - x2), Math.abs(ty - y2));
+        for (let i = 0; i <= n; i++) {
+          const qx = Math.round(x2 + ((tx - x2) * i) / n), qy = Math.round(y2 + ((ty - y2) * i) / n);
+          if (sp.get(qx, qy) < 0) sp.set(qx, qy, S.BR_TOP, 116, S.BR_TOP);
         }
       }
       return;
     }
-    const n = depth === 0 ? 3 : rng.chance(0.3) ? 3 : 2;
+    const n = depth === 0 ? 3 : rng.chance(0.35) ? 3 : 2;
     for (let k = 0; k < n; k++) {
-      const spread = spec.vase ? 0.55 : 0.7;
+      const spread = spec.vase ? 0.5 : 0.66;
       const na = ang + (k - (n - 1) / 2) * spread + rng.range(-0.25, 0.25);
-      branch(x2, y2, na, len * rng.range(0.62, 0.8), depth + 1);
+      branch(x2, y2, na, len * rng.range(0.64, 0.8), depth + 1);
     }
   };
   const topY = base - th;
   const L0 = spec.canopy[1] * 0.75;
-  branch(cx, topY + 1, Math.PI / 2 + rng.range(-0.15, 0.15), L0 * 0.7, 0);
-  if (spec.vase) { branch(cx, topY + 4, Math.PI / 2 + 0.6, L0 * 0.8, 1); branch(cx, topY + 4, Math.PI / 2 - 0.6, L0 * 0.8, 1); }
-  // canopy blobs around tips + centre
+  branch(cx - 2, topY + 2, Math.PI / 2 + rng.range(-0.15, 0.15), L0 * 0.7, 0);
+  if (spec.vase) { branch(cx - 1, topY + 8, Math.PI / 2 + 0.6, L0 * 0.8, 1); branch(cx - 1, topY + 8, Math.PI / 2 - 0.6, L0 * 0.8, 1); }
+  // canopy: leaf clumps around branch tips + random fill, lit from the upper left
   const [rx, ry] = spec.canopy;
   const ccy = topY - ry * 0.55;
   const blobs = [];
-  for (const t of tips) blobs.push([t[0], t[1], rng.range(3.5, 6)]);
+  for (const t of tips) blobs.push([t[0], t[1], rng.range(5, 9)]);
   for (let i = 0; i < spec.blobs; i++) {
     const a = rng.range(0, Math.PI * 2), r = Math.sqrt(rng.next());
-    blobs.push([cx + Math.cos(a) * r * rx * 0.75, ccy + Math.sin(a) * r * ry * 0.7, rng.range(4, 7)]);
+    blobs.push([cx + Math.cos(a) * r * rx * 0.75, ccy + Math.sin(a) * r * ry * 0.7, rng.range(7, 12)]);
   }
-  // paint leaves: shading by position in canopy (light from upper-left)
   const leafPix = (x, y, nx, ny) => {
     const prev = sp.get(x, y);
     const alt = prev === S.BRANCH || prev === S.BR_TOP || prev === S.TRUNK ? prev : 0;
-    const l = -nx * 0.6 - ny * 0.8 + (hash2i(x, y, seed) - 0.5) * 0.7;
-    let slot = l > 0.45 ? S.LEAF_L : l > -0.25 ? S.LEAF_M : S.LEAF_D;
-    if (spec.small && hash2i(x, y, seed + 3) < 0.25) slot = S.LEAF_D;
-    if (hash2i(x, y, seed + 9) < 0.11) slot = S.BLOSSOM;
-    sp.set(x, y, slot, 128, alt);
+    const n = (hash2i(x >> 1, y >> 1, seed) - 0.5) * 0.6 + (hash2i(x >> 2, y >> 2, seed + 7) - 0.5) * 0.5;
+    const l = -nx * 0.6 - ny * 0.8 + n;
+    let slot = l > 0.42 ? S.LEAF_L : l > -0.26 ? S.LEAF_M : S.LEAF_D;
+    if (spec.small && hash2i(x, y, seed + 3) < 0.22) slot = S.LEAF_D;
+    if (hash2i(x >> 1, y >> 1, seed + 9) < 0.08) slot = S.BLOSSOM;
+    const sh = slot === S.LEAF_L && hash2i(x, y, seed + 11) < 0.12 ? 146 : 128;
+    sp.set(x, y, slot, sh, alt);
   };
   for (const [bx, by, br] of blobs) {
     for (let y = Math.floor(by - br); y <= Math.ceil(by + br); y++)
       for (let x = Math.floor(bx - br); x <= Math.ceil(bx + br); x++) {
+        if (x < 0 || y < 0 || x >= w || y >= h) continue;
         const dx = (x + 0.5 - bx) / br, dy = (y + 0.5 - by) / (br * 0.85);
         const d = dx * dx + dy * dy;
-        const edge = d > 0.75 && hash2i(x, y, seed + 1) < 0.5;
-        if (d <= 1 && !edge && x >= 0 && y >= 0 && x < w && y < h) {
-          const nx = (x - cx) / rx, ny = (y - ccy) / ry;
-          leafPix(x, y, nx * 0.6 + dx * 0.4, ny * 0.6 + dy * 0.4);
-        }
+        if (d > 1) continue;
+        if (d > 0.66 && hash2i(x >> 1, y >> 1, seed + 1) < 0.42) continue; // ragged clump edges
+        const nx = (x - cx) / rx, ny = (y - ccy) / ry;
+        leafPix(x, y, nx * 0.6 + dx * 0.4, ny * 0.6 + dy * 0.4);
       }
   }
-  // dark underside band
+  // shadowed underside (2 px)
   for (let y = 0; y < h; y++)
     for (let x = 0; x < w; x++) {
       const s = sp.get(x, y);
-      if ((s === S.LEAF_M || s === S.LEAF_L) && sp.get(x, y + 1) < 0) sp.set(x, y, S.LEAF_D, 128, 0);
+      if ((s === S.LEAF_M || s === S.LEAF_L || s === S.BLOSSOM) && (sp.get(x, y + 1) < 0 || sp.get(x, y + 2) < 0)) sp.set(x, y, S.LEAF_D, 118, 0);
     }
 }
 
-function paintPine(sp, spec, rng) {
+function paintPine(sp, spec, rng, seed) {
   const { w, h } = spec;
   const cx = Math.floor(w / 2), base = h - 1;
-  for (let y = base; y > base - spec.trunkH - 4; y--) { sp.set(cx, y, S.TRUNK, 128, S.TRUNK); sp.set(cx - 1, y, S.TRUNK, 150, S.TRUNK); }
-  const layers = spec.xmas ? 7 : 5;
-  const top = 1, bottom = base - spec.trunkH;
+  for (let y = base; y > base - spec.trunkH - 8; y--) for (let x = cx - 2; x < cx + 2; x++) sp.set(x, y, S.TRUNK, x === cx - 2 ? 150 : x === cx + 1 ? 96 : 124, S.TRUNK);
+  const layers = spec.xmas ? 9 : 7;
+  const top = 3, bottom = base - spec.trunkH;
   for (let l = 0; l < layers; l++) {
     const ly = top + ((bottom - top) * (l + 1)) / layers;
-    const lw = (w / 2 - 1) * (0.35 + (0.65 * (l + 1)) / layers);
-    const lh = (bottom - top) / layers + 5;
+    const lw = (w / 2 - 2) * (0.3 + (0.7 * (l + 1)) / layers);
+    const lh = (bottom - top) / layers + 10;
     for (let y = Math.floor(ly - lh); y <= ly; y++) {
       const t = clamp((y - (ly - lh)) / lh, 0, 1);
-      const half = lw * Math.pow(t, 0.75);
+      const half = lw * Math.pow(t, 0.8);
       for (let x = Math.floor(cx - half); x <= Math.ceil(cx + half); x++) {
         if (x < 0 || x >= w || y < 0) continue;
-        // jagged drooping bottom edge
-        if (y > ly - 2 && hash2i(x, y, 5) < 0.35) continue;
-        const edgeTop = sp.get(x, y - 1) < 0;
-        let slot = x < cx - half * 0.25 ? S.LEAF_L : x > cx + half * 0.35 ? S.LEAF_D : S.LEAF_M;
-        if (y > ly - 1.5) slot = S.LEAF_D;
-        if (edgeTop) slot = S.BR_TOP;
+        const edge = Math.abs(x + 0.5 - cx) / Math.max(1, half);
+        if (y > ly - 4 && hash2i(x >> 1, y, seed + 5) < 0.3 + (y - (ly - 4)) * 0.15) continue; // drooping tips
+        if (edge > 0.82 && hash2i(x, y >> 1, seed + 6) < 0.5) continue; // needle clusters
+        const n = (hash2i(x >> 1, y >> 1, seed) - 0.5) * 0.5;
+        const rel = (x - cx) / Math.max(1, half) + n;
+        let slot = rel < -0.3 ? S.LEAF_L : rel > 0.35 ? S.LEAF_D : S.LEAF_M;
+        if (y > ly - 3) slot = S.LEAF_D;
+        if (sp.get(x, y - 1) < 0 || sp.get(x, y - 2) < 0) slot = S.BR_TOP;
         sp.set(x, y, slot, 128, slot === S.BR_TOP ? S.BR_TOP : 0);
       }
     }
   }
   if (spec.xmas) {
-    for (let i = 0; i < 70; i++) {
-      const y = rng.int(6, bottom - 1), x = rng.int(1, w - 2);
+    for (let i = 0; i < 240; i++) {
+      const y = rng.int(10, bottom - 2), x = rng.int(2, w - 3);
       const s = sp.get(x, y);
-      if (s === S.LEAF_M || s === S.LEAF_D || s === S.LEAF_L) sp.set(x, y, rng.pick([S.LIGHT1, S.LIGHT2, S.LIGHT3]), 128, 0);
+      if (s === S.LEAF_M || s === S.LEAF_D || s === S.LEAF_L) {
+        const L = rng.pick([S.LIGHT1, S.LIGHT2, S.LIGHT3]);
+        sp.set(x, y, L, 128, 0);
+        if (rng.chance(0.3) && sp.get(x + 1, y) > 0) sp.set(x + 1, y, L, 100, 0);
+      }
     }
-    for (const [dx, dy] of [[0, 0], [-1, 1], [1, 1], [0, 1], [0, 2], [-2, 1], [2, 1]]) sp.set(cx + dx, top - 1 + dy, S.STAR, 128, 0);
+    for (const [dx, dy] of [[0, -3], [0, -2], [-1, -1], [0, -1], [1, -1], [-3, 0], [-2, 0], [-1, 0], [0, 0], [1, 0], [2, 0], [3, 0], [-1, 1], [0, 1], [1, 1], [-2, 2], [2, 2], [-2, 3], [2, 3]]) sp.set(cx + dx, top + dy, S.STAR, 128, 0);
   }
 }
 
@@ -331,256 +364,381 @@ function shadeHex(c, f) {
 }
 
 // ---------------------------------------------------------------------------
-// PEOPLE
-// template: { body: 'adult'|'kid'|'elder', female, hair, hat, top, bottom, coat, bag, scarf }
+// PEOPLE (26x42 frames; drawn facing right in 3/4 view, flipped for left)
+// template: { body: 'adult'|'kid'|'elder', hair, hat, top, bottom, coat, bag, scarf, glasses, cane }
 export const POSES = {
   walk: 4, run: 4, idle: 2, sit: 1, dribble: 2, shoot: 2, throw: 2, crouch: 1, wave: 1, skate: 2, phone: 1, lie: 1,
 };
+// poses that get a separate back view (the rest reuse the front view)
+const BACK_POSES = { walk: 1, run: 1, idle: 1, sit: 1 };
+const PW = 26, PH = 42, SIT_EXT = 10;
 
 function poseParams(anim, f) {
-  // returns { lx, rx (foot x offsets), ll, rl (foot lift), la, ra (arm states), bob, sit, crouch, jump, lean }
-  const P = { lx: 0, rx: 0, ll: 0, rl: 0, la: 'down', ra: 'down', bob: 0, sit: false, crouch: false, jump: 0, lean: 0 };
+  const P = { lx: 0, rx: 0, ll: 0, rl: 0, la: 'down', ra: 'down', bob: 0, sit: false, crouch: false, jump: 0, lean: 0, dip: 0 };
   switch (anim) {
     case 'walk': {
-      const ph = [[-1, 1, 'fwd', 'back', 0], [0, 0, 'down', 'down', 1], [1, -1, 'back', 'fwd', 0], [0, 0, 'down', 'down', 1]][f];
+      const ph = [[-3, 3, 'fwd', 'back', 0], [0, 0, 'down', 'down', 1], [3, -3, 'back', 'fwd', 0], [0, 0, 'down', 'down', 1]][f];
       P.lx = ph[0]; P.rx = ph[1]; P.la = ph[2]; P.ra = ph[3]; P.bob = ph[4];
-      if (f === 1) P.rl = 1; if (f === 3) P.ll = 1;
+      if (f === 1) P.rl = 2;
+      if (f === 3) P.ll = 2;
       break;
     }
     case 'run': {
-      const ph = [[-2, 2, 'fwdb', 'backb', 0], [0, 0, 'bent', 'bent', 1], [2, -2, 'backb', 'fwdb', 0], [0, 0, 'bent', 'bent', 1]][f];
+      const ph = [[-5, 5, 'fwdb', 'backb', 0], [0, 0, 'bent', 'bent', 2], [5, -5, 'backb', 'fwdb', 0], [0, 0, 'bent', 'bent', 2]][f];
       P.lx = ph[0]; P.rx = ph[1]; P.la = ph[2]; P.ra = ph[3]; P.bob = ph[4]; P.lean = 1;
-      if (f === 1) P.rl = 2; if (f === 3) P.ll = 2;
+      if (f === 1) P.rl = 4;
+      if (f === 3) P.ll = 4;
       break;
     }
     case 'idle': P.bob = f; break;
     case 'sit': P.sit = true; P.la = 'lap'; P.ra = 'lap'; break;
-    case 'dribble': P.ra = f ? 'low' : 'fwd'; P.la = 'down'; P.lx = -1; P.rx = 1; P.bob = f; break;
-    case 'shoot': P.la = 'up'; P.ra = 'up'; P.jump = f ? 3 : 0; P.ll = f; P.rl = f; break;
-    case 'throw': P.ra = f ? 'fwd' : 'upback'; P.la = f ? 'back' : 'fwd'; P.lx = -1; P.rx = 1; break;
+    case 'dribble': P.ra = f ? 'low' : 'fwdlow'; P.la = 'back'; P.lx = -3; P.rx = 3; P.dip = 2 - f; break;
+    case 'shoot': P.la = 'up'; P.ra = 'up'; P.jump = f ? 6 : 0; P.ll = f * 2; P.rl = f * 2; P.dip = f ? 0 : 2; break;
+    case 'throw': P.ra = f ? 'fwd' : 'upback'; P.la = f ? 'back' : 'fwd'; P.lx = -3; P.rx = 4; break;
     case 'crouch': P.crouch = true; P.la = 'low'; P.ra = 'low'; break;
     case 'wave': P.ra = 'up'; break;
-    case 'skate': P.la = 'out'; P.ra = 'out'; P.lx = f ? -1 : 1; P.rx = f ? 2 : -2; P.lean = 1; break;
+    case 'skate': P.la = 'out'; P.ra = 'out'; P.lx = f ? -3 : 3; P.rx = f ? 5 : -5; P.lean = 1; break;
     case 'phone': P.ra = 'phone'; break;
     case 'lie': P.lie = true; break;
   }
   return P;
 }
 
-export function paintPerson(sp, tpl, anim, f, view) {
-  const P = poseParams(anim, f);
-  const kid = tpl.body === 'kid', elder = tpl.body === 'elder';
-  const W = sp.w;
-  const ax = Math.floor(W / 2) - 1; // body centre column (left of centre)
-  const ground = sp.h - 1;
-  if (P.lie) return paintLying(sp, tpl);
-  const legH = kid ? 3 : 5;
-  const torsoH = kid ? 4 : 5;
-  const headH = 4;
-  let y0 = ground - P.jump; // feet row
-  const crouchDrop = P.crouch ? 3 : 0;
-  const sitDrop = P.sit ? legH - 1 : 0;
-  const hipY = y0 - 1 - legH + (P.bob ? -1 : 0) + crouchDrop + sitDrop; // first leg row is hipY+1
-  const shoulderY = hipY - torsoH + 1 + (elder ? 1 : 0);
-  const headY = shoulderY - headH;
-  const front = view === 'front';
-  const coat = tpl.coat;
-  const longCoat = coat === 'long';
-  const puffer = coat === 'puffer';
-  const topSlot = coat ? S.COAT : S.TOP;
-  const sleeveSlot = coat ? S.COAT : tpl.top === 'tee' || tpl.top === 'tank' || tpl.top === 'jersey' ? S.SKIN : S.TOP;
-  const upperArmSlot = coat ? S.COAT : tpl.top === 'tank' || tpl.top === 'jersey' ? S.SKIN : S.TOP;
+const HEADS = {
+  adult: ['.XXXXX.', 'XXXXXXX', 'XXXXXXX', 'XXXXXXX', 'XXXXXXX', 'XXXXXXX', '.XXXXXX', '..XXXX.'],
+  kid: ['.XXXX.', 'XXXXXX', 'XXXXXX', 'XXXXXX', 'XXXXXX', '.XXXXX', '..XXX.'],
+};
+// arm poses: [elbow, hand] offsets from the shoulder (+x = facing direction)
+const ARMS = {
+  down: [[0, 4], [0, 8]], fwd: [[1, 4], [3, 7]], back: [[-1, 4], [-3, 7]],
+  fwdb: [[2, 3], [5, 1]], backb: [[-3, 3], [-4, 6]], bent: [[0, 4], [3, 3]],
+  up: [[1, -4], [2, -8]], upback: [[-2, -3], [-4, -6]], low: [[1, 4], [3, 9]], fwdlow: [[2, 4], [5, 6]],
+  lap: [[0, 4], [4, 5]], phone: [[1, 4], [3, 1]],
+};
 
-  // ---- legs / feet
-  const legSlotUpper = tpl.bottom === 'shorts' ? S.BOTTOM : tpl.bottom === 'dress' || tpl.bottom === 'skirt' ? S.BOTTOM : S.BOTTOM;
-  const legSlotLower = tpl.bottom === 'shorts' || tpl.bottom === 'skirt' || tpl.bottom === 'dress' ? S.SKIN : S.BOTTOM;
-  if (P.sit) {
-    // thighs forward (to the right), shins down
-    for (let x = ax; x <= ax + 3; x++) { sp.set(x, hipY + 1, legSlotUpper, 120); sp.set(x, hipY + 2, legSlotUpper, 100); }
-    for (let y = hipY + 2; y <= hipY + 3; y++) { sp.set(ax + 3, y, legSlotLower, 110); sp.set(ax + 4, y, legSlotLower, 100); }
-    sp.set(ax + 4, hipY + 4, S.SHOES, 128); sp.set(ax + 5, hipY + 4, S.SHOES, 110);
-  } else {
-    const legs = [
-      { x: ax + P.lx, lift: P.ll, back: true },
-      { x: ax + 2 + P.rx, lift: P.rl, back: false },
-    ];
-    for (const L of legs) {
-      const top = hipY + 1, bottom = y0 - 1 - L.lift;
-      for (let y = top; y <= bottom; y++) {
-        const t = (y - top) / Math.max(1, bottom - top);
-        const xx = Math.round(ax + (L.x - ax) * t) + (L.x > ax + 1 ? 0 : 0);
-        const slot = t < 0.45 ? legSlotUpper : legSlotLower;
-        const sh = L.back ? 100 : 130;
-        sp.set(xx, y, slot, sh);
-        sp.set(xx + 1, y, slot, sh - 12);
+export function paintPerson(sp, tpl, anim, f, view, ext = 0) {
+  const P = poseParams(anim, f);
+  if (P.lie) return paintLying(sp, tpl);
+  const kid = tpl.body === 'kid', elder = tpl.body === 'elder';
+  const shorts = tpl.bottom === 'shorts', skirt = tpl.bottom === 'skirt', dress = tpl.bottom === 'dress';
+  const fem = skirt || dress;
+  const front = view === 'front';
+  const coat = tpl.coat, puffer = coat === 'puffer', longCoat = coat === 'long';
+  const cx = Math.floor(sp.w / 2);
+  const ground = sp.h - 1 - ext;
+  const legH = kid ? 7 : 11, torsoH = kid ? 7 : 10;
+  const headRows = HEADS[kid ? 'kid' : 'adult'];
+  const headH = headRows.length, headW = headRows[0].length;
+  const tw = (kid ? 6 : fem ? 7 : 8) + (puffer ? 2 : 0);
+  const tx0 = cx - Math.ceil(tw / 2);
+  const y0 = ground - P.jump; // shoe sole row
+  const hipY = y0 - 2 - legH - P.bob + (P.crouch ? 5 : P.dip) + (P.sit ? legH - 2 : 0);
+  const shoulderY = hipY - torsoH + 1 + (elder ? 1 : 0);
+  const lean = P.lean;
+  const headY = shoulderY - 1 - headH;
+  const hx0 = cx - Math.floor(headW / 2) + (elder ? 1 : 0) + lean;
+  const topSlot = coat ? S.COAT : S.TOP;
+  const bareArms = !coat && (tpl.top === 'tank' || tpl.top === 'jersey');
+  const shortSleeve = !coat && tpl.top === 'tee';
+  const upperArmSlot = bareArms ? S.SKIN : topSlot;
+  const foreArmSlot = bareArms || shortSleeve ? S.SKIN : topSlot;
+  const legW = kid ? 2 : 3;
+  const ls = (y) => (lean && y < shoulderY + torsoH / 2 ? 1 : 0);
+  const tset = (x, y, slot, sh = 128) => sp.set(x + ls(y), y, slot, sh);
+  const limbShade = (base, k, n) => base + (k === 0 ? 14 : k === n - 1 ? -16 : 0);
+
+  // ---- legs
+  const drawLeg = (hx, dx, lift, far) => {
+    const base = far ? 96 : 128;
+    if (P.sit) {
+      const kneeX = hx + (kid ? 5 : 7);
+      for (let x = hx; x <= kneeX; x++) for (let k = 0; k < legW; k++) sp.set(x, hipY + 1 + k, (skirt || dress) && x > hx + 3 ? S.SKIN : S.BOTTOM, limbShade(base, k, legW));
+      const shinTop = hipY + 1 + legW, shinBot = sp.h - 3;
+      const sx = kneeX - legW + 1;
+      for (let y = shinTop; y <= shinBot; y++) {
+        let slot = shorts || skirt || dress ? S.SKIN : S.BOTTOM;
+        if (shorts && y >= shinBot - 1) slot = S.SOCK;
+        for (let k = 0; k < legW; k++) sp.set(sx + k, y, slot, limbShade(base, k, legW));
       }
-      const fx = Math.round(L.x);
-      sp.set(fx, bottom + 1 - (P.crouch ? 0 : 0), S.SHOES, L.back ? 100 : 128);
-      sp.set(fx + 1, bottom + 1, S.SHOES, L.back ? 90 : 128);
-      if (front && !L.back) sp.set(fx + 2, bottom + 1, S.SHOES, 110);
+      for (let k = 0; k <= legW; k++) sp.set(sx + k, shinBot + 1, S.SHOES, base + 8);
+      for (let k = -1; k <= legW + 1; k++) sp.set(sx + k, shinBot + 2, S.SHOES, base - 18);
+      return;
     }
-  }
-  // skirt / dress flare
-  if (tpl.bottom === 'skirt' || tpl.bottom === 'dress') {
-    const sy = hipY + 1;
-    for (let y = sy; y < sy + (kid ? 2 : 3); y++)
-      for (let x = ax - 1 - (y - sy > 1 ? 1 : 0); x <= ax + 4; x++) sp.set(x, y, S.BOTTOM, x <= ax ? 140 : 120);
+    const top = hipY + 1, bot = y0 - 2 - lift;
+    const n = Math.max(1, bot - top);
+    const kneeY = top + Math.round(n * 0.5);
+    const kx = hx + dx * 0.5 + lift * 0.8 + (P.crouch ? 3 : 0);
+    const fx = hx + dx - lift * 0.6;
+    let lastX = hx;
+    for (let y = top; y <= bot; y++) {
+      const x = Math.round(y <= kneeY ? hx + (kx - hx) * ((y - top) / Math.max(1, kneeY - top)) : kx + (fx - kx) * ((y - kneeY) / Math.max(1, bot - kneeY)));
+      const t = (y - top) / n;
+      let slot = S.BOTTOM;
+      if (shorts && t > 0.42) slot = S.SKIN;
+      if ((skirt || dress) && t > 0.2) slot = S.SKIN;
+      if (shorts && y >= bot - 1) slot = S.SOCK;
+      for (let k = 0; k < legW; k++) sp.set(x + k, y, slot, limbShade(base, k, legW));
+      lastX = x;
+    }
+    // shoe: toe forward, sole one row longer
+    for (let k = 0; k <= legW; k++) sp.set(lastX + k, bot + 1, S.SHOES, base + 8);
+    for (let k = -1; k <= legW + 1; k++) sp.set(lastX + k, bot + 2, S.SHOES, base - 18);
+  };
+
+  // ---- arms
+  const drawArm = (far, state) => {
+    const sx = (far ? tx0 - 1 : tx0 + tw - 1) + lean;
+    const sy = shoulderY + 1;
+    let e, hnd;
+    if (state === 'out') { const s = far ? -1 : 1; e = [3 * s, 1]; hnd = [6 * s, 2]; }
+    else [e, hnd] = ARMS[state] || ARMS.down;
+    const k = kid ? 0.72 : 1;
+    const E = [sx + Math.round(e[0] * k), sy + Math.round(e[1] * k)];
+    const H = [sx + Math.round(hnd[0] * k), sy + Math.round(hnd[1] * k)];
+    const base = far ? 94 : 130;
+    const seg = (a, b, slot) => {
+      const n = Math.max(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1]), 1);
+      for (let i = 0; i <= n; i++) {
+        const x = Math.round(a[0] + ((b[0] - a[0]) * i) / n), y = Math.round(a[1] + ((b[1] - a[1]) * i) / n);
+        sp.set(x, y, slot, base + 10);
+        sp.set(x + 1, y, slot, base - 14);
+      }
+    };
+    seg([sx, sy], E, upperArmSlot);
+    if (puffer) seg([sx - 1, sy], [E[0] - 1, E[1]], S.COAT);
+    seg(E, H, foreArmSlot);
+    if (!coat && !bareArms && !shortSleeve) { sp.set(H[0], H[1] + (H[1] >= E[1] ? -1 : 1), topSlot, base - 22); }
+    sp.set(H[0], H[1], S.SKIN, base + 6); sp.set(H[0] + 1, H[1], S.SKIN, base - 10);
+    sp.set(H[0], H[1] + 1, S.SKIN, base - 4); sp.set(H[0] + 1, H[1] + 1, S.SKIN, base - 20);
+    if (state === 'phone') {
+      sp.set(H[0] + 1, H[1] - 1, S.DARK, 128); sp.set(H[0] + 1, H[1] - 2, S.DARK, 128); sp.set(H[0] + 2, H[1] - 2, S.DARK, 110);
+      sp.set(H[0] + 2, H[1] - 1, S.WHITE, 120);
+    }
+    return H;
+  };
+
+  drawArm(true, P.la);
+  drawLeg(tx0 + 1, P.lx, P.ll, true);
+  drawLeg(cx, P.rx, P.rl, false);
+  // skirt / dress flare and long-coat skirts over the thighs
+  if (skirt || dress) {
+    const len = kid ? 3 : dress ? 6 : 5;
+    for (let r = 0; r < len; r++) {
+      const flare = Math.floor(r / 2);
+      for (let x = tx0 - flare; x <= tx0 + tw - 1 + flare; x++) sp.set(x, hipY + 1 + r, S.BOTTOM, x <= tx0 - flare + 1 ? 146 : x >= tx0 + tw - 2 + flare ? 100 : (x + r) % 4 === 0 ? 112 : 124);
+    }
   }
   if (longCoat && !P.sit) {
-    for (let y = hipY + 1; y < hipY + 1 + (kid ? 2 : 3); y++)
-      for (let x = ax - 1; x <= ax + 3; x++) sp.set(x, y, S.COAT, x <= ax ? 140 : 115);
+    const len = kid ? 3 : 6;
+    for (let r = 0; r < len; r++) for (let x = tx0 - (r > 2 ? 1 : 0); x <= tx0 + tw - 1; x++) sp.set(x, hipY + 1 + r, S.COAT, x <= tx0 ? 146 : x >= tx0 + tw - 2 ? 100 : 122);
   }
   // ---- torso
-  const tw = puffer ? 5 : 4;
-  const tx0 = ax - (puffer ? 1 : 0);
   for (let y = shoulderY; y <= hipY; y++) {
-    for (let x = tx0; x < tx0 + tw; x++) {
-      const sh = x === tx0 ? 150 : x === tx0 + tw - 1 ? 108 : 128;
-      let slot = tpl.bottom === 'dress' ? S.BOTTOM : topSlot;
-      if (y === hipY && !coat && tpl.bottom !== 'dress') slot = S.BOTTOM; // belt line
-      sp.set(x + (P.lean && y < shoulderY + 2 ? 1 : 0), y, slot, sh);
+    const r = y - shoulderY;
+    let x0 = tx0, x1 = tx0 + tw - 1;
+    if (r === 0) { x0++; x1--; }
+    if (fem && !coat && r > torsoH * 0.35 && r < torsoH * 0.75) x0++;
+    for (let x = x0; x <= x1; x++) {
+      const rel = (x - tx0) / (tw - 1);
+      let sh = rel < 0.18 ? 150 : rel > 0.82 ? 98 : rel > 0.6 ? 114 : 130;
+      let slot = dress ? S.BOTTOM : topSlot;
+      if (y === hipY && !coat && !dress) slot = S.BOTTOM;
+      if (puffer && r % 3 === 2) sh -= 20;
+      tset(x, y, slot, sh);
     }
   }
-  // stripes on jersey / top2 accents
-  if (tpl.top === 'jersey' && !coat) for (let x = tx0; x < tx0 + tw; x++) sp.set(x, shoulderY + 1, S.TOP2, 128);
-  if (tpl.top === 'stripe' && !coat) for (let y = shoulderY + 1; y < hipY; y += 2) for (let x = tx0; x < tx0 + tw; x++) sp.set(x, y, S.TOP2, x === tx0 ? 150 : 120);
-  if (tpl.top === 'suit' && front) { sp.set(ax + 1, shoulderY, S.WHITE, 128); sp.set(ax + 2, shoulderY, S.WHITE, 128); sp.set(ax + 1, shoulderY + 1, S.TOP2, 128); sp.set(ax + 1, shoulderY + 2, S.TOP2, 110); }
-  if (coat === 'jacket' && front) for (let y = shoulderY + 1; y <= hipY; y++) sp.set(ax + 2, y, S.TOP, 128);
-  if (tpl.scarf) { sp.set(ax, shoulderY, S.SCARF, 128); sp.set(ax + 1, shoulderY, S.SCARF, 128); sp.set(ax + 2, shoulderY, S.SCARF, 110); if (front) sp.set(ax + 2, shoulderY + 1, S.SCARF, 110); }
-  // backpack (visible on back view, sliver on front)
+  // ---- clothing details
+  if (!coat) {
+    if (front && (tpl.top === 'tee' || tpl.top === 'tank' || tpl.top === 'jersey' || dress)) {
+      tset(cx - 1, shoulderY, S.SKIN, 122); tset(cx, shoulderY, S.SKIN, 112);
+      if (tpl.top === 'tank') tset(cx + 1, shoulderY, S.SKIN, 104);
+    }
+    if (tpl.top === 'stripe' && !dress) {
+      for (let y = shoulderY + 1; y < hipY; y++) if ((y - shoulderY) % 3 === 1) for (let x = tx0; x < tx0 + tw; x++) if (sp.get(x + ls(y), y) === S.TOP) tset(x, y, S.TOP2, x === tx0 ? 146 : x >= tx0 + tw - 2 ? 100 : 124);
+    }
+    if (tpl.top === 'jersey') {
+      for (let x = tx0 + 1; x < tx0 + tw - 1; x++) if (!front || x < cx - 1 || x > cx) tset(x, shoulderY, S.TOP2, 120);
+      const glyph = front ? ['XX', '.X', 'X.', 'XX'] : ['XXX', '..X', '.XX', '..X', 'XXX'];
+      glyph.forEach((row, j) => [...row].forEach((c, i) => { if (c === 'X') tset(cx - 1 + i, shoulderY + (kid ? 2 : 3) + j, S.TOP2, 140); }));
+    }
+    if (tpl.top === 'suit') {
+      if (front) {
+        for (let j = 0; j < 4; j++) for (let x = cx - 1 + Math.floor(j / 2); x <= cx + 1 - Math.floor(j / 2); x++) tset(x, shoulderY + j, S.WHITE, 132);
+        for (let j = 1; j < 7; j++) tset(cx, shoulderY + j, S.TOP2, j === 1 ? 140 : 122);
+        tset(cx + 1, shoulderY + 1, S.TOP2, 110);
+        tset(cx + 2, hipY - 3, S.DARK, 128); tset(cx + 2, hipY - 1, S.DARK, 128);
+      } else for (let y = shoulderY + 2; y < hipY; y++) tset(cx, y, S.TOP, 104);
+    }
+  } else {
+    if (coat === 'jacket' && front) {
+      for (let y = shoulderY + 1; y <= hipY; y++) { tset(cx, y, S.TOP, 128); tset(cx + 1, y, S.TOP, 112); }
+      tset(cx - 1, shoulderY, S.COAT, 150); tset(cx + 2, shoulderY, S.COAT, 150);
+    }
+    if (puffer) {
+      if (front) for (let y = shoulderY + 1; y <= hipY; y++) tset(cx + 1, y, S.COAT, 96);
+      for (let x = cx - 2; x <= cx + 2; x++) tset(x, shoulderY - 1, S.COAT, x === cx - 2 ? 146 : 124);
+    }
+    if (longCoat) {
+      if (front) for (const y of [shoulderY + 3, shoulderY + 6]) tset(cx + 1, y, S.DARK, 120);
+      for (let x = tx0; x < tx0 + tw; x++) tset(x, hipY - 2, S.COAT, 92);
+    }
+  }
+  // bags worn on the body
   if (tpl.bag === 'back') {
-    if (!front) for (let y = shoulderY + 1; y <= hipY - 1; y++) for (let x = ax; x <= ax + 2; x++) sp.set(x, y, S.BAG, x === ax ? 140 : 115);
-    else for (let y = shoulderY + 1; y <= hipY - 1; y++) sp.set(tx0 - 1, y, S.BAG, 100);
-  }
-  // ---- arms
-  const arm = (side, state) => {
-    // side: 'back' (left col) or 'front' (right col)
-    const bx = side === 'back' ? tx0 - 1 : tx0 + tw;
-    const dir = side === 'back' ? -1 : 1;
-    const sh = side === 'back' ? 95 : 135;
-    const pts = [];
-    const len = kid ? 3 : 4;
-    switch (state) {
-      case 'down': for (let i = 0; i < len; i++) pts.push([bx, shoulderY + 1 + i]); break;
-      case 'fwd': for (let i = 0; i < len; i++) pts.push([bx + (i >= 2 ? dir : 0), shoulderY + 1 + i]); break;
-      case 'back': for (let i = 0; i < len; i++) pts.push([bx - (i >= 2 ? dir : 0), shoulderY + 1 + i]); break;
-      case 'fwdb': pts.push([bx, shoulderY + 1], [bx + dir, shoulderY + 2], [bx + dir * 2, shoulderY + 2]); break;
-      case 'backb': pts.push([bx, shoulderY + 1], [bx - dir, shoulderY + 2], [bx - dir, shoulderY + 3]); break;
-      case 'bent': pts.push([bx, shoulderY + 1], [bx, shoulderY + 2], [bx + dir, shoulderY + 2]); break;
-      case 'up': for (let i = 0; i < len; i++) pts.push([bx + (i > 1 ? dir : 0), shoulderY - i]); break;
-      case 'upback': pts.push([bx, shoulderY], [bx - dir, shoulderY - 1], [bx - dir, shoulderY - 2]); break;
-      case 'out': pts.push([bx, shoulderY + 1], [bx + dir, shoulderY + 1], [bx + dir * 2, shoulderY + 1]); break;
-      case 'low': for (let i = 0; i < len; i++) pts.push([bx + (i >= 1 ? dir : 0), shoulderY + 1 + i + (i > 1 ? 1 : 0)]); break;
-      case 'lap': pts.push([bx, shoulderY + 1], [bx, shoulderY + 2], [bx + dir, shoulderY + 3]); break;
-      case 'phone': pts.push([bx, shoulderY + 1], [bx, shoulderY], [bx, shoulderY - 1]); break;
+    if (!front) {
+      const bh = kid ? 6 : 8;
+      for (let y = shoulderY + 1; y <= shoulderY + bh; y++) for (let x = tx0 + 1; x < tx0 + tw - 1; x++) tset(x, y, S.BAG, x === tx0 + 1 ? 146 : x >= tx0 + tw - 2 ? 100 : 124);
+      for (let x = tx0 + 2; x < tx0 + tw - 2; x++) tset(x, shoulderY + Math.round(bh * 0.6), S.BAG, 100);
+      tset(cx - 1, shoulderY, S.BAG, 110); tset(cx, shoulderY, S.BAG, 110);
+    } else {
+      for (let y = shoulderY; y <= shoulderY + 3; y++) { tset(tx0 + 1, y, S.BAG, 104); tset(tx0 + tw - 2, y, S.BAG, 104); }
+      for (let y = shoulderY + 1; y <= shoulderY + (kid ? 5 : 7); y++) { tset(tx0 - 1, y, S.BAG, 112); tset(tx0 - 2, y, S.BAG, 96); }
     }
-    pts.forEach(([x, y], i) => {
-      const last = i === pts.length - 1;
-      const slot = last ? S.SKIN : i === 0 ? upperArmSlot : sleeveSlot;
-      sp.set(x, y, slot, sh);
-      if (puffer && i < pts.length - 1) sp.set(x + dir * 0, y, S.COAT, sh);
-    });
-    if (state === 'phone') sp.set(bx + dir, shoulderY - 1, S.DARK, 128);
-    return pts[pts.length - 1];
-  };
-  arm('back', P.la);
-  const hand = arm('front', P.ra);
-  // briefcase / shoulder bag / held items
-  if (tpl.bag === 'brief' && (P.ra === 'down' || P.ra === 'fwd' || P.ra === 'back')) {
-    sp.set(hand[0], hand[1] + 1, S.BAG, 128); sp.set(hand[0] + 1, hand[1] + 1, S.BAG, 110); sp.set(hand[0], hand[1] + 2, S.BAG, 110); sp.set(hand[0] + 1, hand[1] + 2, S.BAG, 90);
   }
   if (tpl.bag === 'shoulder') {
-    for (let y = shoulderY + 2; y <= hipY; y++) sp.set(front ? tx0 + tw : tx0 - 1, y, S.BAG, 110);
+    for (let j = 0; j < torsoH - 2; j++) tset(tx0 + 1 + Math.round((j * (tw - 3)) / (torsoH - 3)), shoulderY + j, S.BAG, 100);
+    const bx = front ? tx0 + tw - 2 : tx0 - 2, by = hipY - 2;
+    for (let y = by; y < by + 4; y++) for (let x = bx; x < bx + 4; x++) sp.set(x, y, S.BAG, x === bx ? 146 : y === by + 3 ? 100 : 120);
   }
-  if (tpl.bag === 'shopping' && (P.ra === 'down' || P.ra === 'fwd' || P.ra === 'back')) {
-    sp.set(hand[0], hand[1] + 1, S.BAG, 140); sp.set(hand[0] + 1, hand[1] + 1, S.BAG, 120); sp.set(hand[0], hand[1] + 2, S.BAG, 120); sp.set(hand[0] + 1, hand[1] + 2, S.BAG, 100); sp.set(hand[0], hand[1] + 3, S.BAG, 100);
+  if (tpl.scarf) {
+    for (let x = cx - 2; x <= cx + 2; x++) { tset(x, shoulderY - 1, S.SCARF, x === cx - 2 ? 146 : 124); tset(x, shoulderY, S.SCARF, x === cx - 2 ? 140 : 112); }
+    if (front) for (let j = 1; j <= 4; j++) { tset(cx + 1, shoulderY + j, S.SCARF, 120); tset(cx + 2, shoulderY + j, S.SCARF, 100); }
+    else for (let j = 1; j <= 3; j++) tset(cx - 2, shoulderY + j, S.SCARF, 112);
   }
   // ---- head
-  const hx0 = ax;
-  for (let y = headY; y < headY + headH; y++) {
-    for (let x = hx0; x < hx0 + 4; x++) {
-      let slot = S.SKIN;
-      let sh = x === hx0 ? 140 : x === hx0 + 3 ? 110 : 128;
-      if (y === headY + headH - 1 && (x === hx0 || x === hx0 + 3)) continue; // rounded jaw
-      sp.set(x, y, slot, sh);
+  if (!tpl.scarf && !puffer) for (let x = cx - 1; x <= cx + 1; x++) sp.set(x + lean + (elder ? 1 : 0), shoulderY - 1, S.SKIN, x === cx + 1 ? 104 : 120);
+  headRows.forEach((row, r) => {
+    for (let c = 0; c < headW; c++) if (row[c] === 'X') sp.set(hx0 + c, headY + r, S.SKIN, c === 0 ? 144 : c >= headW - 2 ? 112 : 130);
+  });
+  const ey = headY + 3;
+  if (front) {
+    sp.set(hx0 + headW - 2, ey, S.DARK, 128);
+    sp.set(hx0 + headW - 4, ey, S.DARK, 128);
+    sp.set(hx0 + headW, ey + 1, S.SKIN, 112); // nose in profile
+    sp.set(hx0 + headW - 3, headY + headH - 2, S.SKIN, 92); // mouth
+    sp.set(hx0 + 1, ey + 1, S.SKIN, 100); // ear
+    if (tpl.glasses) {
+      for (let c = headW - 5; c < headW; c++) sp.set(hx0 + c, ey, S.DARK, 128);
+      sp.set(hx0 + headW - 4, ey, S.WHITE, 104); sp.set(hx0 + headW - 2, ey, S.WHITE, 104);
     }
   }
-  // neck
-  sp.set(ax + 1, shoulderY - 0, tpl.scarf ? S.SCARF : sp.get(ax + 1, shoulderY) >= 0 ? sp.get(ax + 1, shoulderY) : S.SKIN, 110);
   // hair
+  const H = (c, r, sh = 128) => sp.set(hx0 + c, headY + r, S.HAIR, sh);
   const hair = tpl.hair;
-  const H = (x, y, sh = 128) => sp.set(x, y, S.HAIR, sh);
   if (hair !== 'bald') {
-    for (let x = hx0; x < hx0 + 4; x++) H(x, headY - 1, 140);
+    for (let c = 1; c < headW - 1; c++) H(c, -1, 146);
     if (front) {
-      H(hx0, headY, 120); H(hx0 + 1, headY, 128); H(hx0 + 2, headY, 120);
-      H(hx0, headY + 1, 110);
+      for (let c = 0; c < headW; c++) H(c, 0, c < 2 ? 142 : 126);
+      for (let c = 0; c < headW - 1; c++) H(c, 1, c < 2 ? 130 : 116);
+      for (let c = 0; c < 3; c++) H(c, 2, 112);
+      H(0, 3, 108); H(1, 3, 100); H(0, 4, 100);
     } else {
-      for (let y = headY; y < headY + headH - 1; y++) for (let x = hx0; x < hx0 + 4; x++) H(x, y, x === hx0 ? 140 : 115);
+      for (let r = 0; r < headH - 2; r++) for (let c = 0; c < headW; c++) if (headRows[r][c] === 'X') H(c, r, c === 0 ? 140 : c >= headW - 2 ? 104 : 122 - r * 2);
     }
-    if (hair === 'long' || hair === 'pony') {
-      const len = hair === 'long' ? 4 : 3;
-      for (let y = headY; y < headY + len; y++) H(hx0 - 1, y + 1, 110);
-      if (!front) for (let y = headY + 3; y < headY + 3 + (hair === 'long' ? 2 : 1); y++) for (let x = hx0; x < hx0 + 3; x++) H(x, y + 1, 105);
-      if (hair === 'pony') H(hx0 - 2, headY + 2, 100);
+    if (hair === 'long') {
+      if (front) for (let r = 1; r < headH + 3; r++) { H(-1, r, 110); H(0, r, 120); if (r < headH + 1) H(1, r, r > 4 ? 112 : 120); }
+      else for (let r = headH - 2; r < headH + 3; r++) for (let c = 0; c < headW - 1; c++) H(c, r, c === 0 ? 136 : 112);
+    }
+    if (hair === 'pony') {
+      const pts = front ? [[-1, 1], [-2, 2], [-2, 3], [-2, 4], [-1, 5], [-2, 6]] : [[2, headH - 2], [3, headH - 2], [2, headH - 1], [3, headH - 1], [3, headH], [3, headH + 1]];
+      for (const [c, r] of pts) { H(c, r, 124); H(c + 1, r, 104); }
     }
     if (hair === 'afro') {
-      for (let x = hx0 - 1; x < hx0 + 5; x++) H(x, headY - 1, 130);
-      for (let x = hx0; x < hx0 + 4; x++) H(x, headY - 2, 140);
-      H(hx0 - 1, headY, 115); H(hx0 - 1, headY + 1, 110); if (!front) H(hx0 + 4, headY, 100);
+      const ccx = headW / 2 - (front ? 0.5 : 0), ccy = 1.5;
+      for (let r = -4; r < (front ? 5 : headH - 1); r++)
+        for (let c = -2; c < headW + 2; c++) {
+          const dx = (c + 0.5 - ccx) / (headW / 2 + 1.6), dy = (r + 0.5 - ccy) / 4.6;
+          if (dx * dx + dy * dy > 1) continue;
+          if (front && c >= 3 && r >= 2) continue;
+          H(c, r, (c * 3 + r * 5) % 7 === 0 ? 108 : dx < -0.3 || dy < -0.5 ? 146 : 124);
+        }
     }
-    if (hair === 'bun') { H(hx0 + 1, headY - 2, 140); H(hx0 + 2, headY - 2, 120); }
-    if (hair === 'spiky') { H(hx0, headY - 2, 140); H(hx0 + 2, headY - 2, 140); }
-  } else if (!front) {
-    for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY + 1, S.HAIR, 110);
-  }
-  // face
-  if (front) {
-    sp.set(hx0 + 3, headY + 1, S.DARK, 128); // eye
-    if (tpl.glasses) { sp.set(hx0 + 2, headY + 1, S.DARK, 128); sp.set(hx0 + 3, headY + 1, S.DARK, 128); }
-  }
+    if (hair === 'bun') for (const [c, r] of [[1, -3], [2, -3], [0, -2], [1, -2], [2, -2], [3, -2]]) H(c + (front ? 0 : 1), r, r === -3 ? 146 : 124);
+    if (hair === 'spiky') { for (const c of [1, 3, 5]) H(c, -2, 140); H(3, -3, 146); H(1, -3, 120); }
+  } else if (front) { H(0, 3, 110); H(0, 4, 104); H(1, 3, 100); }
+  else for (let c = 0; c < headW; c++) { H(c, 3, 108); H(c, 4, 100); }
   // hats
   const hat = tpl.hat;
+  const HT = (c, r, sh = 128, slot = S.HAT) => sp.set(hx0 + c, headY + r, slot, sh);
   if (hat === 'beanie') {
-    for (let x = hx0; x < hx0 + 4; x++) { sp.set(x, headY - 1, S.HAT, 140); sp.set(x, headY, S.HAT, 115); }
-    sp.set(hx0 + 1, headY - 2, S.HAT, 150); sp.set(hx0 + 2, headY - 2, S.HAT, 130);
-    sp.set(hx0 + 1, headY - 3, S.WHITE, 128);
+    for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : 0; c < headW - (r === -2 ? 1 : 0); c++) HT(c, r, r <= -1 ? 146 - c * 3 : 122 - c * 2);
+    for (let c = 0; c < headW; c++) HT(c, 2, c === 0 ? 128 : 104);
+    for (const [c, r] of [[2, -4], [3, -4], [4, -4], [2, -3], [3, -3], [4, -3]]) HT(c, r, r === -4 ? 150 : 120, S.WHITE);
   } else if (hat === 'cap') {
-    for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY - 1, S.HAT, 140);
-    sp.set(hx0, headY, S.HAT, 120);
-    if (front) { sp.set(hx0 + 4, headY, S.HAT, 110); sp.set(hx0 + 3, headY, S.HAT, 110); }
-    else sp.set(hx0 - 1, headY, S.HAT, 110);
+    for (let r = -2; r <= 0; r++) for (let c = r === -2 ? 1 : 0; c < headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 148 : 128 - c * 2);
+    if (front) for (let c = 3; c <= headW + 1; c++) HT(c, 1, c > headW - 1 ? 104 : 112);
+    else { HT(2, 0, 90, S.DARK); HT(3, 0, 90, S.DARK); }
+    HT(3, -3, 150);
   } else if (hat === 'fedora') {
-    for (let x = hx0 - 1; x < hx0 + 5; x++) sp.set(x, headY, S.HAT, 110);
-    for (let x = hx0; x < hx0 + 4; x++) { sp.set(x, headY - 1, S.HAT, 140); sp.set(x, headY - 2, S.HAT, 128); }
+    for (let c = -2; c <= headW + 1; c++) HT(c, 0, c < 0 ? 120 : 104);
+    for (let r = -4; r <= -1; r++) for (let c = r === -4 ? 1 : 0; c < headW - (r === -4 ? 1 : 0); c++) HT(c, r, r === -4 ? 146 : c === 0 ? 140 : 122);
+    for (let c = 0; c < headW; c++) HT(c, -1, 100, S.DARK);
+    HT(3, -4, 110);
   } else if (hat === 'hood') {
-    for (let x = hx0 - 1; x < hx0 + 4; x++) sp.set(x, headY - 1, S.TOP, 130);
-    sp.set(hx0 - 1, headY, S.TOP, 115); sp.set(hx0 - 1, headY + 1, S.TOP, 110);
-    if (!front) for (let y = headY; y < headY + 3; y++) for (let x = hx0; x < hx0 + 4; x++) sp.set(x, y, S.TOP, 120);
+    const hs = coat ? S.COAT : S.TOP;
+    for (let c = 0; c < headW; c++) HT(c, -1, 140, hs);
+    for (let r = 0; r < headH + 1; r++) HT(-1, r, 124, hs);
+    if (front) {
+      for (let r = 0; r < headH; r++)
+        for (let c = 0; c < headW; c++) {
+          if (headRows[r][c] !== 'X') continue;
+          if (c >= 3 && r >= 2) continue;
+          HT(c, r, c === 0 ? 136 : 118, hs);
+        }
+      HT(headW - 1, 1, 104, hs); HT(headW, 1, 96, hs);
+    } else for (let r = 0; r < headH + 1; r++) for (let c = 0; c < headW; c++) HT(c, r, c === 0 ? 136 : c >= headW - 2 ? 104 : 120, hs);
   } else if (hat === 'witch') {
-    for (let x = hx0 - 2; x < hx0 + 6; x++) sp.set(x, headY, S.HAT, 110);
-    for (let k = 0; k < 4; k++) for (let x = hx0 + k * 0.5; x < hx0 + 4 - k * 0.5; x++) sp.set(Math.round(x), headY - 1 - k, S.HAT, 130);
+    for (let c = -3; c <= headW + 2; c++) HT(c, 0, c < 0 ? 120 : 104);
+    for (let k = 0; k < 8; k++) {
+      const half = Math.max(0, 3 - k * 0.4), ccx = 3 - k * 0.35;
+      for (let c = Math.round(ccx - half); c <= Math.round(ccx + half); c++) HT(c, -1 - k, c < ccx ? 140 : 118);
+    }
+    for (let c = 0; c < headW; c++) HT(c, -1, 128, S.ITEM);
   } else if (hat === 'helmet') {
-    for (let x = hx0 - 1; x < hx0 + 5; x++) sp.set(x, headY, S.HAT, 120);
-    for (let x = hx0; x < hx0 + 4; x++) sp.set(x, headY - 1, S.HAT, 140);
+    for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : -1; c <= headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 150 : c < 2 ? 140 : 118);
+    if (front) for (let c = headW - 1; c <= headW + 1; c++) HT(c, 2, 100);
+    HT(1, -1, 170, S.WHITE);
   }
-  // elder: cane
-  if (elder && tpl.cane) for (let y = hipY - 1; y <= y0; y++) sp.set(tx0 + tw + 1, y, S.DARK, 110);
+  // ---- near arm, held items
+  const hand = drawArm(false, P.ra);
+  const carrying = P.ra === 'down' || P.ra === 'fwd' || P.ra === 'back';
+  if (tpl.bag === 'brief' && carrying) {
+    const [hx, hy] = hand;
+    sp.set(hx, hy + 2, S.BAG, 96); sp.set(hx + 1, hy + 2, S.BAG, 96);
+    for (let y = hy + 3; y < hy + 7; y++) for (let x = hx - 2; x < hx + 4; x++) sp.set(x, y, S.BAG, x === hx - 2 ? 140 : y === hy + 6 ? 96 : 120);
+    sp.set(hx, hy + 4, S.ITEM2, 150);
+  }
+  if (tpl.bag === 'shopping' && carrying) {
+    const [hx, hy] = hand;
+    sp.set(hx - 1, hy + 2, S.BAG, 100); sp.set(hx + 2, hy + 2, S.BAG, 100);
+    for (let y = hy + 3; y < hy + 9; y++) for (let x = hx - 1; x < hx + 4; x++) sp.set(x, y, S.BAG, x === hx - 1 ? 146 : x === hx + 3 ? 100 : y === hy + 3 ? 136 : 122);
+  }
+  if (elder && tpl.cane) {
+    const [hx, hy] = hand;
+    sp.set(hx + 1, hy - 1, S.DARK, 120); sp.set(hx + 2, hy - 1, S.DARK, 110);
+    for (let y = hy; y <= y0; y++) sp.set(hx + 2, y, S.DARK, 110);
+  }
 }
 
 function paintLying(sp, tpl) {
-  // lying on a towel, seen at 3/4: horizontal figure
-  const y = sp.h - 3;
-  for (let x = 1; x < sp.w - 1; x++) sp.set(x, y + 1, S.ITEM2, x % 2 ? 128 : 110); // towel
-  for (let x = 2; x < 6; x++) sp.set(x, y, S.SKIN, 128);
-  for (let x = 6; x < 10; x++) sp.set(x, y, S.TOP, 128);
-  for (let x = 10; x < 14 && x < sp.w - 1; x++) sp.set(x, y, S.BOTTOM, 128);
-  sp.set(2, y - 1, S.HAIR, 128); sp.set(3, y - 1, S.HAIR, 128); sp.set(4, y - 1, S.SKIN, 128);
-  void tpl;
+  // lying on a towel, head to the left
+  const g = sp.h - 1;
+  for (let x = 1; x < sp.w - 1; x++) for (let y = g - 2; y <= g; y++) sp.set(x, y, S.ITEM2, (x >> 2) % 2 ? 128 : 100);
+  const y = g - 6;
+  const legC = tpl.bottom === 'pants' ? S.BOTTOM : S.SKIN;
+  sp.ellipse(5.5, y + 2, 3, 2.6, S.SKIN, 128);
+  for (let x = 3; x <= 6; x++) sp.set(x, y - 1, S.HAIR, 128);
+  sp.set(2, y, S.HAIR, 120); sp.set(2, y + 1, S.HAIR, 110); sp.set(2, y + 2, S.HAIR, 104);
+  sp.set(6, y + 1, S.DARK, 128); sp.set(7, y + 1, S.DARK, 128); sp.set(8, y + 2, S.SKIN, 110);
+  for (let x = 9; x <= 17; x++) for (let r = 0; r < 4; r++) sp.set(x, y + r, S.TOP, r === 0 ? 146 : r === 3 ? 100 : 124);
+  for (let x = 18; x <= 21; x++) for (let r = 0; r < 4; r++) sp.set(x, y + r, S.BOTTOM, r === 0 ? 140 : 110);
+  for (let x = 22; x <= 28; x++) { sp.set(x, y + 1, legC, 136); sp.set(x, y + 2, legC, 116); sp.set(x, y + 3, legC, 100); }
+  sp.set(29, y, S.SKIN, 128); sp.set(29, y + 1, S.SKIN, 116);
+  for (let x = 10; x <= 16; x++) sp.set(x, y + 3, S.SKIN, 112);
 }
 
-// Generates all frames for a template; returns map anim -> [front frames], [back frames]
-const TEMPLATE_BUDGET = 190;
+// Generates all frames for a template; returns { front: {anim: [frames]}, back: {...} }
+const TEMPLATE_BUDGET = 110;
 export function personTemplate(atlas, tpl) {
   const key = 'p:' + JSON.stringify(tpl);
   const cached = atlas.frames.get(key);
@@ -602,14 +760,14 @@ export function personTemplate(atlas, tpl) {
     if (best) return best.out;
   }
   const out = { front: {}, back: {} };
-  const w = 14, h = 22;
   for (const anim in POSES) {
     for (const view of ['front', 'back']) {
-      if (anim === 'lie' && view === 'back') { out.back.lie = out.front.lie; continue; }
+      if (view === 'back' && !BACK_POSES[anim]) { out.back[anim] = out.front[anim]; continue; }
       const arr = [];
       for (let f = 0; f < POSES[anim]; f++) {
-        const fw = anim === 'lie' ? 16 : w;
-        arr.push(atlas.add(null, fw, h, (sp) => paintPerson(sp, tpl, anim, f, view), Math.floor(fw / 2), h - 1));
+        const fw = anim === 'lie' ? 32 : PW;
+        const ext = anim === 'sit' ? SIT_EXT : 0;
+        arr.push(atlas.add(null, fw, PH + ext, (sp) => { paintPerson(sp, tpl, anim, f, view, ext); selOut(sp); }, Math.floor(fw / 2), PH - 1));
       }
       out[view][anim] = arr;
     }
@@ -620,265 +778,460 @@ export function personTemplate(atlas, tpl) {
 }
 
 // ---------------------------------------------------------------------------
-// ANIMALS
+// ANIMALS (2x)
 export const DOG_BREEDS = {
-  small: { len: 5, hgt: 3, leg: 2, head: 3, ears: 'up', tail: 'up' },
-  terrier: { len: 6, hgt: 3, leg: 2, head: 3, ears: 'up', tail: 'up' },
-  medium: { len: 7, hgt: 4, leg: 3, head: 3, ears: 'flop', tail: 'up' },
-  large: { len: 9, hgt: 4, leg: 4, head: 4, ears: 'flop', tail: 'out' },
-  dachshund: { len: 9, hgt: 3, leg: 1, head: 3, ears: 'flop', tail: 'out' },
-  poodle: { len: 6, hgt: 4, leg: 3, head: 3, ears: 'flop', tail: 'pom', fluffy: true },
-  husky: { len: 8, hgt: 4, leg: 3, head: 4, ears: 'up', tail: 'curl' },
+  small: { len: 10, hgt: 6, leg: 4, head: 6, ears: 'up', tail: 'up' },
+  terrier: { len: 12, hgt: 6, leg: 4, head: 6, ears: 'up', tail: 'up', wiry: true },
+  medium: { len: 14, hgt: 7, leg: 6, head: 6, ears: 'flop', tail: 'up' },
+  large: { len: 18, hgt: 8, leg: 8, head: 7, ears: 'flop', tail: 'out' },
+  dachshund: { len: 18, hgt: 6, leg: 2, head: 6, ears: 'flop', tail: 'out' },
+  poodle: { len: 12, hgt: 7, leg: 6, head: 6, ears: 'flop', tail: 'pom', fluffy: true },
+  husky: { len: 16, hgt: 8, leg: 6, head: 7, ears: 'up', tail: 'curl', mask: true },
+};
+export const dogFrameSize = (breed) => {
+  const B = DOG_BREEDS[breed];
+  return [B.len + 16, B.hgt + B.leg + B.head + 6];
 };
 
 export function paintDog(sp, breed, anim, f) {
   const B = DOG_BREEDS[breed];
-  const ground = sp.h - 1;
-  const x0 = 2;
-  const legY = ground - B.leg + 1;
-  const bodyTop = legY - B.hgt;
-  const sit = anim === 'sit';
-  const sniff = anim === 'sniff';
-  const run = anim === 'run';
-  // body
-  for (let y = bodyTop; y < legY; y++)
-    for (let x = x0; x < x0 + B.len; x++) {
-      if (sit && x < x0 + 2 && y < bodyTop + 1) continue;
-      const sh = y === bodyTop ? 145 : y === legY - 1 ? 105 : 128;
-      const slot = y === legY - 1 && x > x0 + 1 && x < x0 + B.len - 1 ? S.BODY_L : S.BODY;
-      sp.set(x, y + (sit && x < x0 + 3 ? 1 : 0), slot, sh);
-      if (B.fluffy && (x + y) % 2 === 0) sp.set(x, y - 1, S.BODY, 150);
+  const g = sp.h - 1;
+  const x0 = 5;
+  const legTop = g - B.leg + 1;
+  const bodyTop = legTop - B.hgt;
+  const sit = anim === 'sit', sniff = anim === 'sniff', run = anim === 'run', walk = anim === 'walk';
+  const xEnd = x0 + B.len - 1;
+  // when sitting the rump drops to the ground
+  const drop = (x) => (sit ? Math.round((1 - (x - x0) / B.len) * (B.leg + 1)) : 0);
+  // legs (far pair first, then body, then near pair)
+  const legs = [
+    { x: x0 + 1, far: true, ph: 0 }, { x: xEnd - 4, far: true, ph: 1 },
+    { x: x0 + 3, far: false, ph: 2 }, { x: xEnd - 2, far: false, ph: 3 },
+  ];
+  const drawLeg = (L) => {
+    if (sit && L.x < x0 + B.len / 2) return;
+    let dx = 0, lift = 0;
+    if (walk) { const p = (f + L.ph) % 4; dx = [1, 0, -1, 0][p]; lift = p === 1 ? 1 : 0; }
+    if (run) { const p = (f + (L.ph >> 1)) % 2; dx = p ? 2 : -2; lift = p ? 1 : 0; }
+    const sh = L.far ? 96 : 124, slot = L.far ? S.BODY_D : S.BODY;
+    for (let y = legTop - 1; y <= g - lift; y++) {
+      const t = (y - legTop) / Math.max(1, g - legTop);
+      const xx = L.x + Math.round(dx * Math.max(0, t));
+      sp.set(xx, y, slot, sh + 10); sp.set(xx + 1, y, slot, sh - 12);
     }
-  // legs
-  const legsX = [x0, x0 + 1, x0 + B.len - 2, x0 + B.len - 1];
-  const phase = anim === 'walk' || run ? f % 2 : -1;
-  legsX.forEach((lx, i) => {
-    if (sit && i < 2) return;
-    const off = phase >= 0 ? ((i + phase) % 2 === 0 ? (run ? 1 : 0) : (run ? -1 : 0)) : 0;
-    const lift = phase >= 0 && (i + phase) % 2 === 0 ? 1 : 0;
-    for (let y = legY; y < ground + 1 - lift; y++) sp.set(lx + off * (y === ground - lift ? 1 : 0), y, i % 2 ? S.BODY : S.BODY_D, i % 2 ? 128 : 100);
-  });
-  if (sit) for (let x = x0; x < x0 + 3; x++) sp.set(x, ground, S.BODY_D, 100);
+    sp.set(L.x + dx + 2, g - lift, slot, sh - 6); // paw
+  };
+  legs.filter((L) => L.far).forEach(drawLeg);
+  // body
+  for (let x = x0; x <= xEnd; x++)
+    for (let y = bodyTop; y < legTop; y++) {
+      const ry = (y - bodyTop) / Math.max(1, B.hgt - 1);
+      if ((x === x0 || x === xEnd) && (y === bodyTop || y === legTop - 1)) continue;
+      let slot = ry > 0.72 && x > x0 + 2 && x < xEnd - 2 ? S.BODY_L : S.BODY;
+      if (B.mask && ry > 0.6) slot = S.BODY_L;
+      let sh = ry < 0.2 ? 148 : ry > 0.8 ? 104 : 126;
+      if (B.fluffy || B.wiry) sh += hash2i(x, y, 3) < 0.35 ? 16 : hash2i(x, y, 4) < 0.25 ? -14 : 0;
+      sp.set(x, y + drop(x), slot, sh);
+    }
+  if (B.fluffy) for (let x = x0 + 1; x < xEnd; x++) if (hash2i(x, 0, 5) < 0.6) sp.set(x, bodyTop - 1 + drop(x), S.BODY, 150);
+  if (sit) for (let x = x0; x < x0 + 5; x++) sp.set(x, g, S.BODY_D, 100); // folded hind leg
+  legs.filter((L) => !L.far).forEach(drawLeg);
   // head
-  const hx = x0 + B.len - 1, hy = (sniff ? legY - 1 : bodyTop - B.head + 2) + (sit ? -1 : 0);
+  const hw = B.head + 1;
+  const hx = xEnd - 2, hy = (sniff ? legTop - 2 : bodyTop - B.head + 3) - (sit ? 2 : 0);
   for (let y = hy; y < hy + B.head; y++)
-    for (let x = hx; x < hx + 3; x++) sp.set(x, y, S.BODY, y === hy ? 145 : 128);
-  sp.set(hx + 3, hy + B.head - 2, S.BODY, 120); // snout
-  sp.set(hx + 3, hy + B.head - 2 - 0, S.NOSE, 128);
-  sp.set(hx + 2, hy + 1, S.EYE, 128);
-  if (B.ears === 'up') { sp.set(hx, hy - 1, S.BODY_D, 128); sp.set(hx + 1, hy - 1, S.BODY_D, 110); }
-  else { sp.set(hx, hy, S.BODY_D, 100); sp.set(hx, hy + 1, S.BODY_D, 100); }
-  sp.set(hx, hy + B.head - 1, S.COLLAR, 128);
+    for (let x = hx; x < hx + hw; x++) {
+      if ((x === hx || x === hx + hw - 1) && (y === hy || y === hy + B.head - 1)) continue;
+      sp.set(x, y, B.mask && y > hy + 2 ? S.BODY_L : S.BODY, y === hy ? 148 : x === hx + hw - 1 ? 110 : 130);
+    }
+  // snout + nose
+  const sy = hy + B.head - 3;
+  for (let x = hx + hw - 1; x < hx + hw + 2; x++) { sp.set(x, sy, S.BODY, 132); sp.set(x, sy + 1, S.BODY_L, 116); }
+  sp.set(hx + hw + 2, sy, S.NOSE, 128); sp.set(hx + hw + 1, sy - 1, S.BODY, 120);
+  sp.set(hx + hw - 2, hy + 2, S.EYE, 128);
+  if (run) sp.set(hx + hw, sy + 2, S.COLLAR, 150); // tongue out (collar slot is bright)
+  if (B.ears === 'up') { sp.set(hx + 1, hy - 1, S.BODY_D, 128); sp.set(hx + 2, hy - 1, S.BODY_D, 116); sp.set(hx + 1, hy - 2, S.BODY_D, 110); }
+  else for (let y = hy + 1; y < hy + 5; y++) { sp.set(hx, y, S.BODY_D, 104); sp.set(hx + 1, y, S.BODY_D, 116); }
+  for (let y = hy + B.head - 2; y < Math.min(legTop, hy + B.head + 2); y++) { sp.set(hx - 1, y, S.COLLAR, 128); sp.set(hx, y, S.COLLAR, 110); }
   // tail
-  const ty = bodyTop;
+  const ty = bodyTop + drop(x0);
   const wag = f % 2;
-  if (B.tail === 'up') { sp.set(x0 - 1, ty - 1 - wag, S.BODY, 128); sp.set(x0 - 1, ty, S.BODY, 128); }
-  else if (B.tail === 'out') { sp.set(x0 - 1, ty + wag, S.BODY, 128); sp.set(x0 - 2, ty + wag, S.BODY, 110); }
-  else if (B.tail === 'pom') { sp.set(x0 - 1, ty - 1, S.BODY, 150); sp.set(x0 - 2, ty - 1 - wag, S.BODY, 150); }
-  else { sp.set(x0 - 1, ty - 1, S.BODY_L, 128); sp.set(x0, ty - 2, S.BODY_L, 128); sp.set(x0 + 1, ty - 2 + wag, S.BODY_L, 128); }
+  if (B.tail === 'up') for (let k = 0; k < 4; k++) { sp.set(x0 - 1 - (k >> 1) + (k === 3 ? wag : 0), ty - k, S.BODY, 134); sp.set(x0 - (k >> 1), ty - k, S.BODY, 116); }
+  else if (B.tail === 'out') for (let k = 0; k < 5; k++) sp.set(x0 - 1 - k, ty + 1 + (k > 2 ? wag : 0), S.BODY, 128 - k * 4);
+  else if (B.tail === 'pom') { sp.set(x0 - 1, ty, S.BODY, 128); sp.set(x0 - 2, ty - 1, S.BODY, 128); sp.ellipse(x0 - 3, ty - 3 - wag, 1.6, 1.6, S.BODY, 150); }
+  else for (const [dx, dy] of [[-1, 0], [-1, -1], [0, -2], [1, -3], [2, -3], [3, -2 + wag]]) { sp.set(x0 + dx, ty + dy, S.BODY_L, 140); sp.set(x0 + dx, ty + dy + 1, S.BODY, 120); }
 }
 
 export function paintPigeon(sp, anim, f) {
   const g = sp.h - 1;
   if (anim === 'fly') {
     const up = f % 2 === 0;
-    // body
-    for (let x = 2; x < 6; x++) sp.set(x, g - 3, S.BODY, 128);
-    sp.set(6, g - 4, S.BODY_D, 128); sp.set(7, g - 4, S.BEAK, 128);
-    sp.set(1, g - 3, S.BODY_D, 110);
-    if (up) { sp.set(3, g - 4, S.BODY_L, 140); sp.set(3, g - 5, S.BODY_L, 150); sp.set(4, g - 6, S.BODY_L, 150); sp.set(2, g - 6, S.BODY_L, 150); }
-    else { sp.set(3, g - 2, S.BODY_L, 120); sp.set(3, g - 1, S.BODY_L, 110); sp.set(4, g - 1, S.BODY_D, 110); }
+    const by = g - 7;
+    sp.ellipse(8.5, by, 5, 2.2, S.BODY, 128);
+    for (let x = 5; x < 12; x++) sp.set(x, by + 2, S.BODY_L, 112);
+    for (const [x, y] of [[3, by - 1], [2, by - 1], [2, by], [1, by], [2, by + 1], [3, by + 1]]) sp.set(x, y, S.BODY_D, 110);
+    sp.ellipse(14, by - 1, 1.8, 1.6, S.BODY_D, 124);
+    sp.set(12, by, S.ACCENT, 128); sp.set(13, by, S.ACCENT, 112);
+    sp.set(15, by - 2, S.EYE, 128); sp.set(16, by - 1, S.BEAK, 128); sp.set(17, by - 1, S.BEAK, 110);
+    if (up) {
+      for (let k = 0; k < 6; k++) { const x = 8 - (k >> 1); sp.set(x - 1, by - 2 - k, S.BODY_L, 150 - k * 4); sp.set(x, by - 2 - k, S.BODY_L, 136); sp.set(x + 1, by - 2 - k, S.BODY_D, 116); }
+      sp.set(4, by - 8, S.BODY_D, 110); sp.set(5, by - 8, S.BODY_D, 110);
+    } else {
+      for (let k = 0; k < 5; k++) { const x = 8 - (k >> 1); sp.set(x - 1, by + 1 + k, S.BODY_L, 124); sp.set(x, by + 1 + k, S.BODY_D, 110); }
+    }
     return;
   }
   const peck = anim === 'peck' && f === 1;
   const bob = anim === 'walk' && f === 1 ? 1 : 0;
-  // body
-  for (let x = 1; x < 5; x++) sp.set(x, g - 2, S.BODY, 128);
-  for (let x = 2; x < 5; x++) sp.set(x, g - 3, S.BODY_L, 140);
-  sp.set(0, g - 3, S.BODY_D, 110); // tail
-  sp.set(1, g - 3, S.BODY_D, 120);
-  // neck & head
-  const hx = 4 + bob, hy = peck ? g - 2 : g - 4;
-  sp.set(4, g - 3, S.ACCENT, 128);
-  sp.set(hx, hy, S.BODY_D, 128);
-  sp.set(hx + 1, hy, S.BODY_D, 128);
-  sp.set(hx + 2, hy + (peck ? 1 : 0), S.BEAK, 128);
-  sp.set(hx + 1, hy, S.EYE, 128);
-  // feet
-  sp.set(2, g - 1, S.BEAK, 110);
-  sp.set(3 + (anim === 'walk' ? f % 2 : 0), g - 1, S.BEAK, 110);
+  const by = g - 4;
+  sp.ellipse(6.5, by, 4.6, 2.6, S.BODY, 128);
+  for (let x = 4; x <= 9; x++) { sp.set(x, by - 1, S.BODY_L, 140); sp.set(x, by, S.BODY_L, 126); }
+  sp.set(6, by, S.BODY_D, 104); sp.set(8, by, S.BODY_D, 104); sp.set(7, by - 1, S.BODY_D, 112);
+  for (let x = 4; x <= 9; x++) sp.set(x, by + 2, S.BODY_L, 104);
+  sp.set(1, by - 1, S.BODY_D, 120); sp.set(2, by - 1, S.BODY_D, 120); sp.set(1, by, S.BODY_D, 104); sp.set(0, by - 1, S.BODY_D, 100);
+  const hx = 10 + bob, hy = peck ? by + 1 : by - 3;
+  sp.set(10, by - 1, S.ACCENT, 136); sp.set(10, by - 2, S.ACCENT, 120); sp.set(11, by - 1, S.ACCENT, 112);
+  sp.ellipse(hx + 1.5, hy, 1.9, 1.7, S.BODY_D, 126);
+  sp.set(hx + 2, hy - 1, S.EYE, 128);
+  sp.set(hx + 3, hy + (peck ? 1 : 0), S.BEAK, 128); sp.set(hx + 4, hy + (peck ? 1 : 0), S.BEAK, 108);
+  sp.set(hx + 3, hy - 1 + (peck ? 1 : 0), S.BODY_L, 150);
+  const st = anim === 'walk' ? f % 2 : 0;
+  sp.set(5, by + 3, S.BEAK, 110); sp.set(5 - st, by + 4, S.BEAK, 104); sp.set(6 - st, by + 4, S.BEAK, 96);
+  sp.set(8, by + 3, S.BEAK, 120); sp.set(8 + st, by + 4, S.BEAK, 110); sp.set(9 + st, by + 4, S.BEAK, 100);
 }
 
 export function paintCat(sp, anim, f) {
   const g = sp.h - 1;
   if (anim === 'sit') {
-    for (let y = g - 4; y <= g; y++) for (let x = 1; x < 4; x++) sp.set(x, y, S.BODY, x === 1 ? 140 : 120);
-    sp.set(3, g - 5, S.BODY, 128); sp.set(4, g - 5, S.BODY, 128); sp.set(3, g - 6, S.BODY_D, 128); sp.set(4, g - 6, S.BODY_D, 128);
-    sp.set(4, g - 5, S.EYE, 128);
-    sp.set(0, g, S.BODY, 120); sp.set(0, g - 1 - (f % 2), S.BODY, 120);
+    sp.ellipse(5, g - 4, 3.6, 4.2, S.BODY, 124);
+    sp.ellipse(5.5, g - 1.5, 3.2, 1.8, S.BODY, 116);
+    for (let y = g - 7; y <= g - 2; y++) sp.set(2, y, S.BODY, 146);
+    sp.ellipse(7, g - 10, 2.6, 2.3, S.BODY, 130);
+    sp.set(5, g - 13, S.BODY_D, 128); sp.set(5, g - 12, S.BODY, 128); sp.set(6, g - 12, S.BODY, 120);
+    sp.set(8, g - 13, S.BODY_D, 128); sp.set(8, g - 12, S.BODY, 128);
+    sp.set(8, g - 10, S.EYE, 128); sp.set(6, g - 10, S.EYE, 110);
+    sp.set(9, g - 9, S.BODY_L, 140);
+    for (let y = g - 3; y <= g; y++) sp.set(7, y, S.BODY_L, 122);
+    sp.set(8, g, S.BODY_L, 116);
+    const w = f % 2;
+    for (let x = 1; x <= 6; x++) sp.set(x, g, S.BODY_D, 104);
+    sp.set(0, g - 1 - w, S.BODY_D, 110); sp.set(1, g - 1, S.BODY_D, 110); sp.set(0, g - 2 - w, S.BODY_D, 104);
     return;
   }
-  for (let x = 1; x < 6; x++) { sp.set(x, g - 2, S.BODY, 128); sp.set(x, g - 3, S.BODY, 145); }
-  sp.set(6, g - 3, S.BODY, 128); sp.set(6, g - 4, S.BODY, 128); sp.set(7, g - 4, S.BODY, 128); sp.set(6, g - 5, S.BODY_D, 128); sp.set(7, g - 5, S.BODY_D, 128);
-  sp.set(7, g - 4, S.EYE, 128);
   const ph = f % 2;
-  sp.set(1 + ph, g - 1, S.BODY_D, 110); sp.set(2 - ph, g, S.BODY_D, 110); sp.set(5 - ph, g - 1, S.BODY_D, 110); sp.set(5 + ph, g, S.BODY_D, 110);
-  sp.set(1, g, S.BODY_D, 100); sp.set(5, g, S.BODY_D, 100);
-  sp.set(0, g - 4, S.BODY, 120); sp.set(0, g - 5, S.BODY, 120);
+  const by = g - 6;
+  sp.ellipse(8, by, 6, 2.6, S.BODY, 126);
+  for (let x = 4; x <= 12; x++) sp.set(x, by - 2, S.BODY, 146);
+  for (let x = 5; x <= 11; x++) sp.set(x, by + 2, S.BODY_L, 112);
+  [[4, -1], [6, 1], [10, 1], [12, -1]].forEach(([lx, s], i) => {
+    const off = ph ? s : -s;
+    for (let y = by + 2; y <= g; y++) sp.set(lx + (y === g ? off : 0), y, i % 2 ? S.BODY : S.BODY_D, i % 2 ? 124 : 100);
+  });
+  sp.ellipse(14, by - 2, 2.6, 2.2, S.BODY, 130);
+  sp.set(12, by - 5, S.BODY_D, 128); sp.set(12, by - 4, S.BODY, 128); sp.set(15, by - 5, S.BODY_D, 128); sp.set(15, by - 4, S.BODY, 128);
+  sp.set(15, by - 2, S.EYE, 128); sp.set(13, by - 2, S.EYE, 110);
+  sp.set(16, by - 1, S.BODY_L, 140);
+  for (let k = 0; k < 6; k++) sp.set(2 - (k > 3 ? k - 3 : 0), by - 1 - k, S.BODY, 122 - k * 2);
+  sp.set(0, by - 6, S.BODY_D, 110);
 }
 
 export function paintSquirrel(sp, anim, f) {
   const g = sp.h - 1;
-  const hop = anim === 'run' && f === 1 ? 1 : 0;
-  for (let x = 2; x < 5; x++) sp.set(x, g - 1 - hop, S.BODY, 128);
-  sp.set(3, g - 2 - hop, S.BODY, 140); sp.set(4, g - 2 - hop, S.BODY, 128);
-  sp.set(5, g - 2 - hop, S.BODY, 128); sp.set(5, g - 3 - hop, S.BODY_D, 128); sp.set(5, g - 2 - hop, S.EYE, 128);
-  // bushy tail
-  sp.set(1, g - 2 - hop, S.BODY_L, 140); sp.set(0, g - 3 - hop, S.BODY_L, 150); sp.set(1, g - 3 - hop, S.BODY_L, 150); sp.set(1, g - 4 - hop, S.BODY_L, 150); sp.set(2, g - 4 - hop, S.BODY_L, 140);
-  sp.set(2, g, S.BODY_D, 100); sp.set(4, g, S.BODY_D, 100);
-  if (anim === 'stand') { sp.set(4, g - 3, S.BODY, 128); sp.set(4, g - 4, S.BODY, 128); }
+  if (anim === 'stand') {
+    sp.ellipse(7, g - 4, 2.4, 3.6, S.BODY, 126);
+    sp.ellipse(8, g - 9, 2, 1.8, S.BODY, 132);
+    sp.set(7, g - 11, S.BODY_D, 120);
+    sp.set(9, g - 9, S.EYE, 128);
+    sp.set(9, g - 6, S.BODY_L, 130); sp.set(9, g - 7, S.BODY_L, 130);
+    for (let y = g - 4; y <= g - 1; y++) sp.set(8, y, S.BODY_L, 112);
+    for (let k = 0; k < 9; k++) { const x = 4 - Math.round(Math.sin((k / 8) * Math.PI) * 2.5), y = g - 1 - k; sp.set(x, y, S.BODY_L, 146); sp.set(x - 1, y, S.BODY_L, 126); sp.set(x + 1, y, S.BODY_D, 112); }
+    sp.set(7, g, S.BODY_D, 100); sp.set(8, g, S.BODY_D, 100);
+    return;
+  }
+  const hop = anim === 'run' && f === 1 ? 2 : 0;
+  const by = g - 3 - hop;
+  sp.ellipse(7, by, 3.4, 2, S.BODY, 126);
+  sp.ellipse(10.5, by - 1.5, 1.9, 1.7, S.BODY, 132);
+  sp.set(10, by - 3, S.BODY_D, 120);
+  sp.set(11, by - 2, S.EYE, 128);
+  for (let k = 0; k < 7; k++) { const x = 3 - Math.round(Math.sin((k / 6) * Math.PI) * 2), y = by - k; sp.set(x, y, S.BODY_L, 146); sp.set(x + 1, y, S.BODY_L, 124); }
+  sp.set(5 - f, by + 2, S.BODY_D, 104); sp.set(5 - f, by + 3, S.BODY_D, 96); sp.set(9 + f, by + 2, S.BODY_D, 104); sp.set(9 + f, by + 3, S.BODY_D, 96);
 }
 
 export function paintDuck(sp, anim, f) {
   const g = sp.h - 1;
-  for (let x = 1; x < 5; x++) sp.set(x, g - 1, S.BODY, x === 1 ? 110 : 128);
-  for (let x = 2; x < 5; x++) sp.set(x, g - 2, S.BODY_L, 140);
-  sp.set(0, g - 2, S.BODY_D, 120);
-  sp.set(4, g - 3 + (f % 2 && anim === 'swim' ? 0 : 0), S.ACCENT, 128); sp.set(5, g - 3, S.ACCENT, 128);
-  sp.set(5, g - 4, S.ACCENT, 128); sp.set(6, g - 3, S.BEAK, 128);
-  sp.set(5, g - 4, S.EYE, 128);
-  if (anim === 'swim') for (let x = 0; x < 6; x++) if ((x + f) % 3 === 0) sp.set(x, g, S.WHITE, 120);
+  const by = g - 3;
+  sp.ellipse(7, by, 5, 2.4, S.BODY, 126);
+  for (let x = 4; x <= 10; x++) sp.set(x, by - 2, S.BODY_L, 142);
+  for (let x = 5; x <= 9; x++) sp.set(x, by - 1, S.BODY_L, 126);
+  sp.set(1, by - 2, S.BODY_D, 120); sp.set(2, by - 2, S.BODY_D, 110); sp.set(1, by - 1, S.BODY_D, 104);
+  sp.set(11, by - 2, S.ACCENT, 120); sp.set(11, by - 3, S.ACCENT, 128);
+  sp.ellipse(12.5, by - 5, 2, 1.8, S.ACCENT, 130);
+  sp.set(13, by - 6, S.EYE, 128);
+  sp.set(14, by - 5, S.BEAK, 128); sp.set(15, by - 5, S.BEAK, 116); sp.set(14, by - 4, S.BEAK, 104);
+  if (anim === 'swim') for (let x = 0; x < sp.w; x++) if ((x + f * 2) % 5 < 2) sp.set(x, g, S.WHITE, 120);
+}
+
+export function paintRat(sp, f) {
+  const g = sp.h - 1;
+  sp.ellipse(6.5, g - 2.5, 3.6, 1.8, S.BODY, 124);
+  for (let x = 4; x <= 8; x++) sp.set(x, g - 4, S.BODY, 140);
+  sp.ellipse(10.5, g - 2.5, 1.6, 1.3, S.BODY, 130);
+  sp.set(12, g - 2, S.BODY_L, 128);
+  sp.set(10, g - 4, S.BODY_L, 120);
+  sp.set(11, g - 3, S.EYE, 128);
+  for (let k = 0; k < 4; k++) sp.set(2 - k, g - 2 + (k > 1 ? f : 0), S.BODY_L, 110);
+  sp.set(4 + f, g, S.BODY_D, 100); sp.set(8 - f, g, S.BODY_D, 100);
 }
 
 // ---------------------------------------------------------------------------
 // PROPS (generic slot colours supplied by a shared palette row)
 export function buildPropSprites(atlas) {
   const A = atlas;
-  // satellite dish: slots C1 dish light, C2 dish dark, C3 pole
-  A.add('dish', 8, 9, (sp) => {
-    for (let y = 1; y < 6; y++) for (let x = 1 + Math.abs(3 - y) * 0; x < 6; x++) if ((x - 3.5) ** 2 / 9 + (y - 3.5) ** 2 / 6 <= 1) sp.set(x, y, x < 3 ? S.C1 : S.C2, 128);
-    sp.set(6, 3, S.C3, 128); sp.set(7, 3, S.C3, 128);
-    for (let y = 6; y < 9; y++) sp.set(4, y, S.C3, 110);
-  });
-  A.add('antenna', 9, 18, (sp) => {
-    for (let y = 2; y < 18; y++) sp.set(4, y, S.C3, 120);
-    for (let k = 0; k < 4; k++) for (let x = 1 + k; x < 8 - k; x++) sp.set(x, 2 + k * 3, S.C3, 140);
-  });
-  A.add('deckchair', 9, 6, (sp) => {
-    for (let x = 0; x < 7; x++) sp.set(x, 3, S.C5, x % 2 ? 128 : 150);
-    for (let y = 0; y < 3; y++) sp.set(6 + Math.floor(y / 2), y, S.C5, 140);
-    sp.set(0, 4, S.C3, 110); sp.set(0, 5, S.C3, 110); sp.set(5, 4, S.C3, 110); sp.set(5, 5, S.C3, 110);
-  });
-  A.add('bush', 12, 9, (sp) => {
-    for (let y = 0; y < 9; y++) for (let x = 0; x < 12; x++) {
-      const d = ((x - 5.5) / 6) ** 2 + ((y - 5) / 4.5) ** 2;
-      if (d <= 1 && hash2i(x, y, 9) > 0.08) sp.set(x, y, d < 0.3 && x < 6 ? S.C8 : x + y < 10 ? S.C8 : x > 7 ? S.C10 : S.C9, 128);
+  A.add('dish', 16, 18, (sp) => {
+    for (let y = 1; y < 12; y++) for (let x = 1; x < 13; x++) {
+      const d = ((x - 6.5) / 5.6) ** 2 + ((y - 6) / 4.8) ** 2;
+      if (d <= 1) sp.set(x, y, x + y < 11 ? S.C1 : S.C4, d > 0.7 ? 110 : 140 - Math.round(d * 30));
     }
+    for (let k = 0; k < 4; k++) sp.set(9 + k, 6 - (k >> 1), S.C3, 120);
+    sp.set(13, 4, S.C3, 140); sp.set(14, 4, S.C3, 128); sp.set(13, 5, S.C3, 110);
+    for (let y = 11; y < 18; y++) { sp.set(7, y, S.C3, 124); sp.set(8, y, S.C3, 96); }
+    sp.set(6, 17, S.C3, 110); sp.set(9, 17, S.C3, 100);
   });
-  A.add('grill', 6, 7, (sp) => {
-    for (let x = 0; x < 6; x++) { sp.set(x, 1, S.C4, 128); sp.set(x, 2, S.C4, 110); }
-    for (let x = 1; x < 5; x++) sp.set(x, 0, S.C4, 140);
-    sp.set(1, 3, S.C4, 100); sp.set(4, 3, S.C4, 100); sp.set(1, 4, S.C3, 100); sp.set(4, 4, S.C3, 100); sp.set(0, 6, S.C3, 100); sp.set(5, 6, S.C3, 100); sp.set(1, 5, S.C3, 100); sp.set(4, 5, S.C3, 100);
-  });
-  A.add('laundry', 26, 16, (sp) => {
-    for (let y = 2; y < 16; y++) { sp.set(0, y, S.C3, 110); sp.set(25, y, S.C3, 110); }
-    for (let x = 0; x < 26; x++) sp.set(x, 2 + Math.round(Math.sin((x / 25) * Math.PI) * 2), S.C4, 128);
-    const cols = [S.C5, S.C6, S.C7, S.C1, S.C5];
+  A.add('antenna', 18, 36, (sp) => {
+    for (let y = 3; y < 36; y++) { sp.set(9, y, S.C3, 124); sp.set(10, y, S.C3, 96); }
     for (let k = 0; k < 5; k++) {
-      const x0 = 2 + k * 5, sag = Math.round(Math.sin(((x0 + 1) / 25) * Math.PI) * 2);
-      const hgt = 4 + (k % 2) * 2;
-      for (let y = 3 + sag; y < 3 + sag + hgt; y++) for (let x = x0; x < x0 + 3; x++) sp.set(x, y, cols[k], x === x0 ? 140 : 120);
+      const half = 7 - k, yy = 4 + k * 5;
+      for (let x = 9 - half; x <= 10 + half; x++) sp.set(x, yy, S.C3, 140 - k * 4);
+      sp.set(9 - half, yy + 1, S.C3, 110); sp.set(10 + half, yy + 1, S.C3, 110);
+    }
+    sp.set(9, 2, S.C2, 150); sp.set(10, 2, S.C2, 128);
+  });
+  A.add('deckchair', 18, 12, (sp) => {
+    for (let x = 1; x < 13; x++) { const y = 7 - Math.floor(x / 6); sp.set(x, y, S.C5, (x >> 1) % 2 ? 128 : 150); sp.set(x, y + 1, S.C5, 104); }
+    for (let k = 0; k < 6; k++) { sp.set(13 + (k >> 1), 6 - k, S.C5, 140); sp.set(14 + (k >> 1), 6 - k, S.C5, 112); }
+    for (let k = 0; k < 4; k++) { sp.set(2, 8 + k, S.C3, 110); sp.set(11, 8 + k, S.C3, 110); sp.set(15, 7 + k, S.C3, 100); }
+  });
+  A.add('bush', 24, 18, (sp) => {
+    const blobs = [[7, 11, 6], [15, 10, 7], [11, 7, 6], [19, 12, 4.5], [4, 13, 4]];
+    for (const [bx, by, r] of blobs)
+      for (let y = 0; y < 18; y++)
+        for (let x = 0; x < 24; x++) {
+          const d = ((x + 0.5 - bx) / r) ** 2 + ((y + 0.5 - by) / (r * 0.85)) ** 2;
+          if (d > 1 || (d > 0.7 && hash2i(x >> 1, y >> 1, 9) < 0.4)) continue;
+          const l = (-(x - 12) / 12) * 0.5 - ((y - 9) / 9) * 0.7 + (hash2i(x >> 1, y >> 1, 4) - 0.5) * 0.6;
+          sp.set(x, y, l > 0.3 ? S.C8 : l > -0.25 ? S.C9 : S.C10, 128);
+        }
+    for (let x = 0; x < 24; x++) for (let y = 17; y >= 10; y--) if (sp.get(x, y) >= 0 && (sp.get(x, y + 1) < 0 || sp.get(x, y + 2) < 0)) sp.set(x, y, S.C10, 110);
+  });
+  A.add('grill', 12, 14, (sp) => {
+    for (let y = 1; y < 9; y++) for (let x = 0; x < 12; x++) {
+      const d = ((x + 0.5 - 6) / 5.6) ** 2 + ((y + 0.5 - 5) / 4) ** 2;
+      if (d <= 1) sp.set(x, y, S.C3, x < 4 ? 150 : x > 8 ? 100 : 124);
+    }
+    for (let x = 1; x < 11; x++) sp.set(x, 5, S.C4, 120);
+    sp.set(5, 0, S.C4, 140); sp.set(6, 0, S.C4, 128);
+    for (let k = 0; k < 5; k++) { sp.set(3 - (k >> 1), 9 + k, S.C4, 110); sp.set(8 + (k >> 1), 9 + k, S.C4, 100); sp.set(6, 9 + k, S.C4, 96); }
+  });
+  A.add('laundry', 52, 32, (sp) => {
+    for (let y = 3; y < 32; y++) { sp.set(0, y, S.C3, 128); sp.set(1, y, S.C3, 100); sp.set(50, y, S.C3, 128); sp.set(51, y, S.C3, 100); }
+    const sag = (x) => 4 + Math.round(Math.sin((x / 51) * Math.PI) * 4);
+    for (let x = 1; x < 51; x++) sp.set(x, sag(x), S.C4, 128);
+    const cols = [S.C5, S.C6, S.C7, S.C1, S.C2];
+    const widths = [8, 6, 7, 3, 9], heights = [10, 11, 13, 5, 14];
+    let x = 4;
+    for (let k = 0; k < 5; k++) {
+      const c = cols[k], wdt = widths[k], hgt = heights[k];
+      const top = sag(x + wdt / 2) + 1;
+      for (let yy = 0; yy < hgt; yy++)
+        for (let xx = 0; xx < wdt; xx++) {
+          if (k === 0 && yy > 3 && (xx < 2 || xx > wdt - 3)) continue;
+          if (k === 2 && yy < 4 && (xx < 1 || xx > wdt - 2)) continue;
+          sp.set(x + xx, top + yy, c, xx === 0 ? 146 : xx === wdt - 1 ? 104 : (xx + yy) % 5 === 0 ? 116 : 128);
+        }
+      sp.set(x + 1, top - 1, S.C4, 150); sp.set(x + wdt - 2, top - 1, S.C4, 150);
+      x += wdt + 2;
     }
   });
-  A.add('statue', 12, 24, (sp) => {
-    // bronze figure with raised torch/arm, patina green
+  A.add('statue', 32, 40, (sp) => {
+    // equestrian bronze: prancing horse and rider pointing ahead, patina green with gilded trim
     const c = S.C9;
-    for (let y = 8; y < 24; y++) for (let x = 3; x < 8; x++) sp.set(x, y, c, x === 3 ? 150 : x === 7 ? 100 : 128);
-    for (let y = 20; y < 24; y++) for (let x = 2; x < 9; x++) sp.set(x, y, c, 110);
-    for (let y = 4; y < 8; y++) for (let x = 4; x < 7; x++) sp.set(x, y, c, 140);
-    for (let y = 0; y < 8; y++) sp.set(8, y + 1, c, 120);
-    sp.set(8, 0, S.C10, 150); sp.set(9, 0, S.C10, 128);
+    const shadeAt = (x, y, cx, cy) => (x + y < cx + cy - 4 ? 150 : x > cx + 3 || y > cy + 2 ? 100 : 126);
+    // horse body, neck and head
+    for (let y = 20; y < 32; y++) for (let x = 5; x < 26; x++) {
+      const d = ((x + 0.5 - 15) / 9.5) ** 2 + ((y + 0.5 - 26) / 4.6) ** 2;
+      if (d <= 1) sp.set(x, y, c, shadeAt(x, y, 15, 26));
+    }
+    for (let k = 0; k < 10; k++) for (let w = 0; w < 4; w++) sp.set(21 + Math.round(k * 0.45) + w, 24 - k, c, w === 0 ? 146 : w === 3 ? 100 : 126);
+    for (let y = 12; y < 18; y++) for (let x = 25; x < 31; x++) if (((x + 0.5 - 27.5) / 3.2) ** 2 + ((y + 0.5 - 14.5) / 2.4) ** 2 <= 1) sp.set(x, y, c, x < 27 ? 144 : 118);
+    sp.set(26, 11, c, 140); sp.set(27, 10, c, 132); sp.set(30, 16, c, 104);
+    for (let k = 0; k < 6; k++) sp.set(22 + (k >> 1), 22 - k, c, 92); // mane
+    // legs: hind legs planted, one foreleg raised
+    for (let y = 30; y < 38; y++) { sp.set(8, y, c, 120); sp.set(9, y, c, 100); sp.set(11, y, c, 110); sp.set(12, y, c, 96); sp.set(21, y, c, 120); sp.set(22, y, c, 100); }
+    for (let k = 0; k < 5; k++) { sp.set(23 + (k >> 1), 30 + k - (k > 2 ? 2 : 0), c, 126); sp.set(24 + (k >> 1), 30 + k - (k > 2 ? 2 : 0), c, 104); }
+    // tail
+    for (let k = 0; k < 8; k++) { sp.set(5 - (k >> 2), 23 + k, c, 112); sp.set(4 - (k >> 2), 23 + k, c, 130); }
+    // rider: torso, head with hat, coat tails, arm pointing forward
+    for (let y = 13; y < 22; y++) for (let x = 13; x < 18; x++) sp.set(x, y, c, x === 13 ? 148 : x === 17 ? 100 : 126);
+    for (let y = 21; y < 25; y++) { sp.set(12, y, c, 120); sp.set(13, y, c, 110); }
+    sp.ellipse(15.5, 10, 2.2, 2.4, c, 136);
+    for (let x = 12; x < 20; x++) sp.set(x, 8, c, 116);
+    for (let x = 13; x < 18; x++) sp.set(x, 7, c, 132);
+    for (let k = 0; k < 7; k++) { sp.set(17 + k, 15 - (k >> 1), c, 136); sp.set(17 + k, 16 - (k >> 1), c, 108); }
+    sp.set(24, 12, S.C10, 150);
+    for (let x = 14; x < 18; x++) sp.set(x, 18, S.C10, 128); // gilded sash
+    // plinth
+    for (let x = 3; x < 29; x++) { sp.set(x, 38, c, 116); sp.set(x, 39, c, 94); }
   });
-  A.add('xmas', 40, 76, (sp) => paintTree(sp, TREE_SPECIES.xmas, 77), 20, 75);
-  A.add('snowman', 9, 13, (sp) => {
-    sp.ellipse(4.5, 10, 4, 3, S.C1, 128);
-    sp.ellipse(4.5, 5.5, 3, 2.5, S.C1, 140);
-    sp.ellipse(4.5, 2, 2, 2, S.C1, 150);
-    sp.set(5, 2, S.C3, 128); sp.set(6, 2, S.C7, 128);
-    sp.set(4, 5, S.C3, 128); sp.set(4, 7, S.C3, 128);
-    sp.set(1, 5, S.C4, 110); sp.set(0, 4, S.C4, 110); sp.set(8, 5, S.C4, 110);
-    for (let x = 3; x < 7; x++) sp.set(x, 3, S.C5, 128);
-    for (let x = 3; x < 6; x++) sp.set(x, 0, S.C3, 128);
-  }, 4, 12);
-  A.add('umbrella', 11, 6, (sp) => {
-    for (let y = 0; y < 4; y++) for (let x = 5 - (y + 2); x <= 5 + (y + 2); x++) if (x >= 0 && x < 11) sp.set(x, y, S.ITEM, x < 5 ? 150 : 115);
-    for (let x = 0; x < 11; x += 2) sp.set(x, 3, S.ITEM, 90);
-    sp.set(5, 4, S.DARK, 128); sp.set(5, 5, S.DARK, 128);
-  }, 5, 5);
-  A.add('ball', 2, 2, (sp) => { sp.set(0, 0, S.C1, 150); sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 100); }, 1, 1);
-  A.add('snowball', 2, 2, (sp) => { sp.set(0, 0, S.C2, 150); sp.set(1, 0, S.C2, 128); sp.set(0, 1, S.C2, 128); sp.set(1, 1, S.C2, 110); }, 1, 1);
-  A.add('frisbee', 3, 1, (sp) => { sp.set(0, 0, S.C6, 128); sp.set(1, 0, S.C6, 150); sp.set(2, 0, S.C6, 110); }, 1, 0);
-  for (const [n, w, h] of [['puff1', 5, 4], ['puff2', 8, 6], ['puff3', 11, 8], ['puff4', 14, 10]]) {
-    A.add(n, w, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-        const d = ((x + 0.5 - w / 2) / (w / 2)) ** 2 + ((y + 0.5 - h / 2) / (h / 2)) ** 2;
-        if (d <= 1 && hash2i(x, y, w) > (d > 0.6 ? 0.35 : 0)) sp.set(x, y, S.C1, x + y < (w + h) / 2.2 ? 150 : d > 0.55 ? 108 : 128);
+  const X = TREE_SPECIES.xmas;
+  A.add('xmas', X.w, X.h, (sp) => paintTree(sp, X, 77), X.w / 2, X.h - 1);
+  A.add('snowman', 18, 26, (sp) => {
+    const balls = [[9, 20.5, 7, 5.5], [9, 11.5, 5.2, 4.4], [9, 4.8, 3.6, 3.4]];
+    for (const [bx, by, rx, ry] of balls)
+      for (let y = Math.floor(by - ry); y <= Math.ceil(by + ry); y++)
+        for (let x = Math.floor(bx - rx); x <= Math.ceil(bx + rx); x++) {
+          const dx = (x + 0.5 - bx) / rx, dy = (y + 0.5 - by) / ry;
+          if (dx * dx + dy * dy > 1) continue;
+          sp.set(x, y, S.C1, dx + dy * 0.6 < -0.4 ? 150 : dx > 0.45 || dy > 0.6 ? 104 : 128);
+        }
+    for (let x = 6; x <= 12; x++) sp.set(x, 2, S.C3, 110);
+    for (let y = -1; y < 2; y++) for (let x = 7; x <= 11; x++) sp.set(x, y, S.C3, x === 7 ? 140 : 120);
+    sp.set(8, 4, S.C3, 128); sp.set(10, 4, S.C3, 128);
+    sp.set(11, 5, S.C7, 140); sp.set(12, 5, S.C7, 120); sp.set(13, 6, S.C7, 110);
+    for (let x = 6; x <= 12; x++) sp.set(x, 8, S.C5, x === 6 ? 140 : 120);
+    sp.set(11, 9, S.C5, 120); sp.set(11, 10, S.C5, 110); sp.set(12, 11, S.C5, 104);
+    sp.set(9, 11, S.C3, 128); sp.set(9, 14, S.C3, 128); sp.set(9, 18, S.C3, 128);
+    for (let k = 0; k < 4; k++) { sp.set(4 - k, 11 - k, S.C4, 110); sp.set(14 + k, 11 - k, S.C4, 110); }
+    sp.set(1, 6, S.C4, 100); sp.set(16, 6, S.C4, 100);
+  }, 9, 25);
+  A.add('umbrella', 22, 12, (sp) => {
+    for (let y = 0; y < 7; y++)
+      for (let x = 0; x < 22; x++) {
+        const dx = (x + 0.5 - 11) / 10.8, dy = (y + 0.5 - 7) / 7;
+        if (dx * dx + dy * dy > 1) continue;
+        if (y === 6 && x % 5 === 2) continue;
+        const panel = Math.floor((x + 0.5 - 11) / 3.6);
+        sp.set(x, y, S.ITEM, (x < 11 ? 146 : 112) + (panel % 2 ? -10 : 6));
       }
+    for (let x = 2; x < 22; x += 5) sp.set(x, 6, S.DARK, 110);
+    for (let y = 7; y < 12; y++) sp.set(11, y, S.DARK, 128);
+    sp.set(10, 11, S.DARK, 110); sp.set(11, 0, S.DARK, 128);
+  }, 11, 11);
+  A.add('ball', 4, 4, (sp) => {
+    for (const [x, y, sh] of [[1, 0, 150], [2, 0, 136], [0, 1, 146], [1, 1, 136], [2, 1, 120], [3, 1, 108], [0, 2, 128], [1, 2, 116], [2, 2, 104], [3, 2, 96], [1, 3, 100], [2, 3, 92]]) sp.set(x, y, S.C1, sh);
+    sp.set(1, 2, S.C3, 110); sp.set(2, 1, S.C3, 110);
+  }, 2, 3);
+  A.add('snowball', 3, 3, (sp) => { sp.set(1, 0, S.C2, 150); sp.set(0, 1, S.C2, 140); sp.set(1, 1, S.C2, 128); sp.set(2, 1, S.C2, 110); sp.set(1, 2, S.C2, 104); }, 1, 2);
+  A.add('frisbee', 6, 2, (sp) => { for (let x = 0; x < 6; x++) sp.set(x, 0, S.C6, x < 2 ? 150 : 128); for (let x = 1; x < 5; x++) sp.set(x, 1, S.C6, 100); }, 3, 1);
+  for (const [n, w, h] of [['puff1', 10, 8], ['puff2', 16, 12], ['puff3', 22, 16], ['puff4', 28, 20]]) {
+    A.add(n, w, h, (sp) => {
+      const rr = new RNG(w * 7 + 3);
+      const blobs = [[w / 2, h * 0.6, w * 0.3, h * 0.36]];
+      for (let k = 0; k < 4; k++) blobs.push([w * rr.range(0.28, 0.72), h * rr.range(0.38, 0.62), w * rr.range(0.18, 0.27), h * rr.range(0.22, 0.32)]);
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          let best = 0;
+          for (const [bx, by, rx, ry] of blobs) { const d = 1 - (((x + 0.5 - bx) / rx) ** 2 + ((y + 0.5 - by) / ry) ** 2); if (d > best) best = d; }
+          if (best <= 0) continue;
+          if (best < 0.22 && hash2i(x, y, w) < 0.5) continue;
+          const lit = x + y < (w + h) * 0.42;
+          sp.set(x, y, S.C1, lit ? 150 : best < 0.3 ? 106 : 126);
+        }
     }, Math.floor(w / 2), h - 1);
   }
-  A.add('leaf', 2, 1, (sp) => { sp.set(0, 0, S.C1, 128); sp.set(1, 0, S.C1, 100); }, 1, 0);
-  A.add('glow', 3, 2, (sp) => { sp.set(0, 0, S.C1, 110); sp.set(1, 0, S.C1, 150); sp.set(2, 0, S.C1, 110); sp.set(1, 1, S.C1, 120); }, 1, 0);
+  A.add('leaf', 3, 2, (sp) => { sp.set(0, 0, S.C1, 140); sp.set(1, 0, S.C1, 128); sp.set(1, 1, S.C1, 110); sp.set(2, 1, S.C1, 96); }, 1, 1);
+  A.add('glow', 7, 3, (sp) => {
+    for (let x = 1; x < 6; x++) { sp.set(x, 0, S.C1, 110); sp.set(x, 2, S.C1, 110); }
+    for (let x = 0; x < 7; x++) sp.set(x, 1, S.C1, x === 0 || x === 6 ? 110 : x >= 2 && x <= 4 ? 160 : 140);
+  }, 3, 0);
   A.add('dot', 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0);
   A.add('dot2', 2, 2, (sp) => { sp.set(0, 0, S.C1, 140); sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 110); }, 1, 1);
-  A.add('cartUmbrella', 20, 12, (sp) => {
-    for (let y = 0; y < 5; y++) for (let x = 9 - y * 2; x <= 10 + y * 2; x++) if (x >= 0 && x < 20) sp.set(x, y, Math.floor(x / 3) % 2 ? S.C1 : S.C2, x < 10 ? 150 : 115);
-    for (let y = 5; y < 12; y++) sp.set(10, y, S.C3, 110);
-  }, 10, 11);
-  A.add('bike', 11, 7, (sp) => {
-    const wheel = (cx) => { for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, 1], [1, -1], [-1, 1]]) sp.set(cx + dx * 1, 4 + dy * 1, S.C3, 110); };
-    wheel(2); wheel(8);
-    for (let x = 2; x <= 8; x++) sp.set(x, 3, S.C5, 128);
-    sp.set(5, 2, S.C5, 128); sp.set(4, 1, S.C3, 110); sp.set(8, 1, S.C3, 110); sp.set(8, 2, S.C5, 128); sp.set(9, 1, S.C3, 110);
-  }, 5, 6);
-  A.add('stroller', 7, 7, (sp) => {
-    for (let y = 1; y < 4; y++) for (let x = 1; x < 6; x++) sp.set(x, y, S.ITEM, x < 3 ? 150 : 120);
-    for (let x = 0; x < 3; x++) sp.set(x, 0, S.ITEM, 140);
-    sp.set(6, 0, S.DARK, 110); sp.set(6, 1, S.DARK, 110);
-    sp.set(1, 5, S.DARK, 110); sp.set(5, 5, S.DARK, 110); sp.set(1, 6, S.DARK, 100); sp.set(5, 6, S.DARK, 100);
-    sp.set(3, 4, S.DARK, 110);
-  }, 3, 6);
+  A.add('flake', 3, 3, (sp) => { sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 150); sp.set(2, 1, S.C1, 128); sp.set(1, 2, S.C1, 128); }, 1, 1);
+  A.add('cartUmbrella', 40, 24, (sp) => {
+    for (let y = 0; y < 10; y++)
+      for (let x = 0; x < 40; x++) {
+        const dx = (x + 0.5 - 20) / 19.5, dy = (y + 0.5 - 10) / 10;
+        if (dx * dx + dy * dy > 1) continue;
+        if (y === 9 && x % 6 === 3) continue;
+        const seg = Math.floor((Math.atan2(x + 0.5 - 20, 10.5 - y) + Math.PI) / (Math.PI / 7));
+        sp.set(x, y, seg % 2 ? S.C1 : S.C2, x < 20 ? 146 : 112);
+      }
+    for (let y = 10; y < 24; y++) { sp.set(19, y, S.C3, 120); sp.set(20, y, S.C3, 96); }
+    sp.set(19, 0, S.C3, 128);
+  }, 20, 23);
+  A.add('bike', 22, 14, (sp) => {
+    const wheel = (cx) => {
+      for (let a = 0; a < 28; a++) { const ang = (a / 28) * Math.PI * 2; sp.set(Math.round(cx + Math.cos(ang) * 4), Math.round(9 + Math.sin(ang) * 4), S.C3, 110); }
+      sp.set(cx, 9, S.C4, 128);
+    };
+    wheel(5); wheel(17);
+    sp.line(5, 9, 10, 9, S.C5); sp.line(10, 9, 15, 4, S.C5); sp.line(8, 4, 15, 4, S.C5); sp.line(8, 4, 10, 9, S.C5); sp.line(5, 9, 8, 4, S.C5); sp.line(15, 4, 17, 9, S.C5);
+    sp.set(7, 3, S.C3, 128); sp.set(8, 3, S.C3, 128); sp.set(9, 3, S.C3, 128);
+    sp.set(15, 2, S.C3, 128); sp.set(16, 2, S.C3, 128); sp.set(15, 3, S.C3, 110);
+  }, 11, 13);
+  A.add('stroller', 14, 14, (sp) => {
+    for (let y = 3; y < 9; y++) for (let x = 2; x < 11; x++) sp.set(x, y, S.ITEM, x < 4 ? 150 : y === 8 ? 100 : 122);
+    for (let y = 0; y < 5; y++) for (let x = 1; x < 6; x++) if (((x + 0.5 - 6) / 5) ** 2 + ((y + 0.5 - 5) / 5) ** 2 <= 1) sp.set(x, y, S.ITEM, 144);
+    sp.line(11, 4, 13, 0, S.DARK);
+    sp.line(3, 9, 11, 9, S.DARK);
+    sp.ellipse(3.5, 11.5, 2, 2, S.DARK, 120); sp.ellipse(10.5, 11.5, 2, 2, S.DARK, 120);
+    sp.set(3, 11, S.C4, 140); sp.set(10, 11, S.C4, 140);
+  }, 6, 13);
   // flags (4 wave frames)
   for (let f = 0; f < 4; f++) {
-    A.add('flag_us' + f, 13, 10, (sp) => {
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 12; x++) {
-        const wy = y + Math.round(Math.sin((x * 0.6) + f * 1.57) * 1);
-        const slot = x < 5 && y < 4 ? S.C7 : Math.floor(y / 1) % 2 ? S.C2 : S.C1;
-        const sh = 110 + Math.round(Math.sin(x * 0.6 + f * 1.57) * 25);
-        sp.set(x + 1, wy + 1, slot, sh);
-        if (x < 5 && y < 4 && (x + y) % 2 === 0) sp.set(x + 1, wy + 1, S.C2, sh);
-      }
-      for (let y = 0; y < 10; y++) sp.set(0, y, S.C3, 128);
-    }, 0, 9);
-    A.add('flag_hotel' + f, 13, 10, (sp) => {
-      for (let y = 0; y < 8; y++) for (let x = 0; x < 12; x++) {
-        const wy = y + Math.round(Math.sin((x * 0.6) + f * 1.57) * 1);
-        sp.set(x + 1, wy + 1, S.C6, 110 + Math.round(Math.sin(x * 0.6 + f * 1.57) * 25));
-      }
-      for (let y = 0; y < 10; y++) sp.set(0, y, S.C3, 128);
-    }, 0, 9);
+    A.add('flag_us' + f, 26, 20, (sp) => {
+      for (let y = 0; y < 14; y++)
+        for (let x = 0; x < 24; x++) {
+          const wv = Math.sin(x * 0.32 + f * 1.57);
+          const wy = y + Math.round(wv * 1.6 * (x / 24));
+          const canton = x < 10 && y < 7;
+          let slot = canton ? S.C7 : y % 2 ? S.C2 : S.C1;
+          if (canton && x % 2 === 1 && y % 2 === 1) slot = S.C2;
+          sp.set(x + 2, wy + 2, slot, 116 + Math.round(wv * 24));
+        }
+      for (let y = 0; y < 20; y++) { sp.set(0, y, S.C3, 128); sp.set(1, y, S.C3, 100); }
+      sp.set(0, 0, S.C6, 150); sp.set(1, 0, S.C6, 128);
+    }, 0, 19);
+    A.add('flag_hotel' + f, 26, 20, (sp) => {
+      for (let y = 0; y < 14; y++)
+        for (let x = 0; x < 24; x++) {
+          const wv = Math.sin(x * 0.32 + f * 1.57);
+          const wy = y + Math.round(wv * 1.6 * (x / 24));
+          sp.set(x + 2, wy + 2, y === 2 || y === 11 ? S.C2 : S.C6, 116 + Math.round(wv * 24));
+        }
+      for (let y = 0; y < 20; y++) { sp.set(0, y, S.C3, 128); sp.set(1, y, S.C3, 100); }
+    }, 0, 19);
   }
-  // signal lamps 2x2
-  A.add('lamp2', 2, 2, (sp) => { sp.set(0, 0, S.C1, 128); sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 128); }, 0, 1);
-  A.add('lamp1', 1, 2, (sp) => { sp.set(0, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); }, 0, 1);
-  A.add('beacon', 3, 3, (sp) => { sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 160); sp.set(2, 1, S.C1, 128); sp.set(1, 2, S.C1, 128); }, 1, 1);
-  // christmas tree bundle (seller)
-  A.add('treeBundle', 8, 14, (sp) => {
-    for (let y = 0; y < 14; y++) { const w = Math.floor(y / 3) + 1; for (let x = 4 - w; x < 4 + w; x++) if (x >= 0 && x < 8) sp.set(x, y, (x + y) % 3 ? S.C8 : S.C10, 128); }
-    sp.set(3, 13, S.C4, 100); sp.set(4, 13, S.C4, 100);
-  }, 4, 13);
+  // signal lamps
+  A.add('lamp2', 4, 4, (sp) => { for (const [x, y] of [[1, 0], [2, 0], [0, 1], [1, 1], [2, 1], [3, 1], [0, 2], [1, 2], [2, 2], [3, 2], [1, 3], [2, 3]]) sp.set(x, y, S.C1, x === 1 && y === 1 ? 160 : 128); }, 2, 3);
+  A.add('lamp1', 2, 4, (sp) => { for (let y = 0; y < 4; y++) { sp.set(0, y, S.C1, 128); sp.set(1, y, S.C1, 128); } }, 0, 3);
+  A.add('pedHand', 5, 6, (sp) => {
+    for (const [x, y] of [[0, 0], [2, 0], [4, 0], [0, 1], [1, 1], [2, 1], [3, 1], [4, 1], [0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [1, 3], [2, 3], [3, 3], [1, 4], [2, 4], [3, 4], [1, 5], [2, 5], [3, 5]]) sp.set(x, y, S.C1, 128);
+  }, 2, 5);
+  A.add('pedWalk', 5, 7, (sp) => {
+    for (const [x, y] of [[2, 0], [1, 1], [2, 1], [3, 1], [0, 2], [2, 2], [4, 2], [2, 3], [1, 4], [3, 4], [1, 5], [4, 5], [0, 6], [4, 6]]) sp.set(x, y, S.C1, 128);
+  }, 2, 6);
+  A.add('beacon', 5, 5, (sp) => { for (const [x, y, s] of [[2, 0, 128], [1, 1, 140], [2, 1, 160], [3, 1, 140], [0, 2, 128], [1, 2, 160], [2, 2, 180], [3, 2, 160], [4, 2, 128], [1, 3, 140], [2, 3, 160], [3, 3, 140], [2, 4, 128]]) sp.set(x, y, S.C1, s); }, 2, 2);
+  // bundled christmas trees for sale
+  A.add('treeBundle', 16, 28, (sp) => {
+    for (let y = 0; y < 26; y++) {
+      const half = Math.min(7, 1 + y / 3.5);
+      for (let x = Math.round(8 - half); x < Math.round(8 + half); x++) sp.set(x, y, (x * 3 + y * 2) % 7 < 3 ? S.C10 : S.C8, x < 8 ? 140 : 110);
+    }
+    for (let y = 4; y < 26; y += 6) for (let x = 2; x < 14; x++) if (sp.get(x, y) >= 0) sp.set(x, y, S.C4, 120);
+    sp.set(7, 26, S.C4, 100); sp.set(8, 26, S.C4, 100); sp.set(7, 27, S.C4, 90); sp.set(8, 27, S.C4, 90);
+  }, 8, 27);
   A.add('firefly', 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0);
-  A.add('pumpkinSmall', 4, 3, (sp) => { for (let x = 0; x < 4; x++) { sp.set(x, 1, S.C5, 128); sp.set(x, 2, S.C5, 110); } sp.set(1, 0, S.C5, 140); sp.set(2, 0, S.C8, 128); });
-  A.add('coffee', 2, 3, (sp) => { sp.set(0, 0, S.C2, 128); sp.set(1, 0, S.C2, 128); sp.set(0, 1, S.C4, 128); sp.set(1, 1, S.C4, 110); sp.set(0, 2, S.C4, 128); sp.set(1, 2, S.C4, 110); });
+  A.add('pumpkinSmall', 8, 6, (sp) => {
+    sp.ellipse(4, 3.5, 3.8, 2.5, S.C5, 128);
+    sp.set(2, 2, S.C5, 150); sp.set(3, 1, S.C5, 146);
+    sp.set(4, 0, S.C8, 128);
+  });
+  A.add('coffee', 4, 6, (sp) => {
+    for (let x = 0; x < 4; x++) sp.set(x, 0, S.C2, 128);
+    for (let y = 1; y < 6; y++) for (let x = 0; x < 4; x++) sp.set(x, y, S.C4, x === 0 ? 140 : x === 3 ? 104 : 124);
+    sp.set(1, 3, S.C3, 110); sp.set(2, 3, S.C3, 110);
+  });
 }
 
 export const PROP_COLORS = {

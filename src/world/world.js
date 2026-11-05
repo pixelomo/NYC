@@ -7,11 +7,14 @@ import { paintGround, buildGroundGeometry, buildSlabSides } from './ground.js';
 import { makeBaseTextures } from './textures.js';
 import { makeContext, buildBlocks } from './blocks.js';
 import { RNG } from '../core/math.js';
+import { Page, Painter } from '../core/painter.js';
 
 export function buildWorld(seed = 1977, progress = () => {}) {
   const rng = new RNG(seed);
   const atlas = new Atlas(2048);
-  const groundReg = atlas.allocPage(MAP * T, MAP * T);
+  // the ground gets its own texture (MAP*T texels square)
+  const groundPage = new Page(MAP * T, MAP * T);
+  const groundReg = { layer: 0, x: 0, y: 0, w: MAP * T, h: MAP * T, p: new Painter(groundPage, 0, 0, MAP * T, MAP * T), page: groundPage };
   progress('Paving streets');
   const groundInfo = paintGround(groundReg, rng);
   const tex = makeBaseTextures(atlas);
@@ -20,7 +23,7 @@ export function buildWorld(seed = 1977, progress = () => {}) {
   buildSlabSides(mb, atlas, tex);
 
   const world = {
-    rng, atlas, tex, ground: groundReg, groundInfo,
+    rng, atlas, tex, ground: groundReg, groundPage, groundInfo,
     heights: new Float32Array(MAP * MAP),
     lamps: [], lampHeads: [], trees: [], props: [], doors: [], officeDoors: [], benches: [], steam: [], signals: [],
     shops: [], stoopSeats: [], perches: [], pigeonCoops: [], beacons: [], flags: [], fountains: [], hydrants: [],

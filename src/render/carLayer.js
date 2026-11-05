@@ -1,8 +1,70 @@
-// Instanced 3D vehicles. Meshes are boxes textured from the palette-indexed sprite atlas.
+// Instanced 3D vehicles. Bodies are lofted from cross-sections (chamfered corners, sloped hoods and glass,
+// tumblehome cabins) with 10-sided wheels, textured from the palette-indexed sprite atlas by planar projection.
 
 import { createProgram, makeBuffer } from '../core/gl.js';
 import { MeshBuilder, MAT } from '../world/mesh.js';
 import { RNG } from '../core/math.js';
+import { T } from '../world/layout.js';
+
+const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+// lower-body cross-section: vertical side up to a shoulder crease, rolled over to a flat top
+const bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]];
+// cabin cross-section with tumblehome: base half-width wb at zb, roof half-width wr at zr
+const cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
+
+function bboxOf(st) {
+  const bb = { x0: Infinity, x1: -Infinity, y0: Infinity, y1: -Infinity, z0: Infinity, z1: -Infinity };
+  for (const s of st) {
+    bb.x0 = Math.min(bb.x0, s.x); bb.x1 = Math.max(bb.x1, s.x);
+    for (const [y, z] of s.pts) { bb.y0 = Math.min(bb.y0, y); bb.y1 = Math.max(bb.y1, y); bb.z0 = Math.min(bb.z0, z); bb.z1 = Math.max(bb.z1, z); }
+  }
+  return bb;
+}
+
+// Emit a planar face with UVs projected along its dominant axis (or a forced texture key).
+function face(mb, q, tx, bb, c, force, mat = 0) {
+  const pts = [];
+  for (const p of q) if (!pts.some((r) => Math.abs(r[0] - p[0]) + Math.abs(r[1] - p[1]) + Math.abs(r[2] - p[2]) < 1e-6)) pts.push(p);
+  if (pts.length < 3) return;
+  let n = pts.length === 4 ? cross3(sub3(pts[2], pts[0]), sub3(pts[3], pts[1])) : cross3(sub3(pts[1], pts[0]), sub3(pts[2], pts[0]));
+  const l = Math.hypot(n[0], n[1], n[2]);
+  if (l < 1e-9) return;
+  n = [n[0] / l, n[1] / l, n[2] / l];
+  const cen = [0, 0, 0];
+  for (const p of pts) for (let k = 0; k < 3; k++) cen[k] += p[k] / pts.length;
+  if (dot3(n, sub3(cen, c)) < 0) n = [-n[0], -n[1], -n[2]];
+  if (n[2] < -0.6) return; // undersides are never visible
+  const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
+  const key = force || (az >= ax && az >= ay ? 'top' : ay >= ax ? 'side' : n[0] > 0 ? 'front' : 'back');
+  const tex = tx[key] || tx.side;
+  let uv;
+  if (key === 'top') uv = (p) => [(p[0] - bb.x0) * T, (p[1] - bb.y0) * T];
+  else if (key === 'side') uv = (p) => [(p[0] - bb.x0) * T, (bb.z1 - p[2]) * T];
+  else if (key === 'front' || key === 'glassF') uv = (p) => [(bb.y1 - p[1]) * T, (bb.z1 - p[2]) * T];
+  else uv = (p) => [(p[1] - bb.y0) * T, (bb.z1 - p[2]) * T];
+  if (pts.length === 4) mb.quad(pts[0], pts[1], pts[2], pts[3], pts.map(uv), tex, n, mat);
+  else mb.tri(pts[0], pts[1], pts[2], pts.map(uv), tex, n, mat);
+}
+
+// Loft a solid through cross-sections placed along x (stations: [{x, pts: [[y, z], ...]}], same point count).
+function loft(mb, st, tx, o = {}) {
+  const bb = o.bb || bboxOf(st);
+  const c = [(bb.x0 + bb.x1) / 2, (bb.y0 + bb.y1) / 2, (bb.z0 + bb.z1) / 2];
+  const P = (s, j) => [s.x, s.pts[j][0], s.pts[j][1]];
+  for (let i = 0; i < st.length - 1; i++)
+    for (let j = 0; j < st[i].pts.length - 1; j++)
+      face(mb, [P(st[i], j), P(st[i + 1], j), P(st[i + 1], j + 1), P(st[i], j + 1)], tx, bb, c, o.faceKey ? o.faceKey(i, j) : null, o.mat);
+  if (o.caps !== false) {
+    for (const [s, key] of [[st[0], 'back'], [st[st.length - 1], 'front']]) {
+      const pts = s.pts.map((p) => [s.x, p[0], p[1]]);
+      for (let k = 1; k < pts.length - 1; k++) face(mb, [pts[0], pts[k], pts[k + 1]], tx, bb, c, key, o.mat);
+    }
+  }
+  return bb;
+}
 
 const HEAD = `#version 300 es
 precision highp float;
@@ -75,7 +137,7 @@ float faceShade(vec3 n) {
 }
 void main() {
   if (vB.y < 0.999 && bayer4(gl_FragCoord.xy) >= vB.y) discard;
-  ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+  ivec2 tc = ivec2(vRect.xy) + ivec2(clamp(floor(vUV), vec2(0.0), vec2(vRect.zw) - 1.0));
   vec4 t = texelFetch(uSprites, tc, 0);
   if (t.a < 0.5) discard;
   int row = int(vB.x + 0.5);
@@ -91,7 +153,7 @@ void main() {
   }
   // snow on roofs of parked cars
   if (vB.z > 0.0 && n.z > 0.6) {
-    float h = fract(sin(dot(floor(vWorld.xy * 16.0), vec2(12.9898, 78.233))) * 43758.5453);
+    float h = fract(sin(dot(floor(vWorld.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
     float nn = texture(uNoise, vWorld.xy * 0.35).r;
     if (nn * 0.85 + h * 0.15 < vB.z * 1.35) albedo = mix(vec3(0.86, 0.9, 0.97), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nn));
   }
@@ -161,225 +223,492 @@ export class CarLayer {
 
   buildMeshes() {
     const A = this;
-    const solid = (slot, shade = 128) => A.reg(2, 2, (sp) => sp.rect(0, 0, 2, 2, slot, shade));
+    const reg = (w, h, paint) => A.reg(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)), paint);
+    const solid = (slot, shade = 128) => reg(2, 2, (sp) => sp.rect(0, 0, 2, 2, slot, shade));
     this.solid = {
-      body: solid(CS.BODY), bodyTop: solid(CS.BODY, 140), trim: solid(CS.TRIM), glass: solid(CS.GLASS), tire: solid(CS.TIRE),
+      body: solid(CS.BODY), bodyTop: solid(CS.BODY, 140), trim: solid(CS.TRIM), glass: solid(CS.GLASS), tire: solid(CS.TIRE, 90),
       chrome: solid(CS.CHROME), sign: solid(CS.SIGN), accent: solid(CS.ACCENT), red: solid(CS.SIREN_R), blue: solid(CS.SIREN_B),
-      white: solid(CS.WHITE), black: solid(CS.BLACK), led: solid(CS.LED),
+      white: solid(CS.WHITE), black: solid(CS.BLACK), led: solid(CS.LED), plastic: solid(CS.TRIM, 110), cargo: solid(CS.WHITE, 120),
     };
-    const T = 16;
-    // generic side of a lower body with wheels at given texel positions
-    const bodySide = (len, h, wheels, opts = {}) => A.reg(len, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < len; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : y >= h - 3 ? 108 : 128);
-      if (opts.stripe != null) for (let x = 0; x < len; x++) sp.set(x, opts.stripe, CS.ACCENT, 128);
-      if (opts.checker) for (let x = 0; x < len; x += 2) { sp.set(x, opts.checker, CS.BLACK, 128); sp.set(x + 1, opts.checker + 1, CS.BLACK, 128); }
-      for (const wx of wheels) {
-        for (let x = wx - 3; x <= wx + 3; x++) sp.set(x, h - 3, CS.BLACK, 100);
-        for (let y = h - 3; y < h; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-        sp.set(wx, h - 2, CS.CHROME, 128);
+    const S = this.solid;
+    const all = (t) => ({ px: t, nx: t, py: t, ny: t, pz: t });
+    const box = (mb, x0, y0, z0, x1, y1, z1, F) => mb.box(x0, y0, z0, x1, y1, z1, F.px ? F : all(F), { topMat: MAT.SNOW, mat: 0 });
+
+    // ---- texture painters shared by all vehicles ---------------------------------------------
+    const wheelTex = (r, rim = CS.CHROME) => {
+      const D = Math.round(2 * r * T);
+      return reg(D, D, (sp) => {
+        const c = (D - 1) / 2;
+        for (let y = 0; y < D; y++)
+          for (let x = 0; x < D; x++) {
+            const d = Math.hypot(x - c, y - c) / (D / 2);
+            let slot = CS.TIRE, sh = d > 0.86 ? 96 : 112;
+            if (d < 0.6) { slot = rim; sh = x + y < D - 2 ? 150 : 112; }
+            if (d >= 0.6 && d < 0.68) sh = 74;
+            if (d < 0.2) { slot = CS.TIRE; sh = 100; }
+            sp.set(x, y, slot, sh);
+          }
+        for (let k = 0; k < 5; k++) {
+          const a = (k / 5) * Math.PI * 2 - 0.4;
+          sp.set(Math.round(c + Math.cos(a) * D * 0.2), Math.round(c + Math.sin(a) * D * 0.2), CS.BLACK, 90);
+        }
+      });
+    };
+    // side elevation of a lower body: shoulder highlight, crease, rocker, wheel arches
+    const paintBodySide = (sp, Lt, Ht, o) => {
+      const vs = o.vs;
+      for (let y = 0; y < Ht; y++)
+        for (let x = 0; x < Lt; x++) {
+          const sh = y < vs ? 146 : y === vs ? 160 : y >= Ht - 2 ? 100 : 130 - Math.round(((y - vs) / Ht) * 24);
+          sp.set(x, y, o.slot ?? CS.BODY, sh);
+        }
+      for (const [cu, cv, R] of o.arches || []) {
+        for (let y = 0; y < Ht; y++)
+          for (let x = Math.floor(cu - R - 2); x <= Math.ceil(cu + R + 2); x++) {
+            const d = Math.hypot(x + 0.5 - cu, y + 0.5 - cv);
+            if (d < R) sp.set(x, y, CS.BLACK, d > R - 1.2 ? 64 : 48);
+            else if (d < R + 1.2 && y + 0.5 < cv) sp.set(x, y, o.slot ?? CS.BODY, 160);
+          }
       }
-      if (opts.door) for (const dx of opts.door) for (let y = 1; y < h - 3; y++) sp.set(dx, y, CS.BODY, 96);
-      for (let x = 0; x < len; x++) sp.set(x, h - 1, CS.TRIM, 80);
-    });
-    const cabinSide = (len, h, opts = {}) => A.reg(len, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < len; x++) sp.set(x, y, CS.BODY, 135);
-      const gx0 = 2, gx1 = len - 2;
-      for (let y = 1; y < h; y++) for (let x = gx0 + (y < 2 ? 1 : 0); x < gx1 - (y < 2 ? 1 : 0); x++) sp.set(x, y, CS.GLASS, y < 2 ? 140 : 118);
-      for (const px of opts.pillars || [Math.floor(len / 2)]) for (let y = 1; y < h; y++) sp.set(px, y, CS.BODY, 120);
-    });
-    const front = (w, h, opts = {}) => A.reg(w, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : 125);
-      for (let x = 3; x < w - 3; x++) for (let y = 2; y < h - 3; y++) sp.set(x, y, CS.BLACK, x % 2 ? 110 : 90);
-      for (const hx of [1, w - 3]) { sp.set(hx, 2, CS.HEAD, 128); sp.set(hx + 1, 2, CS.HEAD, 128); sp.set(hx, 3, CS.HEAD, 110); sp.set(hx + 1, 3, CS.HEAD, 110); }
-      for (let x = 0; x < w; x++) sp.set(x, h - 2, CS.CHROME, 120);
-      for (let x = 0; x < w; x++) sp.set(x, h - 1, CS.TRIM, 80);
-      if (opts.plate) for (let x = (w >> 1) - 2; x < (w >> 1) + 2; x++) sp.set(x, h - 3, CS.PLATE, 128);
-    });
-    const back = (w, h) => A.reg(w, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, y === 0 ? 150 : 118);
-      for (const tx of [0, w - 3]) for (let x = tx; x < tx + 3; x++) { sp.set(x, 2, CS.TAIL, 128); sp.set(x, 3, CS.TAIL, 110); }
-      for (let x = (w >> 1) - 2; x < (w >> 1) + 2; x++) sp.set(x, h - 3, CS.PLATE, 128);
-      for (let x = 0; x < w; x++) sp.set(x, h - 2, CS.CHROME, 110);
-      for (let x = 0; x < w; x++) sp.set(x, h - 1, CS.TRIM, 80);
-    });
-    const glassFace = (w, h) => A.reg(w, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, 135);
-      for (let y = 1; y < h; y++) for (let x = 1; x < w - 1; x++) sp.set(x, y, CS.GLASS, y === 1 ? 145 : 120);
-    });
-    const top = (w, h, opts = {}) => A.reg(w, h, (sp) => {
-      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) sp.set(x, y, CS.BODY, 140 + (y === 1 || y === h - 2 ? -12 : 0));
-      if (opts.lines) for (let x = 0; x < w; x += opts.lines) for (let y = 0; y < h; y++) sp.set(x, y, CS.BODY, 118);
-    });
-
-    const box = (mb, x0, y0, z0, x1, y1, z1, F, mat = 0) => {
-      mb.box(x0, y0, z0, x1, y1, z1, F, { topMat: mat || MAT.SNOW, mat: 0 });
+      for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
     };
-    // F: faces mapped for a car pointing +x: front = px, back = nx, sides = py/ny
-    const faces = (side, fr, bk, tp) => ({ px: fr, nx: bk, py: side, ny: side, pz: tp });
+    const glassPanel = (W, H, o = {}) => reg(W, H, (sp) => {
+      for (let y = 0; y < H; y++)
+        for (let x = 0; x < W; x++) {
+          const frame = x < (o.fx ?? 1) || x >= W - (o.fx ?? 1) || y < (o.ft ?? 1) || (o.fb && y >= H - o.fb);
+          const streak = (x - y * 2 + 64) % 15 < 3;
+          sp.set(x, y, frame ? (o.frame ?? CS.BODY) : CS.GLASS, frame ? 132 : streak ? 158 : 126 - Math.round((y / H) * 18) + (o.dark ? -14 : 0));
+        }
+      if (o.wipers) for (let x = 3; x < W - 3; x++) if (x % 10 < 6) sp.set(x, H - 1 - (x % 10 < 3 ? 0 : 1), CS.BLACK, 90);
+      if (o.brake) for (let x = (W >> 1) - 3; x < (W >> 1) + 3; x++) sp.set(x, o.ft ?? 1, CS.TAIL, 128);
+    });
 
-    // --- sedan-like
+    // ---- geometry -------------------------------------------------------------------------------
+    const wheelsAt = (mb, xs, yOff, r, wdt, tex) => {
+      const N = 10;
+      for (const x of xs)
+        for (const s of [-1, 1]) {
+          const ring = [];
+          for (let k = 0; k < N; k++) { const a = (k / N) * Math.PI * 2; ring.push([x + Math.cos(a) * r, r + Math.sin(a) * r]); }
+          const ya = s * yOff - wdt / 2, yb = s * yOff + wdt / 2;
+          for (let k = 0; k < N; k++) {
+            const a = ring[k], b = ring[(k + 1) % N];
+            const am = ((k + 0.5) / N) * Math.PI * 2;
+            const n = [Math.cos(am), 0, Math.sin(am)];
+            if (n[2] < -0.5) continue;
+            mb.quad([a[0], ya, a[1]], [b[0], ya, b[1]], [b[0], yb, b[1]], [a[0], yb, a[1]], [[0, 0], [1, 0], [1, 1], [0, 1]], S.tire, n, 0);
+          }
+          const yo = s > 0 ? yb : ya, D = 2 * r;
+          const uv = (p) => [(p[0] - (x - r)) * T, (D - p[1]) * T];
+          for (let k = 0; k < N; k++) {
+            const a = ring[k], b = ring[(k + 1) % N];
+            mb.tri([x, yo, r], [a[0], yo, a[1]], [b[0], yo, b[1]], [uv([x, r]), uv(a), uv(b)], tex, [0, s, 0], 0);
+          }
+        }
+    };
+    const mirrors = (mb, x, w, z) => {
+      for (const s of [-1, 1]) box(mb, x - 0.04, s > 0 ? w - 0.01 : -w - 0.06, z, x + 0.04, s > 0 ? w + 0.06 : -w + 0.01, z + 0.06, S.body);
+    };
+
+    // ---- cars: lower tub + glasshouse ------------------------------------------------------------
     const sedan = (o = {}) => {
       const mb = new MeshBuilder();
-      const L = o.len ?? 2.25, W = o.wid ?? 0.875, bh = o.bodyH ?? 0.5, ch = o.cabH ?? 0.3125;
-      const cl = o.cabLen ?? 1.25, cw = W - 0.125, coff = o.cabOff ?? -0.125;
-      const Lt = Math.round(L * T), Wt = Math.round(W * T), bht = Math.round(bh * T);
-      const side = bodySide(Lt, bht, [Math.round(Lt * 0.2), Math.round(Lt * 0.8)], { door: [Math.round(Lt * 0.42), Math.round(Lt * 0.62)], stripe: o.stripe, checker: o.checker });
-      box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, bh, faces(side, front(Wt, bht, { plate: true }), back(Wt, bht), top(Lt, Wt)));
-      const clt = Math.round(cl * T), cwt = Math.round(cw * T), cht = Math.round(ch * T);
-      box(mb, coff - cl / 2, -cw / 2, bh, coff + cl / 2, cw / 2, bh + ch, faces(cabinSide(clt, cht, { pillars: [Math.round(clt * 0.48)] }), glassFace(cwt, cht), glassFace(cwt, cht), top(clt, cwt)));
-      if (o.taxiSign) box(mb, coff - 0.19, -0.19, bh + ch, coff + 0.19, 0.19, bh + ch + 0.15, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign));
+      const L = o.len ?? 2.25, W = o.wid ?? 0.875, w = W / 2;
+      const zb = 0.13, zt = o.zt ?? 0.48, zs = zt - 0.06, drop = o.hoodDrop ?? 0.07;
+      const xr = -L / 2, xf = L / 2;
+      const cabR = o.cabR ?? -0.62, cabF = o.cabF ?? 0.5, roofR = o.roofR ?? -0.36, roofF = o.roofF ?? 0.13;
+      const zr = zt + (o.cabH ?? 0.31);
+      const r = 0.17;
+      const wheelX = [xr + L * 0.2, xf - L * 0.19];
+      const st = [
+        { x: xr, pts: bodySec(w - 0.05, zb + 0.03, zs - 0.07, zt - 0.06) },
+        { x: xr + 0.09, pts: bodySec(w, zb, zs - 0.01, zt - 0.01) },
+        { x: cabR, pts: bodySec(w, zb, zs, zt) },
+        { x: cabF, pts: bodySec(w, zb, zs - 0.005, zt - 0.005) },
+        { x: xf - 0.1, pts: bodySec(w, zb, zs - drop, zt - drop) },
+        { x: xf, pts: bodySec(w - 0.05, zb + 0.03, zs - drop - 0.07, zt - drop - 0.06) },
+      ];
+      const bb = bboxOf(st);
+      const Lt = (bb.x1 - bb.x0) * T, Wt = (bb.y1 - bb.y0) * T, Ht = (bb.z1 - bb.z0) * T;
+      const U = (x) => (x - bb.x0) * T, V = (z) => (bb.z1 - z) * T;
+      const vs = Math.round(V(zs));
+      const side = reg(Lt, Ht, (sp) => {
+        paintBodySide(sp, Math.round(Lt), Math.round(Ht), { vs, arches: wheelX.map((x) => [U(x), V(r), r * T + 1.5]) });
+        const doors = o.doors ?? [cabF - 0.04, (cabR + cabF) / 2 - 0.02, cabR + 0.08];
+        for (const dx of doors) for (let y = vs + 1; y < Ht - 2; y++) sp.set(Math.round(U(dx)), y, CS.BODY, 96);
+        for (const hx of o.handles ?? [cabF - 0.2, (cabR + cabF) / 2 - 0.18]) { sp.set(Math.round(U(hx)), vs + 2, CS.CHROME, 156); sp.set(Math.round(U(hx)) + 1, vs + 2, CS.CHROME, 120); }
+        if (o.stripe) for (let x = 0; x < Lt; x++) { sp.set(x, vs + 3, CS.ACCENT, 136); sp.set(x, vs + 4, CS.ACCENT, 112); }
+        if (o.checker) for (let x = Math.round(U(cabR)); x < U(cabF); x++) { sp.set(x, vs + 2, (x >> 1) % 2 ? CS.BLACK : CS.WHITE, 128); sp.set(x, vs + 3, (x >> 1) % 2 ? CS.WHITE : CS.BLACK, 120); }
+        if (o.text) for (let x = Math.round(U(cabR)) + 2; x < U(cabF) - 2; x += 2) sp.set(x, vs + 5, CS.ACCENT, 140);
+        sp.set(1, vs + 2, CS.TAIL, 128); sp.set(Math.round(Lt) - 2, vs + 2, CS.HEAD, 128);
+      });
+      const top = reg(Lt, Wt, (sp) => {
+        for (let y = 0; y < Wt; y++)
+          for (let x = 0; x < Lt; x++) {
+            const e = Math.min(y, Wt - 1 - y);
+            sp.set(x, y, CS.BODY, e < 1 ? 118 : e < 3 ? 138 : Math.abs(y - Wt / 2) < 3 ? 156 : 148);
+          }
+        for (let y = 2; y < Wt - 2; y++) { sp.set(Math.round(U(cabF + 0.03)), y, CS.BLACK, 70); sp.set(Math.round(U(xr + 0.3)), y, CS.BODY, 106); sp.set(Math.round(U(xf - 0.12)), y, CS.BODY, 112); }
+        for (const yy of [Math.round(Wt * 0.28), Math.round(Wt * 0.6)]) for (let k = 0; k < 7; k++) sp.set(Math.round(U(cabF + 0.05)) + (k >> 2), yy + k, CS.BLACK, 92);
+        if (o.hoodStripe) for (let x = Math.round(U(cabF)); x < Lt; x++) for (const yy of [Math.round(Wt / 2) - 2, Math.round(Wt / 2) + 1]) sp.set(x, yy, CS.ACCENT, 130);
+      });
+      const vTop = Math.round(V(zt - drop - 0.06));
+      const front = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, y <= vTop ? 150 : 124);
+        const gy0 = vTop + 2, gy1 = Math.round(Ht) - 3;
+        for (let y = gy0; y < gy1; y++) for (let x = 8; x < Wt - 8; x++) sp.set(x, y, CS.BLACK, (y - gy0) % 2 ? 76 : 108);
+        for (let x = 8; x < Wt - 8; x++) sp.set(x, gy0 - 1, CS.CHROME, 146);
+        for (const hx of [2, Math.round(Wt) - 7]) for (let x = hx; x < hx + 5; x++) { sp.set(x, gy0, CS.HEAD, 146); sp.set(x, gy0 + 1, CS.HEAD, 118); }
+        for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 2, CS.CHROME, 126);
+        for (let x = Math.round(Wt / 2) - 3; x < Wt / 2 + 3; x++) sp.set(x, Math.round(Ht) - 3, CS.PLATE, 132);
+        for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 1, CS.TRIM, 80);
+      });
+      const vTopB = Math.round(V(zt - 0.06));
+      const back = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, y <= vTopB ? 150 : 120);
+        const ty = vTopB + 2;
+        for (const tx of [1, Math.round(Wt) - 7]) for (let x = tx; x < tx + 6; x++) { sp.set(x, ty, CS.TAIL, 146); sp.set(x, ty + 1, CS.TAIL, 116); }
+        sp.set(8, ty + 1, CS.WHITE, 130); sp.set(Math.round(Wt) - 9, ty + 1, CS.WHITE, 130);
+        for (let x = 8; x < Wt - 8; x++) sp.set(x, ty - 1, CS.BODY, 104);
+        for (let x = Math.round(Wt / 2) - 3; x < Wt / 2 + 3; x++) { sp.set(x, ty + 3, CS.PLATE, 132); sp.set(x, ty + 4, CS.PLATE, 116); }
+        for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 2, CS.TRIM, 110);
+        for (let x = 0; x < Wt; x++) sp.set(x, Math.round(Ht) - 1, CS.TRIM, 80);
+      });
+      loft(mb, st, { side, top, front, back }, { bb });
+      // glasshouse
+      const wb = w - 0.06, wr = w - 0.15, zc = zt - 0.01;
+      const cst = [
+        { x: cabR, pts: cabSec(wb, zc, wb, zc) },
+        { x: roofR, pts: cabSec(wb, zc, wr, zr) },
+        { x: roofF, pts: cabSec(wb, zc, wr, zr) },
+        { x: cabF, pts: cabSec(wb, zc, wb, zc) },
+      ];
+      const cb = bboxOf(cst);
+      const Lc = (cb.x1 - cb.x0) * T, Wc = (cb.y1 - cb.y0) * T, Hc = (cb.z1 - cb.z0) * T;
+      const Uc = (x) => (x - cb.x0) * T;
+      const cside = reg(Lc, Hc, (sp) => {
+        const H = Math.round(Hc);
+        for (let y = 0; y < H; y++) {
+          const t = y / Math.max(1, H - 1);
+          const xl = Uc(roofR + (cabR - roofR) * t), xr2 = Uc(roofF + (cabF - roofF) * t);
+          for (let x = 0; x < Lc; x++) {
+            const inside = x > xl + 1.5 && x < xr2 - 1.5 && y >= 1 && y < H - 1;
+            let slot = CS.BODY, sh = 134;
+            if (inside) { slot = CS.GLASS; sh = (x + y * 2) % 13 < 2 ? 156 : 118; }
+            if (y === H - 1) { slot = CS.CHROME; sh = 118; }
+            sp.set(x, y, slot, sh);
+          }
+        }
+        const bx = Math.round(Uc((cabR + cabF) / 2 - 0.04));
+        for (let y = 1; y < H - 1; y++) { sp.set(bx, y, CS.BLACK, 72); sp.set(bx + 1, y, CS.BLACK, 72); }
+      });
+      const roof = reg(Lc, Wc, (sp) => {
+        for (let y = 0; y < Wc; y++) for (let x = 0; x < Lc; x++) { const e = Math.min(y, Wc - 1 - y); sp.set(x, y, CS.BODY, e < 1 ? 128 : e < 3 ? 146 : 158); }
+        if (o.sunroof) for (let y = Math.round(Wc * 0.3); y < Wc * 0.7; y++) for (let x = Math.round(Uc(roofR + 0.12)); x < Uc(roofF - 0.1); x++) sp.set(x, y, CS.GLASS, 118);
+      });
+      const glassF = glassPanel(Wc, Hc, { wipers: true });
+      const glassB = glassPanel(Wc, Hc, { dark: true, brake: true });
+      loft(mb, cst, { side: cside, top: roof, glassF, glassB }, { bb: cb, caps: false, faceKey: (i, j) => (j !== 1 ? 'side' : i === 0 ? 'glassB' : i === 2 ? 'glassF' : 'top') });
+      // bumpers, mirrors, wheels
+      box(mb, xf - 0.02, -w + 0.04, zb - 0.01, xf + 0.05, w - 0.04, zb + 0.08, o.chromeBumper ? S.chrome : S.plastic);
+      box(mb, xr - 0.05, -w + 0.04, zb - 0.01, xr + 0.02, w - 0.04, zb + 0.08, o.chromeBumper ? S.chrome : S.plastic);
+      mirrors(mb, cabF - 0.06, w, zt - 0.02);
+      wheelsAt(mb, wheelX, w - 0.06, r, 0.14, wheelTex(r, o.darkRims ? CS.TRIM : CS.CHROME));
+      // roof equipment
+      const rx = (roofR + roofF) / 2;
+      if (o.taxiSign) {
+        box(mb, rx - 0.2, -0.17, zr, rx + 0.2, 0.17, zr + 0.03, S.black);
+        box(mb, rx - 0.18, -0.15, zr + 0.03, rx + 0.18, 0.15, zr + 0.16, S.sign);
+      }
       if (o.lightBar) {
-        box(mb, coff - 0.12, -0.32, bh + ch, coff + 0.12, -0.02, bh + ch + 0.1, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red));
-        box(mb, coff - 0.12, 0.02, bh + ch, coff + 0.12, 0.32, bh + ch + 0.1, faces(this.solid.blue, this.solid.blue, this.solid.blue, this.solid.blue));
+        box(mb, rx - 0.08, -0.33, zr, rx + 0.08, 0.33, zr + 0.03, S.black);
+        box(mb, rx - 0.07, -0.32, zr + 0.03, rx + 0.07, -0.02, zr + 0.12, S.red);
+        box(mb, rx - 0.07, 0.02, zr + 0.03, rx + 0.07, 0.32, zr + 0.12, S.blue);
       }
-      return mb.finish();
-    };
-    const van = (o = {}) => {
-      const mb = new MeshBuilder();
-      const L = o.len ?? 2.75, W = o.wid ?? 1.0, H = o.h ?? 1.25;
-      const Lt = Math.round(L * T), Wt = Math.round(W * T), Ht = Math.round(H * T);
-      const side = A.reg(Lt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y < 2 ? 145 : 125);
-        for (let y = 2; y < 7; y++) for (let x = Lt - 10; x < Lt - 3; x++) sp.set(x, y, CS.GLASS, 125);
-        if (o.stripe != null) for (let x = 0; x < Lt; x++) { sp.set(x, o.stripe, CS.ACCENT, 128); sp.set(x, o.stripe + 1, CS.ACCENT, 115); }
-        if (o.text) for (let x = 3; x < Lt - 14; x += 2) sp.set(x, 6, CS.ACCENT, 128);
-        if (o.window) for (let y = 3; y < 8; y++) for (let x = 6; x < 14; x++) sp.set(x, y, CS.INTERIOR, 128);
-        for (const wx of [Math.round(Lt * 0.18), Math.round(Lt * 0.82)]) for (let y = Ht - 3; y < Ht; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-        for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
-      });
-      const fr = A.reg(Wt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 125);
-        for (let y = 2; y < 8; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, y < 3 ? 140 : 118);
-        for (const hx of [1, Wt - 3]) { sp.set(hx, Ht - 6, CS.HEAD, 128); sp.set(hx + 1, Ht - 6, CS.HEAD, 128); }
-        for (let x = 0; x < Wt; x++) sp.set(x, Ht - 2, CS.CHROME, 110);
-      });
-      const bk = A.reg(Wt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 118);
-        sp.set(Wt >> 1, 2, CS.BODY, 90);
-        for (let y = 1; y < Ht - 2; y++) sp.set(Wt >> 1, y, CS.BODY, 96);
-        for (const tx of [0, Wt - 2]) for (let y = Ht - 8; y < Ht - 5; y++) { sp.set(tx, y, CS.TAIL, 128); sp.set(tx + 1, y, CS.TAIL, 128); }
-      });
-      box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, fr, bk, top(Lt, Wt, { lines: 6 })));
-      if (o.cone) {
-        // ice cream cone on the roof
-        box(mb, -0.2, -0.15, H, 0.1, 0.15, H + 0.3, faces(this.solid.accent, this.solid.accent, this.solid.accent, this.solid.white));
-        box(mb, -0.22, -0.18, H + 0.3, 0.12, 0.18, H + 0.55, faces(this.solid.white, this.solid.white, this.solid.white, this.solid.white));
-      }
-      if (o.beacon) box(mb, 0.4, -0.12, H, 0.6, 0.12, H + 0.15, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign));
-      return mb.finish();
-    };
-    const bus = () => {
-      const mb = new MeshBuilder();
-      const L = 6.5, W = 1.25, H = 1.6;
-      const Lt = Math.round(L * T), Wt = Math.round(W * T), Ht = Math.round(H * T);
-      const side = A.reg(Lt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.WHITE, y < 2 ? 145 : 125);
-        for (let y = 4; y < 13; y++) for (let x = 4; x < Lt - 6; x++) sp.set(x, y, x % 11 === 0 ? CS.BLACK : CS.INTERIOR, y < 6 ? 135 : 118);
-        for (let x = 0; x < Lt; x++) { sp.set(x, 15, CS.ACCENT, 128); sp.set(x, 16, CS.ACCENT, 115); sp.set(x, 17, CS.ACCENT, 128); }
-        for (let y = 4; y < Ht - 3; y++) for (let x = Lt - 13; x < Lt - 9; x++) sp.set(x, y, CS.GLASS, 120);
-        for (const wx of [14, Lt - 22]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 3; x <= wx + 3; x++) sp.set(x, y, CS.TIRE, 110);
-        for (let x = 0; x < Lt; x++) sp.set(x, Ht - 1, CS.TRIM, 80);
-      });
-      const fr = A.reg(Wt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 125);
-        for (let x = 1; x < Wt - 1; x++) { sp.set(x, 1, CS.BLACK, 110); sp.set(x, 2, CS.LED, 128); }
-        for (let y = 4; y < 14; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, y < 6 ? 140 : 118);
-        for (const hx of [1, Wt - 3]) { sp.set(hx, Ht - 6, CS.HEAD, 128); sp.set(hx + 1, Ht - 6, CS.HEAD, 128); }
-        for (let x = 0; x < Wt; x++) sp.set(x, 17, CS.ACCENT, 128);
-      });
-      const bk = A.reg(Wt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 118);
-        for (let y = 3; y < 9; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 118);
-        for (const tx of [0, Wt - 2]) for (let y = Ht - 9; y < Ht - 5; y++) { sp.set(tx, y, CS.TAIL, 128); sp.set(tx + 1, y, CS.TAIL, 128); }
-      });
-      const roof = A.reg(Lt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.WHITE, 140); });
-      box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, fr, bk, roof));
-      box(mb, -1.5, -0.4, H, 0.2, 0.4, H + 0.2, faces(this.solid.chrome, this.solid.chrome, this.solid.chrome, this.solid.chrome));
-      return mb.finish();
-    };
-    const truck = (o = {}) => {
-      const mb = new MeshBuilder();
-      const L = o.len ?? 4.0, W = o.wid ?? 1.125;
-      const cabL = 1.1, cabH = 1.25, boxH = 1.75;
-      const Wt = Math.round(W * T);
-      const cabT = Math.round(cabL * T), cabHt = Math.round(cabH * T);
-      const cabSide = A.reg(cabT, cabHt, (sp) => {
-        for (let y = 0; y < cabHt; y++) for (let x = 0; x < cabT; x++) sp.set(x, y, CS.BODY, y < 2 ? 145 : 125);
-        for (let y = 2; y < 8; y++) for (let x = 4; x < cabT - 2; x++) sp.set(x, y, CS.GLASS, 120);
-        for (let y = cabHt - 3; y < cabHt; y++) for (let x = 4; x < 9; x++) sp.set(x, y, CS.TIRE, 110);
-      });
-      const cabFr = A.reg(Wt, cabHt, (sp) => {
-        for (let y = 0; y < cabHt; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 125);
-        for (let y = 2; y < 8; y++) for (let x = 1; x < Wt - 1; x++) sp.set(x, y, CS.GLASS, 120);
-        for (let y = 10; y < cabHt - 3; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, CS.BLACK, x % 2 ? 110 : 90);
-        for (const hx of [1, Wt - 3]) { sp.set(hx, 11, CS.HEAD, 128); sp.set(hx + 1, 11, CS.HEAD, 128); }
-      });
-      const bodyL = L - cabL - 0.1;
-      const bLt = Math.round(bodyL * T), bHt = Math.round((boxH - 0.2) * T);
-      const boxSide = A.reg(bLt, bHt, (sp) => {
-        for (let y = 0; y < bHt; y++) for (let x = 0; x < bLt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, y < 1 ? 145 : 122);
-        if (o.ladder) for (let x = 0; x < bLt; x++) { sp.set(x, 3, CS.CHROME, 128); if (x % 3 === 0) sp.set(x, 4, CS.CHROME, 110); sp.set(x, 5, CS.CHROME, 128); }
-        if (o.stripe != null) for (let x = 0; x < bLt; x++) { sp.set(x, o.stripe, CS.ACCENT, 128); sp.set(x, o.stripe + 1, CS.ACCENT, 110); }
-        if (o.hopper) for (let y = 4; y < bHt - 2; y++) for (let x = 0; x < 6; x++) sp.set(x, y, CS.BLACK, 100);
-        for (const wx of [8, bLt - 8]) for (let y = bHt - 4; y < bHt; y++) for (let x = wx - 2; x <= wx + 2; x++) sp.set(x, y, CS.TIRE, 110);
-        for (let x = 0; x < bLt; x++) sp.set(x, bHt - 1, CS.TRIM, 80);
-      });
-      const boxBack = A.reg(Wt, bHt, (sp) => {
-        for (let y = 0; y < bHt; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, 115);
-        for (let y = 1; y < bHt - 3; y++) sp.set(Wt >> 1, y, CS.TRIM, 90);
-        for (const tx of [0, Wt - 2]) for (let y = bHt - 6; y < bHt - 3; y++) { sp.set(tx, y, CS.TAIL, 128); sp.set(tx + 1, y, CS.TAIL, 128); }
-      });
-      const boxTop = A.reg(bLt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < bLt; x++) sp.set(x, y, o.cargo ?? CS.WHITE, 138); });
-      box(mb, L / 2 - cabL, -W / 2, 0, L / 2, W / 2, cabH, faces(cabSide, cabFr, this.solid.body, top(cabT, Wt)));
-      box(mb, -L / 2, -W / 2, 0.2, L / 2 - cabL - 0.1, W / 2, boxH, faces(boxSide, this.solid.trim, boxBack, boxTop));
-      box(mb, -L / 2, -W / 2 + 0.1, 0, L / 2 - cabL, W / 2 - 0.1, 0.2, faces(this.solid.black, this.solid.black, this.solid.black, this.solid.black));
-      if (o.lightBar) {
-        box(mb, L / 2 - 0.7, -0.4, cabH, L / 2 - 0.5, -0.02, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red));
-        box(mb, L / 2 - 0.7, 0.02, cabH, L / 2 - 0.5, 0.4, cabH + 0.12, faces(this.solid.red, this.solid.red, this.solid.red, this.solid.red));
-      }
-      if (o.beacon) box(mb, L / 2 - 0.65, -0.12, cabH, L / 2 - 0.45, 0.12, cabH + 0.16, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign));
-      if (o.plow) box(mb, L / 2 + 0.05, -0.75, 0.0, L / 2 + 0.3, 0.75, 0.55, faces(this.solid.sign, this.solid.sign, this.solid.sign, this.solid.sign));
-      if (o.ladderTop) box(mb, -L / 2 + 0.2, -0.25, boxH, L / 2 - cabL, 0.25, boxH + 0.12, faces(this.solid.chrome, this.solid.chrome, this.solid.chrome, this.solid.chrome));
+      if (o.rack) for (const s of [-1, 1]) box(mb, roofR + 0.05, s * (wr - 0.05) - 0.02, zr, roofF - 0.05, s * (wr - 0.05) + 0.02, zr + 0.05, S.trim);
       return mb.finish();
     };
 
-    const subway = () => {
+    // ---- one-box van ------------------------------------------------------------------------------------
+    const van = (o = {}) => {
       const mb = new MeshBuilder();
-      const L = 3.25, W = 1.125, H = 1.5;
-      const Lt = Math.round(L * T), Wt = Math.round(W * T), Ht = Math.round(H * T);
-      const side = A.reg(Lt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 6 === 0 ? 118 : 132) - (y > Ht - 5 ? 20 : 0));
-        for (let y = 4; y < 11; y++) for (let x = 3; x < Lt - 3; x++) {
-          const door = (x > 9 && x < 15) || (x > Lt - 16 && x < Lt - 10);
-          sp.set(x, y, door ? CS.BODY : (x % 8 === 0 ? CS.BLACK : CS.INTERIOR), door ? 110 : y < 6 ? 140 : 120);
+      const L = o.len ?? 2.75, W = o.wid ?? 1.0, H = o.h ?? 1.25, w = W / 2;
+      const zb = 0.16, xr = -L / 2, xf = L / 2;
+      const xWin = xf - 0.82, xHood = xf - 0.4, zHood = 0.72;
+      const st = [
+        { x: xr, pts: bodySec(w - 0.04, zb + 0.02, H - 0.09, H - 0.03, 0.05) },
+        { x: xr + 0.06, pts: bodySec(w, zb, H - 0.07, H, 0.06) },
+        { x: xWin, pts: bodySec(w, zb, H - 0.07, H, 0.06) },
+        { x: xHood, pts: bodySec(w, zb, zHood - 0.04, zHood, 0.05) },
+        { x: xf - 0.06, pts: bodySec(w, zb, zHood - 0.12, zHood - 0.07, 0.05) },
+        { x: xf, pts: bodySec(w - 0.05, zb + 0.03, zHood - 0.2, zHood - 0.14, 0.05) },
+      ];
+      const bb = bboxOf(st);
+      const Lt = (bb.x1 - bb.x0) * T, Wt = (bb.y1 - bb.y0) * T, Ht = (bb.z1 - bb.z0) * T;
+      const U = (x) => (x - bb.x0) * T, V = (z) => (bb.z1 - z) * T;
+      const r = 0.19;
+      const wheelX = [xr + 0.55, xf - 0.5];
+      const side = reg(Lt, Ht, (sp) => {
+        const HH = Math.round(Ht), LL = Math.round(Lt);
+        paintBodySide(sp, LL, HH, { vs: 2, arches: wheelX.map((x) => [U(x), V(r), r * T + 1.5]) });
+        // cab door window following the windshield rake
+        const bpx = Math.round(U(xWin - 0.3));
+        for (let y = 4; y < V(zHood) + 1; y++) {
+          const z = bb.z1 - y / T;
+          const ta = clamp01((H - z) / (H - zHood));
+          const ax = U(xWin + (xHood - xWin) * ta) - 2;
+          for (let x = bpx + 2; x < ax; x++) sp.set(x, y, CS.GLASS, (x + y * 2) % 13 < 2 ? 156 : 118);
         }
-        for (const dx of [9, 15, Lt - 16, Lt - 10]) for (let y = 3; y < Ht - 5; y++) sp.set(dx, y, CS.BLACK, 100);
-        for (let x = 0; x < Lt; x++) { sp.set(x, 13, CS.ACCENT, 128); sp.set(x, 14, CS.ACCENT, 110); }
-        for (const wx of [8, Lt - 9]) for (let y = Ht - 4; y < Ht; y++) for (let x = wx - 4; x <= wx + 4; x++) sp.set(x, y, CS.TIRE, 100);
+        for (let y = 3; y < HH - 3; y++) { sp.set(bpx, y, CS.BODY, 96); sp.set(Math.round(U(xWin - 0.95)), y, CS.BODY, 96); }
+        sp.set(bpx + 3, Math.round(V(zHood)) + 3, CS.CHROME, 150);
+        if (o.stripe != null) for (let x = 0; x < LL; x++) { sp.set(x, o.stripe, CS.ACCENT, 136); sp.set(x, o.stripe + 1, CS.ACCENT, 116); sp.set(x, o.stripe + 3, CS.ACCENT, 126); }
+        if (o.text) for (let x = 6; x < bpx - 10; x += 2) { sp.set(x, 10, CS.ACCENT, 136); if (x % 6 === 0) sp.set(x, 11, CS.ACCENT, 120); }
+        if (o.window) {
+          for (let y = 6; y < 17; y++) for (let x = 12; x < 34; x++) sp.set(x, y, CS.INTERIOR, y < 8 ? 150 : 124);
+          for (let x = 10; x < 36; x++) { sp.set(x, 5, CS.WHITE, 150); sp.set(x, 17, CS.CHROME, 140); }
+          for (let k = 0; k < 4; k++) for (let y = 19; y < 25; y++) for (let x = 38 + k * 6; x < 42 + k * 6; x++) sp.set(x, y, [CS.ACCENT, CS.SIGN, CS.HEAD, CS.ACCENT][k], 136);
+        }
       });
-      const end = A.reg(Wt, Ht, (sp) => {
-        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 120);
-        for (let y = 4; y < 10; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, 125);
-        for (let x = 5; x < Wt - 5; x++) sp.set(x, 2, CS.LED, 128);
-        sp.set(2, Ht - 6, CS.HEAD, 128); sp.set(Wt - 3, Ht - 6, CS.HEAD, 128); sp.set(3, Ht - 6, CS.HEAD, 128); sp.set(Wt - 4, Ht - 6, CS.HEAD, 128);
+      const top = reg(Lt, Wt, (sp) => {
+        for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) { const e = Math.min(y, Wt - 1 - y); sp.set(x, y, CS.BODY, e < 1 ? 120 : x % 8 === 0 ? 128 : 148); }
       });
-      const roof = A.reg(Lt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, y === 0 || y === Wt - 1 ? 110 : 140); });
-      box(mb, -L / 2, -W / 2, 0, L / 2, W / 2, H, faces(side, end, end, roof));
+      const vF = Math.round(V(zHood - 0.14));
+      const front = reg(Wt, Ht, (sp) => {
+        const HH = Math.round(Ht), WW = Math.round(Wt);
+        for (let y = 0; y < HH; y++) for (let x = 0; x < WW; x++) sp.set(x, y, CS.BODY, y <= vF ? 150 : 124);
+        for (let y = vF + 3; y < HH - 4; y++) for (let x = 8; x < WW - 8; x++) sp.set(x, y, CS.BLACK, (y - vF) % 2 ? 76 : 106);
+        for (const hx of [2, WW - 7]) for (let x = hx; x < hx + 5; x++) { sp.set(x, vF + 3, CS.HEAD, 146); sp.set(x, vF + 4, CS.HEAD, 120); sp.set(x, vF + 5, CS.HEAD, 104); }
+        for (let x = 0; x < WW; x++) { sp.set(x, HH - 3, CS.TRIM, 118); sp.set(x, HH - 2, CS.TRIM, 104); sp.set(x, HH - 1, CS.TRIM, 80); }
+        for (let x = (WW >> 1) - 3; x < (WW >> 1) + 3; x++) sp.set(x, HH - 4, CS.PLATE, 132);
+      });
+      const back = reg(Wt, Ht, (sp) => {
+        const HH = Math.round(Ht), WW = Math.round(Wt);
+        for (let y = 0; y < HH; y++) for (let x = 0; x < WW; x++) sp.set(x, y, CS.BODY, y < 2 ? 148 : 120);
+        for (let y = 4; y < 14; y++) for (const [x0, x1] of [[3, (WW >> 1) - 2], [(WW >> 1) + 2, WW - 3]]) for (let x = x0; x < x1; x++) sp.set(x, y, CS.GLASS, y < 6 ? 146 : 112);
+        for (let y = 2; y < HH - 3; y++) sp.set(WW >> 1, y, CS.BLACK, 80);
+        for (const tx of [0, WW - 2]) for (let y = 16; y < 24; y++) { sp.set(tx, y, CS.TAIL, 140); sp.set(tx + 1, y, CS.TAIL, 116); }
+        for (let x = (WW >> 1) - 3; x < (WW >> 1) + 3; x++) sp.set(x, HH - 5, CS.PLATE, 132);
+        for (let x = 0; x < WW; x++) { sp.set(x, HH - 3, CS.TRIM, 112); sp.set(x, HH - 2, CS.TRIM, 100); sp.set(x, HH - 1, CS.TRIM, 80); }
+      });
+      const glassF = glassPanel(Wt, V(zHood) + 1, { wipers: true, fx: 2 });
+      loft(mb, st, { side, top, front, back, glassF }, { bb, faceKey: (i, j) => (i === 2 && j === 2 ? 'glassF' : null) });
+      box(mb, xf - 0.02, -w + 0.03, zb - 0.01, xf + 0.05, w - 0.03, zb + 0.1, S.plastic);
+      box(mb, xr - 0.05, -w + 0.03, zb - 0.01, xr + 0.02, w - 0.03, zb + 0.1, S.plastic);
+      mirrors(mb, xHood - 0.04, w, zHood);
+      wheelsAt(mb, wheelX, w - 0.07, r, 0.15, wheelTex(r));
+      if (o.cone) {
+        box(mb, -0.25, -0.16, H, 0.09, 0.16, H + 0.04, S.white);
+        mb.cone(-0.08, 0, H + 0.38, H + 0.04, 0.15, 8, S.accent, { mat: 0 });
+        mb.cylinder(-0.08, 0, H + 0.38, H + 0.5, 0.17, 8, S.white, S.white, { mat: 0 });
+        mb.cone(-0.08, 0, H + 0.5, H + 0.66, 0.15, 8, S.white, { mat: 0 });
+      }
+      if (o.beacon) box(mb, 0.4, -0.12, H, 0.6, 0.12, H + 0.15, S.sign);
       return mb.finish();
     };
+
+    // ---- city bus ----------------------------------------------------------------------------------
+    const bus = () => {
+      const mb = new MeshBuilder();
+      const L = 6.5, W = 1.25, H = 1.6, w = W / 2, zb = 0.18, xr = -L / 2, xf = L / 2;
+      const st = [
+        { x: xr, pts: bodySec(w - 0.05, zb + 0.02, H - 0.1, H - 0.03, 0.06) },
+        { x: xr + 0.08, pts: bodySec(w, zb, H - 0.08, H, 0.07) },
+        { x: xf - 0.1, pts: bodySec(w, zb, H - 0.08, H, 0.07) },
+        { x: xf, pts: bodySec(w - 0.06, zb + 0.02, H - 0.12, H - 0.05, 0.06) },
+      ];
+      const bb = bboxOf(st);
+      const Lt = Math.round((bb.x1 - bb.x0) * T), Wt = Math.round((bb.y1 - bb.y0) * T), Ht = Math.round((bb.z1 - bb.z0) * T);
+      const U = (x) => (x - bb.x0) * T, V = (z) => (bb.z1 - z) * T;
+      const r = 0.24;
+      const wheelX = [xr + 1.35, xf - 1.25];
+      const side = reg(Lt, Ht, (sp) => {
+        paintBodySide(sp, Lt, Ht, { vs: 2, slot: CS.WHITE, arches: wheelX.map((x) => [U(x), V(r), r * T + 1.5]) });
+        // window band with frames
+        for (let y = 5; y < 22; y++)
+          for (let x = 4; x < Lt - 4; x++) {
+            const frame = (x - 4) % 22 < 2;
+            sp.set(x, y, frame ? CS.BLACK : CS.INTERIOR, frame ? 76 : y < 8 ? 146 : (x + y) % 17 < 2 ? 150 : 120);
+          }
+        // doors (front, middle)
+        for (const [d0, d1] of [[Lt - 26, Lt - 12], [Math.round(Lt * 0.52), Math.round(Lt * 0.52) + 14]])
+          for (let y = 5; y < Ht - 3; y++) for (let x = d0; x < d1; x++) sp.set(x, y, x === d0 || x === d1 - 1 || x === ((d0 + d1) >> 1) ? CS.BLACK : CS.GLASS, x === d0 || x === d1 - 1 ? 72 : y < 8 ? 150 : 118);
+        // livery stripes
+        for (let x = 0; x < Lt; x++) { sp.set(x, 24, CS.ACCENT, 140); sp.set(x, 25, CS.ACCENT, 124); sp.set(x, 26, CS.ACCENT, 140); sp.set(x, 28, CS.ACCENT, 110); }
+        // advertising panel between the wheels
+        const ax0 = Math.round(U(wheelX[0]) + 14), ax1 = Math.round(Lt * 0.52) - 6;
+        for (let y = 30; y < Ht - 4; y++) for (let x = ax0; x < ax1; x++) sp.set(x, y, x < ax0 + 2 || x >= ax1 - 2 || y < 31 ? CS.BLACK : ((x - ax0) >> 3) % 3 === 0 ? CS.SIGN : CS.HEAD, 118);
+      });
+      const top = reg(Lt, Wt, (sp) => {
+        for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) { const e = Math.min(y, Wt - 1 - y); sp.set(x, y, CS.WHITE, e < 2 ? 124 : 146); }
+        for (let x = 30; x < 50; x++) for (let y = 8; y < Wt - 8; y++) sp.set(x, y, CS.CHROME, 130);
+      });
+      const front = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 128);
+        for (let x = 4; x < Wt - 4; x++) { sp.set(x, 2, CS.BLACK, 90); sp.set(x, 3, CS.LED, 140); sp.set(x, 4, CS.LED, 120); sp.set(x, 5, CS.BLACK, 90); }
+        for (let y = 7; y < 27; y++) for (let x = 2; x < Wt - 2; x++) sp.set(x, y, CS.GLASS, (x - y * 2 + 60) % 17 < 3 ? 158 : y < 9 ? 146 : 122);
+        for (let y = 7; y < 27; y++) sp.set(Wt >> 1, y, CS.BLACK, 80);
+        for (let x = 0; x < Wt; x++) sp.set(x, 29, CS.ACCENT, 136);
+        for (const hx of [2, Wt - 7]) for (let x = hx; x < hx + 5; x++) { sp.set(x, Ht - 9, CS.HEAD, 146); sp.set(x, Ht - 8, CS.HEAD, 118); }
+        for (let x = 0; x < Wt; x++) { sp.set(x, Ht - 3, CS.TRIM, 110); sp.set(x, Ht - 2, CS.TRIM, 96); sp.set(x, Ht - 1, CS.TRIM, 80); }
+      });
+      const back = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.WHITE, 118);
+        for (let y = 5; y < 15; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, CS.GLASS, 112);
+        for (let y = 20; y < 32; y++) for (let x = 8; x < Wt - 8; x++) sp.set(x, y, CS.BLACK, y % 2 ? 80 : 104);
+        for (const tx of [1, Wt - 4]) for (let y = 18; y < 30; y++) for (let x = tx; x < tx + 3; x++) sp.set(x, y, CS.TAIL, y % 4 === 0 ? 110 : 136);
+        for (let x = 0; x < Wt; x++) { sp.set(x, Ht - 2, CS.TRIM, 100); sp.set(x, Ht - 1, CS.TRIM, 80); }
+      });
+      loft(mb, st, { side, top, front, back }, { bb });
+      box(mb, -1.6, -0.42, H, 0.1, 0.42, H + 0.2, S.chrome);
+      box(mb, 1.4, -0.3, H, 2.2, 0.3, H + 0.08, S.cargo);
+      mirrors(mb, xf - 0.05, w, H - 0.6);
+      wheelsAt(mb, wheelX, w - 0.08, r, 0.16, wheelTex(r));
+      return mb.finish();
+    };
+
+    // ---- trucks: shaped cab + cargo body ---------------------------------------------------------------
+    const truck = (o = {}) => {
+      const mb = new MeshBuilder();
+      const L = o.len ?? 4.0, W = o.wid ?? 1.125, w = W / 2;
+      const cabL = 1.15, cabH = 1.32, boxH = o.boxH ?? 1.8, zb = 0.2;
+      const xf = L / 2, xc = xf - cabL, xr = -L / 2;
+      const st = [
+        { x: xc, pts: bodySec(w, zb, cabH - 0.06, cabH, 0.06) },
+        { x: xf - 0.5, pts: bodySec(w, zb, cabH - 0.06, cabH, 0.06) },
+        { x: xf - 0.2, pts: bodySec(w, zb, 0.8, 0.85, 0.05) },
+        { x: xf, pts: bodySec(w - 0.05, zb + 0.02, 0.72, 0.77, 0.05) },
+      ];
+      const bb = bboxOf(st);
+      const Lt = Math.round((bb.x1 - bb.x0) * T), Wt = Math.round((bb.y1 - bb.y0) * T), Ht = Math.round((bb.z1 - bb.z0) * T);
+      const U = (x) => (x - bb.x0) * T, V = (z) => (bb.z1 - z) * T;
+      const r = 0.22;
+      const cabSlot = o.cabSlot ?? CS.BODY;
+      const side = reg(Lt, Ht, (sp) => {
+        paintBodySide(sp, Lt, Ht, { vs: 2, slot: cabSlot, arches: [[U(xf - 0.45), V(r), r * T + 1.5]] });
+        for (let y = 4; y < V(0.86); y++) {
+          const z = bb.z1 - y / T;
+          const ta = clamp01((cabH - z) / (cabH - 0.85));
+          const ax = U(xf - 0.5 + 0.3 * ta) - 2;
+          for (let x = 5; x < ax; x++) sp.set(x, y, CS.GLASS, (x + y * 2) % 13 < 2 ? 156 : 118);
+        }
+        for (let y = 3; y < Ht - 3; y++) sp.set(3, y, cabSlot, 96);
+        sp.set(7, Math.round(V(0.86)) + 3, CS.CHROME, 150);
+        for (let y = Math.round(V(0.6)); y < Math.round(V(0.6)) + 4; y++) for (let x = 2; x < 6; x++) sp.set(x, y, CS.CHROME, 130);
+      });
+      const top = reg(Lt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, cabSlot, Math.min(y, Wt - 1 - y) < 2 ? 122 : 146); });
+      const vF = Math.round(V(0.77));
+      const front = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, cabSlot, y <= vF ? 148 : 122);
+        for (let y = vF + 2; y < Ht - 5; y++) for (let x = 7; x < Wt - 7; x++) sp.set(x, y, CS.CHROME, (y - vF) % 2 ? 96 : 140);
+        for (const hx of [1, Wt - 6]) for (let x = hx; x < hx + 5; x++) for (let y = vF + 2; y < vF + 5; y++) sp.set(x, y, CS.HEAD, 150 - (y - vF) * 10);
+        for (let x = 0; x < Wt; x++) { sp.set(x, Ht - 4, CS.CHROME, 140); sp.set(x, Ht - 3, CS.CHROME, 118); sp.set(x, Ht - 2, CS.TRIM, 96); sp.set(x, Ht - 1, CS.TRIM, 80); }
+      });
+      const glassF = glassPanel(Wt, V(0.85) + 1, { wipers: true, fx: 2 });
+      loft(mb, st, { side, top, front, back: S.black, glassF }, { bb, faceKey: (i, j) => (i === 1 && j === 2 ? 'glassF' : null) });
+      // cargo body
+      const bst = [
+        { x: xr, pts: bodySec(w + 0.02, 0.36, boxH - 0.04, boxH, 0.04) },
+        { x: xc - 0.08, pts: bodySec(w + 0.02, 0.36, boxH - 0.04, boxH, 0.04) },
+      ];
+      const cbb = bboxOf(bst);
+      const BL = Math.round((cbb.x1 - cbb.x0) * T), BW = Math.round((cbb.y1 - cbb.y0) * T), BH = Math.round((cbb.z1 - cbb.z0) * T);
+      const cargo = o.cargo ?? CS.WHITE;
+      const bside = reg(BL, BH, (sp) => {
+        for (let y = 0; y < BH; y++) for (let x = 0; x < BL; x++) sp.set(x, y, cargo, y < 2 ? 148 : x % 16 === 0 ? 112 : 126);
+        for (let x = 0; x < BL; x++) { sp.set(x, BH - 1, CS.TRIM, 90); sp.set(x, BH - 2, cargo, 104); }
+        if (o.stripe != null) for (let x = 0; x < BL; x++) { sp.set(x, o.stripe, CS.ACCENT, 140); sp.set(x, o.stripe + 1, CS.ACCENT, 120); sp.set(x, o.stripe + 3, CS.ACCENT, 130); }
+        if (o.ladder) for (let x = 0; x < BL; x++) { sp.set(x, 4, CS.CHROME, 146); if (x % 4 === 0) { sp.set(x, 5, CS.CHROME, 120); sp.set(x, 6, CS.CHROME, 120); } sp.set(x, 7, CS.CHROME, 146); }
+        if (o.lockers) for (let k = 0; k < 5; k++) { const x0 = 4 + k * Math.floor((BL - 8) / 5); for (let y = 12; y < BH - 4; y++) for (let x = x0; x < x0 + Math.floor((BL - 8) / 5) - 2; x++) sp.set(x, y, CS.CHROME, (x + y) % 3 === 0 ? 150 : y === 12 ? 160 : 124); }
+        if (o.hopper) for (let y = 6; y < BH - 3; y++) for (let x = 0; x < 12; x++) sp.set(x, y, CS.BLACK, x === 11 ? 70 : 100 + ((x + y) % 4) * 4);
+        if (o.logo) for (let y = 10; y < 18; y++) for (let x = Math.round(BL * 0.45); x < BL * 0.45 + 16; x++) sp.set(x, y, CS.ACCENT, (x + y) % 5 === 0 ? 150 : 128);
+      });
+      const btop = reg(BL, BW, (sp) => { for (let y = 0; y < BW; y++) for (let x = 0; x < BL; x++) sp.set(x, y, cargo, Math.min(y, BW - 1 - y) < 2 ? 118 : x % 12 === 0 ? 124 : 140); });
+      const bback = reg(BW, BH, (sp) => {
+        for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) sp.set(x, y, cargo, 116);
+        for (let y = 2; y < BH - 4; y++) { sp.set(BW >> 1, y, CS.TRIM, 86); if (y % 8 === 0) for (let x = 2; x < BW - 2; x++) sp.set(x, y, CS.CHROME, 120); }
+        for (const tx of [1, BW - 4]) for (let y = BH - 10; y < BH - 4; y++) for (let x = tx; x < tx + 3; x++) sp.set(x, y, CS.TAIL, 136);
+        for (let x = 0; x < BW; x++) { sp.set(x, BH - 2, CS.TRIM, 100); sp.set(x, BH - 1, CS.TRIM, 80); }
+      });
+      const bfront = reg(BW, BH, (sp) => {
+        for (let y = 0; y < BH; y++) for (let x = 0; x < BW; x++) sp.set(x, y, cargo, y < 2 ? 146 : x < 2 || x >= BW - 2 ? 108 : 122);
+        for (const mx of [3, BW - 5]) { sp.set(mx, 3, CS.TAIL, 140); sp.set(mx + 1, 3, CS.TAIL, 140); }
+      });
+      loft(mb, bst, { side: bside, top: btop, back: bback, front: bfront }, { bb: cbb });
+      box(mb, xr + 0.1, -w + 0.12, 0.12, xc, w - 0.12, 0.36, S.black);
+      wheelsAt(mb, [xf - 0.45], w - 0.08, r, 0.16, wheelTex(r));
+      wheelsAt(mb, o.len >= 4.5 ? [xr + 0.7, xr + 1.25] : [xr + 0.75], w - 0.08, r, 0.18, wheelTex(r));
+      box(mb, xf - 0.02, -w + 0.02, zb - 0.02, xf + 0.06, w - 0.02, zb + 0.1, S.chrome);
+      mirrors(mb, xf - 0.42, w, 0.95);
+      if (o.lightBar) {
+        box(mb, xf - 0.62, -0.42, cabH, xf - 0.48, -0.02, cabH + 0.12, S.red);
+        box(mb, xf - 0.62, 0.02, cabH, xf - 0.48, 0.42, cabH + 0.12, S.blue);
+      }
+      if (o.beacon) box(mb, xf - 0.65, -0.12, cabH, xf - 0.45, 0.12, cabH + 0.16, S.sign);
+      if (o.plow) {
+        // angled blade
+        const b0 = [xf + 0.35, -0.8], b1 = [xf + 0.12, 0.8];
+        mb.quad([b0[0], b0[1], 0.6], [b1[0], b1[1], 0.6], [b1[0], b1[1], 0.02], [b0[0], b0[1], 0.02], [[0, 0], [2, 0], [2, 2], [0, 2]], S.sign, null, MAT.SNOW);
+        mb.quad([b1[0] - 0.04, b1[1], 0.6], [b0[0] - 0.04, b0[1], 0.6], [b0[0] - 0.04, b0[1], 0.02], [b1[0] - 0.04, b1[1], 0.02], [[0, 0], [2, 0], [2, 2], [0, 2]], S.black, null, 0);
+        box(mb, xf, -0.1, 0.2, xf + 0.25, 0.1, 0.35, S.black);
+      }
+      if (o.ladderTop) {
+        box(mb, xr + 0.25, -0.28, boxH, xc - 0.2, -0.2, boxH + 0.14, S.chrome);
+        box(mb, xr + 0.25, 0.2, boxH, xc - 0.2, 0.28, boxH + 0.14, S.chrome);
+        for (let x = xr + 0.35; x < xc - 0.25; x += 0.22) box(mb, x, -0.2, boxH + 0.06, x + 0.04, 0.2, boxH + 0.1, S.chrome);
+      }
+      return mb.finish();
+    };
+
+    // ---- subway car --------------------------------------------------------------------------------------
+    const subway = () => {
+      const mb = new MeshBuilder();
+      const L = 3.25, W = 1.125, H = 1.5, w = W / 2, zb = 0.12;
+      const sec = [[-w, zb], [-w, H - 0.18], [-(w - 0.06), H - 0.06], [-(w - 0.2), H], [w - 0.2, H], [w - 0.06, H - 0.06], [w, H - 0.18], [w, zb]];
+      const st = [{ x: -L / 2, pts: sec }, { x: L / 2, pts: sec }];
+      const bb = bboxOf(st);
+      const Lt = Math.round((bb.x1 - bb.x0) * T), Wt = Math.round((bb.y1 - bb.y0) * T), Ht = Math.round((bb.z1 - bb.z0) * T);
+      const side = reg(Lt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, (x % 4 === 0 ? 116 : 134) - (y > Ht - 8 ? 22 : 0) + (y < 4 ? 12 : 0));
+        const doors = [[16, 30], [Lt - 30, Lt - 16]];
+        for (let y = 8; y < 21; y++)
+          for (let x = 4; x < Lt - 4; x++) {
+            if (doors.some(([a, b]) => x >= a - 1 && x <= b)) continue;
+            sp.set(x, y, x % 14 < 2 ? CS.BLACK : CS.INTERIOR, x % 14 < 2 ? 80 : y < 10 ? 150 : 122);
+          }
+        for (const [a, b] of doors) {
+          for (let y = 6; y < Ht - 8; y++) for (let x = a; x < b; x++) sp.set(x, y, CS.BODY, x === a || x === b - 1 ? 92 : x === ((a + b) >> 1) ? 96 : 140);
+          for (let y = 9; y < 19; y++) for (const x0 of [a + 2, ((a + b) >> 1) + 2]) for (let x = x0; x < x0 + 4; x++) sp.set(x, y, CS.INTERIOR, 128);
+        }
+        for (let x = 0; x < Lt; x++) { sp.set(x, 25, CS.ACCENT, 140); sp.set(x, 26, CS.ACCENT, 118); }
+        for (let y = Ht - 6; y < Ht; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.TIRE, (x % 6 === 0 ? 70 : 96));
+      });
+      const top = reg(Lt, Wt, (sp) => { for (let y = 0; y < Wt; y++) for (let x = 0; x < Lt; x++) sp.set(x, y, CS.BODY, Math.min(y, Wt - 1 - y) < 3 ? 118 : x % 20 < 2 ? 120 : 140); });
+      const end = reg(Wt, Ht, (sp) => {
+        for (let y = 0; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.BODY, 122);
+        for (let y = 8; y < 20; y++) for (let x = 3; x < Wt - 3; x++) sp.set(x, y, x > 13 && x < 22 ? CS.BODY : CS.GLASS, x > 13 && x < 22 ? 110 : y < 10 ? 150 : 120);
+        for (let y = 9; y < 26; y++) for (let x = 15; x < 21; x++) sp.set(x, y, CS.INTERIOR, 120);
+        for (let x = 6; x < Wt - 6; x++) { sp.set(x, 4, CS.LED, 146); sp.set(x, 5, CS.LED, 120); }
+        for (const hx of [3, Wt - 6]) for (let x = hx; x < hx + 3; x++) { sp.set(x, 30, CS.HEAD, 146); sp.set(x, 31, CS.HEAD, 120); }
+        for (let y = Ht - 6; y < Ht; y++) for (let x = 0; x < Wt; x++) sp.set(x, y, CS.TIRE, 90);
+      });
+      loft(mb, st, { side, top, front: end, back: end }, { bb });
+      for (const x of [-L / 2 + 0.55, L / 2 - 0.55]) box(mb, x - 0.35, -w + 0.1, 0, x + 0.35, w - 0.1, zb + 0.02, S.black);
+      return mb.finish();
+    };
+
     const defs = {
       subway: subway(),
       sedan: sedan(),
-      taxi: sedan({ taxiSign: true, checker: 3 }),
-      suv: sedan({ len: 2.375, wid: 1.0, bodyH: 0.5625, cabH: 0.375, cabLen: 1.5, cabOff: -0.25 }),
-      police: sedan({ len: 2.375, lightBar: true, stripe: 3 }),
+      taxi: sedan({ taxiSign: true, checker: true, chromeBumper: false }),
+      suv: sedan({ len: 2.375, wid: 1.0, zt: 0.6, cabH: 0.36, cabR: -0.98, roofR: -0.88, cabF: 0.42, roofF: 0.08, hoodDrop: 0.05, rack: true, darkRims: true }),
+      police: sedan({ len: 2.375, lightBar: true, stripe: true, text: true, darkRims: true }),
       van: van({ text: true }),
-      icecream: van({ len: 3.25, h: 1.375, stripe: 12, window: true, cone: true }),
+      icecream: van({ len: 3.25, h: 1.375, stripe: 26, window: true, cone: true }),
       bus: bus(),
-      truck: truck({ stripe: 4 }),
-      fire: truck({ len: 5.0, cargo: CS.BODY, ladder: true, lightBar: true, ladderTop: true }),
-      garbage: truck({ len: 4.25, hopper: true, stripe: 8 }),
-      plow: truck({ len: 4.25, hopper: true, stripe: 8, beacon: true, plow: true }),
+      truck: truck({ stripe: 12, logo: true }),
+      fire: truck({ len: 5.0, cargo: CS.BODY, cabSlot: CS.BODY, ladder: true, lightBar: true, ladderTop: true, lockers: true }),
+      garbage: truck({ len: 4.25, hopper: true, stripe: 20 }),
+      plow: truck({ len: 4.25, hopper: true, stripe: 20, beacon: true, plow: true }),
     };
     const gl = this.gl;
     for (const k in defs) {

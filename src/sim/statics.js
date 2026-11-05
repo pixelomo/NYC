@@ -43,7 +43,7 @@ export class Statics {
     this.lampDelay = world.lamps.map(() => rng.range(0, 0.6));
     this.lampFlicker = world.lamps.map(() => (rng.chance(0.04) ? rng.range(0.5, 2) : 0));
     this.frames = {};
-    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella']) this.frames[n] = atlas.get(n);
+    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella', 'pedWalk', 'pedHand']) this.frames[n] = atlas.get(n);
     this.umbRows = {
       hotdog: pal.alloc({ [S.C1]: 0xf2c230, [S.C2]: 0x1f4fa0, [S.C3]: 0x9a9da3 }),
       halal: pal.alloc({ [S.C1]: 0xf2f2ee, [S.C2]: 0xc8302c, [S.C3]: 0x9a9da3 }),
@@ -149,7 +149,7 @@ export class Statics {
         } else {
           const w = s.axis === 'x' ? st.walkEW : st.walkNS; // 'walk','flash','dont'
           if (w === 'flash' && (time % 1) > 0.5) continue;
-          L.push(s.x, s.y, s.z + (w === 'walk' ? 0 : 0.12), this.frames.lamp2, this.glowRows[w === 'walk' ? 'walk' : 'hand'], SF.EMISSIVE | SF.NOSHADOW, 1, 0.02);
+          L.push(s.x, s.y, s.z + 0.02, w === 'walk' ? this.frames.pedWalk : this.frames.pedHand, this.glowRows[w === 'walk' ? 'walk' : 'hand'], SF.EMISSIVE | SF.NOSHADOW, 1, 0.02);
         }
       }
     }

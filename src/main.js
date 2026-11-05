@@ -35,12 +35,12 @@ async function boot() {
   setMsg('Waking up the city…');
   await nextFrame();
   const renderer = new Renderer(gl);
-  renderer.setStatic(world.mesh, world.atlas);
+  renderer.setStatic(world.mesh, world.atlas, world.groundPage);
   const q = new URLSearchParams(location.search);
   const env = new Environment();
   const camera = new Camera();
   const dpr = window.devicePixelRatio || 1;
-  camera.scale = camera.scaleTo = Math.max(1, Math.round(2 * dpr));
+  camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr));
   camera.x = 60;
   camera.y = 70;
   if (q.has('zoom')) camera.scale = camera.scaleTo = parseFloat(q.get('zoom'));

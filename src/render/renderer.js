@@ -3,7 +3,7 @@
 import { createProgram, makeTexture, makeDepthTexture, makeFBO, makeBuffer, setFilter } from '../core/gl.js';
 import { STATIC_VS, STATIC_FS, SHADOW_VS, SHADOW_FS, FS_VS, SKY_FS, BLUR_FS, COMPOSITE_FS } from './shaders.js';
 import { normalize3, cross3, dot3, valueNoise } from '../core/math.js';
-import { MAP, BASE_DEPTH } from '../world/layout.js';
+import { MAP, BASE_DEPTH, T } from '../world/layout.js';
 
 export class Renderer {
   constructor(gl) {
@@ -71,9 +71,26 @@ export class Renderer {
     return t;
   }
 
-  setStatic(mesh, atlas) {
+  setStatic(mesh, atlas, groundPage) {
     const gl = this.gl;
     this.atlasTex = atlas.upload(gl);
+    // ground: one big texture (world-space, T texels per unit); halve it if the GPU can't hold it
+    const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
+    let gp = groundPage, scale = 1;
+    if (gp.w > maxTex) {
+      const h = new Uint8Array((gp.w >> 1) * (gp.h >> 1) * 4);
+      for (let y = 0; y < gp.h >> 1; y++) for (let x = 0; x < gp.w >> 1; x++) {
+        const s = ((y * 2) * gp.w + x * 2) * 4, d = (y * (gp.w >> 1) + x) * 4;
+        h[d] = gp.data[s]; h[d + 1] = gp.data[s + 1]; h[d + 2] = gp.data[s + 2]; h[d + 3] = gp.data[s + 3];
+      }
+      gp = { w: gp.w >> 1, h: gp.h >> 1, data: h };
+      scale = 0.5;
+    }
+    this.groundTex = makeTexture(gl, gp.w, gp.h, { data: gp.data });
+    this.groundScale = scale;
+    // free CPU copies of the static textures
+    for (const pg of atlas.pages) pg.data = null;
+    groundPage.data = null;
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     makeBuffer(gl, mesh.pos);
@@ -249,7 +266,7 @@ export class Renderer {
         const c = camera.project(MAP / 2, MAP / 2, -BASE_DEPTH - 14);
         const t = camera.project(camera.x, camera.y, 0);
         const sx = bw / 2 + (c[0] - Math.floor(t[0])), sy = bh / 2 - (c[1] - Math.floor(t[1]));
-        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * 16 * 0.62, MAP * 8 * 0.62);
+        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62, MAP * (T / 2) * 0.62);
       }
       gl.bindVertexArray(this.emptyVAO);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -266,6 +283,10 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
       gl.uniform1i(u.uAtlas, 0);
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundTex);
+      gl.uniform1i(u.uGround, 4);
+      gl.uniform1f(u.uGroundScale, this.groundScale);
       gl.uniform1f(u.uResLit, env.resLit);
       gl.uniform1f(u.uOffLit, env.offLit);
       gl.uniform1f(u.uLeaves, env.leaves);

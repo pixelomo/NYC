@@ -1,7 +1,7 @@
 // Particle systems: steam, rain, snow, leaves, petals, water spray, fountains, fireworks, fireflies.
 
 import { RNG, clamp, dist2 } from '../core/math.js';
-import { CURB, MAP } from '../world/layout.js';
+import { CURB, MAP, T } from '../world/layout.js';
 import { SF } from '../render/spriteLayer.js';
 import { S } from '../render/sprites.js';
 
@@ -12,9 +12,9 @@ export class Particles {
     this.city = city;
     this.rng = new RNG(1234);
     const A = city.atlas;
-    this.fr = { puff: [A.get('puff1'), A.get('puff2'), A.get('puff3'), A.get('puff4')], dot: A.get('dot'), dot2: A.get('dot2'), leaf: A.get('leaf'), glow: A.get('glow') };
-    this.fr.rain = A.add('rain', 1, 7, (sp) => { for (let y = 0; y < 7; y++) sp.set(0, y, S.C2, 80 + y * 14); }, 0, 6);
-    this.fr.splash = A.add('splash', 3, 2, (sp) => { sp.set(0, 0, S.C2, 128); sp.set(2, 0, S.C2, 128); sp.set(1, 1, S.C2, 150); }, 1, 1);
+    this.fr = { puff: [A.get('puff1'), A.get('puff2'), A.get('puff3'), A.get('puff4')], dot: A.get('dot'), dot2: A.get('dot2'), flake: A.get('flake'), leaf: A.get('leaf'), glow: A.get('glow') };
+    this.fr.rain = A.add('rain', 1, 14, (sp) => { for (let y = 0; y < 14; y++) sp.set(0, y, S.C2, 76 + y * 7); }, 0, 13);
+    this.fr.splash = A.add('splash', 5, 3, (sp) => { sp.set(0, 0, S.C2, 120); sp.set(4, 0, S.C2, 120); sp.set(1, 1, S.C2, 136); sp.set(3, 1, S.C2, 136); sp.set(2, 2, S.C2, 150); sp.set(1, 2, S.C2, 120); sp.set(3, 2, S.C2, 120); }, 2, 2);
     const pal = city.pal;
     this.row = pal.alloc({ [S.C1]: 0xf0f2f6, [S.C2]: 0xd0e4f8, [S.C3]: 0xffffff, [S.C4]: 0xe07a20, [S.C5]: 0xc8402a, [S.C6]: 0xf0c030, [S.C7]: 0xffb8d8, [S.C8]: 0xd8f0ff, [S.C9]: 0x9a9a9a });
     this.fwRows = [0xff4040, 0x40ff80, 0x5080ff, 0xffd040, 0xff70e0, 0xffffff, 0xff9030, 0x60f0ff].map((c) => pal.alloc({ [S.C1]: [c, 128] }));
@@ -48,7 +48,7 @@ export class Particles {
     const cam = this.city.camera;
     const sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2);
     const sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2);
-    const a = sx / 16, b = (sy + z * 16) / 8;
+    const a = sx / T, b = (sy + z * T) / (T / 2);
     const xr = (a + b) / 2, yr = (b - a) / 2;
     const c = Math.cos(cam.angle), s = Math.sin(cam.angle);
     return [MAP / 2 + c * xr + s * yr, MAP / 2 - s * xr + c * yr];
@@ -257,7 +257,7 @@ export class Particles {
       }
     }
     for (const d of this.rain) {
-      if (d.snow) L.push(d.x, d.y, d.z, d.sp > 1.1 ? this.fr.dot2 : this.fr.dot, this.slotRow(S.C3), SF.NOSHADOW | SF.BRIGHT, 1, 0);
+      if (d.snow) L.push(d.x, d.y, d.z, d.sp > 1.1 ? this.fr.flake : this.fr.dot2, this.slotRow(S.C3), SF.NOSHADOW | SF.BRIGHT, 1, 0);
       else L.push(d.x, d.y, d.z, this.fr.rain, this.row, SF.NOSHADOW | SF.BRIGHT, 0.9, 0);
     }
     for (const f of this.fireflies) {

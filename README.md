@@ -97,14 +97,20 @@ URL parameters are handy for jumping straight to a moment, e.g.
 ## How it works
 
 - `src/render/` – a WebGL2 renderer with a true 2:1 pixel projection rendered into a low-res buffer
-  and scaled up with nearest-neighbour filtering. Passes: sun shadow map → world-space light map
+  and scaled up with nearest-neighbour filtering. The art is authored at 32 texels per world unit
+  (one unit is 2 m, so 16 pixels per metre); the default zoom shows one art pixel per CSS pixel. Passes: sun shadow map → world-space light map
   (lamps, shop windows, headlights, fireworks) → scene (MRT colour + glow + depth) → bloom →
   composite with sub-pixel smooth scrolling and depth-based outlines.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
 - `src/render/sprites.js` – palette-indexed sprites: one person template covers every skin, hair
-  and clothing colour; trees swap palettes per season (leaves hide in winter, revealing branches).
+  and clothing colour (26×42-pixel figures with faces, hairstyles, hats, coats, bags and a shaded
+  outline); trees swap palettes per season (leaves hide in winter, revealing branches).
+- `src/render/carLayer.js` – instanced 3D vehicles. Bodies are lofted from cross-sections
+  (chamfered corners, sloped hoods and windshields, cabins that narrow towards the roof) with
+  10-sided wheels, hubcaps, bumpers, mirrors and light bars. Their textures are projected from the
+  palette atlas, so headlights, brake lights, sirens and lit bus windows switch via palette rows.
 - `src/sim/` – environment (clock, sun, seasons, weather), traffic, pedestrians and navigation,
   activities, animals and particles.
 - `src/audio/` – the procedural sound engine.

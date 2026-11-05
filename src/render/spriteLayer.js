@@ -1,6 +1,9 @@
 // Instanced billboard sprites (palette-indexed), with shadow-casting and lamp lighting.
 
 import { createProgram } from '../core/gl.js';
+import { T } from '../world/layout.js';
+
+const TX = T.toFixed(1);
 
 const HEAD = `#version 300 es
 precision highp float;
@@ -31,7 +34,7 @@ void main() {
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
   vInfo = vec4(iA.z, flags, iB.x, 0.0);
-  vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / 16.0);
+  vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
   gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y, 1.0);
 }`;
 
@@ -118,7 +121,7 @@ void main() {
   if (noShadow) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vec3 right = normalize(vec3(-uSunDir.y, uSunDir.x, 0.0) + vec3(1e-4, 0.0, 0.0));
   float w = iRect.z, h = iRect.w;
-  vec3 wp = iPos + right * ((aCorner.x * w - iA.x) / 16.0) + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / 16.0);
+  vec3 wp = iPos + right * ((aCorner.x * w - iA.x) / ${TX}) + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
   vUV = iRect.xy + vec2(aCorner.x * w, aCorner.y * h);
   gl_Position = uShadowVP * vec4(wp, 1.0);
 }`;
