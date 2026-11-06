@@ -314,6 +314,22 @@ export class Traffic {
     // distance to the nearest obstacle ahead along the route and its speed
     const P = car.piece;
     let best = 1e9, bestV = 0;
+    // things off the lanes (the player on foot or driving, chasing police, abandoned cars): brake
+    // for them, but after a long stand-off creep past a car that isn't going anywhere
+    const obs = this.city.player?.obstacles;
+    if (obs && obs.length) {
+      const hx = Math.cos(car.h), hy = Math.sin(car.h);
+      for (const o of obs) {
+        if (o.car === car) continue;
+        const dx = o.x - car.x, dy = o.y - car.y;
+        const ahead = dx * hx + dy * hy;
+        if (ahead <= 0 || ahead > 14) continue;
+        if (Math.abs(dx * hy - dy * hx) > 0.9 + o.r * 0.6) continue;
+        if (o.v < 0.3 && car.wait > 6) continue;
+        const g = ahead - car.len / 2 - o.r;
+        if (g < best) { best = Math.max(0, g); bestV = 0; }
+      }
+    }
     for (const o of P.cars) {
       if (o === car || o.state === 'parked') continue;
       const ds = o.s - car.s;
@@ -399,17 +415,17 @@ export class Traffic {
     const env = this.city.env;
     const dark = env.darkness > 0.45;
     // population control
-    const moving = this.cars.filter((c) => c.state !== 'parked' && !c.special && c.type !== 'bus').length;
+    const moving = this.cars.filter((c) => c.state !== 'parked' && !c.free && !c.special && c.type !== 'bus').length;
     const target = this.targetCount(env);
     if (moving < target && this.rng.chance(dt * 1.2)) this.spawnMoving(false) || (this.rng.chance(0.2) && this.spawnMoving(true));
     this.updateSpecials(dt, env);
     for (const car of [...this.cars]) {
-      if (car.state === 'parked') continue;
+      if (car.state === 'parked' || car.free) continue; // free cars are moved by the player system
       this.stepCar(car, dt, moving > target + 3);
     }
     // lights/palette states
     for (const car of this.cars) {
-      car.lights = car.state !== 'parked' && dark;
+      car.lights = car.state !== 'parked' && car.state !== 'abandoned' && dark;
     }
   }
   updateSpecials(dt, env) {

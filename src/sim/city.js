@@ -11,6 +11,7 @@ import { Activities } from './activities.js';
 import { Animals } from './animals.js';
 import { Particles } from './particles.js';
 import { Subway } from './subway.js';
+import { Player } from './player.js';
 import { T } from '../world/layout.js';
 
 export class City {
@@ -47,6 +48,8 @@ export class City {
     this.addSystem(this.particles);
     this.subway = new Subway(this);
     this.addSystem(this.subway);
+    this.player = new Player(this);
+    this.addSystem(this.player);
     this.traffic.init();
     this.people.init();
   }

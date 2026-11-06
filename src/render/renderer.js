@@ -250,8 +250,9 @@ export class Renderer {
     const ditherOff = [(((tsx - bw / 2) % 4) + 4) % 4, (((tsy + bh / 2) % 4) + 4) % 4];
     // world xy per art pixel along the screen's horizontal axis (sprite billboards lie in this plane)
     const ca = Math.cos(camera.angle), sa = Math.sin(camera.angle);
-    const right = [(ca - sa) / (2 * T), -(sa + ca) / (2 * T)];
-    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
+    const right = camera.screenRight();
+    void ca; void sa;
+    const ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right, squash: camera.squash, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl };
     const vis = env.vis >>> 0;
 
     // 1. Shadow map
@@ -321,7 +322,8 @@ export class Renderer {
         // project the map centre well below the slab to place the drop shadow
         const c = camera.project(MAP / 2, MAP / 2, -BASE_DEPTH - 14);
         const sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
-        gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62 * k, MAP * (T / 2) * 0.62 * k);
+        if (camera.bird) gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.58 * k, MAP * T * 0.58 * k);
+        else gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62 * k, MAP * (T / 2) * 0.62 * k);
       }
       gl.bindVertexArray(this.emptyVAO);
       gl.drawArrays(gl.TRIANGLES, 0, 3);

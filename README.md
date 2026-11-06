@@ -25,7 +25,8 @@ npm run build
 - **6×6 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab: a big
   **central park** fills the middle four blocks, twelve mixed blocks surround it, and an outer
   ring of twenty more — mostly red-brick apartment houses, plus shopping streets and a mini
-  **Times Square**. Pick a place from the **GO TO** menu to glide there. The slab's
+  **Times Square**. Pick a place from the **GO TO** menu to glide there, or press **V** for a
+  bird's-eye view (top-down, tilted just enough to show the building fronts). The slab's
   cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver
   trains loop around the city and stop at a tiled station with passengers waiting on the platform.
   - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
@@ -93,6 +94,27 @@ screen: city hum, wind, rain and thunder, birdsong, crickets, car horns, sirens,
 the ice-cream truck, ball dribbles/rim/swish, snowballs, pigeon coos and wing flaps, barking dogs,
 geese, subway rumble, crosswalk chirps and fireworks. Click **♪** to turn sound on.
 
+## Play mode
+
+Press **P** (or **PLAY** in the toolbar) to take over whoever you are following, or the person
+nearest the middle of the screen; the camera switches to the bird's-eye view and follows you.
+
+- Walk with **WASD** / arrows (relative to the screen), **Shift** to run. Buildings, walls,
+  fences and cars are solid.
+- **F** next to a car gets you in: a parked car (it may set off its alarm) or a moving one — the
+  driver gets out and runs off shouting. **F** again gets you out; the car stays where you left it.
+- Drive with **W/S** to accelerate and brake/reverse, **A/D** to steer, **Space** for the
+  handbrake. You can mount the sidewalk; people dive out of the way (or land on their backs and
+  get up grumbling), parked cars get shoved, and traffic stops for you.
+- Crimes raise the **HEAT** (stealing an occupied car, a police car, alarms the police notice,
+  hit-and-runs, ramming patrol cars, speeding past them). Police cars leave their patrols or arrive
+  from out of sight with sirens wailing and steer after you along the streets. Let them box you in
+  and you're **BUSTED** — released across town with a clean slate. Stay well clear of them for a
+  while and the heat cools off.
+- **Esc** (or **P**) hands the person back to their day.
+
+There are no weapons: the city just gets annoyed with you.
+
 ## Controls
 
 | Input | Action |
@@ -103,6 +125,8 @@ geese, subway rumble, crosswalk chirps and fireworks. Click **♪** to turn soun
 | Click a person | Follow them (see their name and what they're thinking) |
 | `WASD` / arrows | Pan |
 | GO TO menu | Glide to the park, the lake, Times Square, the court… |
+| `V` | Bird's-eye / isometric view |
+| `P` | Play as someone (see Play mode) |
 | `Space` | Pause / resume time |
 | `T` | Time speed (1×, 3×, 10×, 30×) |
 | `1`–`4` / `0` | Pick a season / back to daily seasons |

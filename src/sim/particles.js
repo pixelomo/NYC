@@ -48,10 +48,7 @@ export class Particles {
     const cam = this.city.camera;
     const sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2);
     const sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2);
-    const a = sx / T, b = (sy + z * T) / (T / 2);
-    const xr = (a + b) / 2, yr = (b - a) / 2;
-    const c = Math.cos(cam.angle), s = Math.sin(cam.angle);
-    return [MAP / 2 + c * xr + s * yr, MAP / 2 - s * xr + c * yr];
+    return cam.artToWorld(sx, sy, z);
   }
   groundZ(x, y) {
     const W = this.city.world;

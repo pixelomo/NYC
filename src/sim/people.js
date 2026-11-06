@@ -527,6 +527,39 @@ export class People {
         p.anim = 'idle';
         if (p.timer <= 0) { p.plan = [{ t: 'go', node: this.nearestOf(this.poi().subways, p.x, p.y) }, { t: 'enter' }]; this.nextStep(p); }
         break;
+      case 'player':
+        // moved by the player system
+        break;
+      case 'dodge': {
+        // diving out of the way of a car, then carrying on
+        const d = p.dodge, C = this.city.player?.coll;
+        d.t -= dt;
+        const nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
+        if (!C || C.free(nx, ny, 0.18)) { p.x = nx; p.y = ny; p.dist += 3.4 * dt; }
+        p.dx = d.x; p.dy = d.y; p.anim = 'run'; p.animFrame = null;
+        if (d.t <= 0) { p.state = d.back === 'flee' ? 'flee' : d.back === 'walk' && p.path ? 'walk' : 'idle'; p.timer = 0.3; p.dodge = null; }
+        break;
+      }
+      case 'knocked':
+        // knocked flat by a car: lie there a moment, then get up grumbling and carry on
+        p.timer -= dt;
+        p.anim = 'lie'; p.animFrame = 0;
+        if (p.timer <= 0) { p.anim = 'idle'; p.animFrame = null; p.node = this.nearestOf(this.nav.nodes, p.x, p.y); p.state = 'idle'; p.timer = 0.6; if (!p.plan.length) p.plan = [{ t: 'go', node: p.home || this.pickHome(), thought: 'What a city...' }, { t: 'enter' }]; }
+        break;
+      case 'flee': {
+        // a driver who has just had their car taken: run away from it, then head home
+        const C = this.city.player?.coll, f = p.fleeFrom;
+        p.timer -= dt;
+        let ax = p.x - f.x, ay = p.y - f.y;
+        const l = Math.hypot(ax, ay) || 1; ax /= l; ay /= l;
+        const nx = p.x + ax * 2.4 * dt, ny = p.y + ay * 2.4 * dt;
+        if (!C || C.free(nx, ny, 0.18)) { p.x = nx; p.y = ny; }
+        else if (C.free(p.x + ay * 2.4 * dt, p.y - ax * 2.4 * dt, 0.18)) { p.x += ay * 2.4 * dt; p.y -= ax * 2.4 * dt; }
+        p.dx = ax; p.dy = ay; p.anim = 'run'; p.dist += 2.4 * dt; p.animFrame = null;
+        if (C) p.z += (C.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 12);
+        if (p.timer <= 0) { p.node = this.nearestOf(this.nav.nodes, p.x, p.y); p.state = 'idle'; p.timer = 0.2; }
+        break;
+      }
     }
     if (p.dog) this.city.animals?.followOwner(p.dog, p, dt);
   }

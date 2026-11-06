@@ -52,6 +52,7 @@ export class UI {
     // title
     const title = this.h('div', 'title', 'PIXEL<span>NYC</span>');
     R.append(title);
+    this.titleEl = title;
     // top right buttons
     const tr = this.h('div', 'topright');
     this.soundBtn = this.btn('♪ OFF', 'Sound on/off (M)', () => this.toggleSound());
@@ -109,10 +110,12 @@ export class UI {
     this.placeSel.addEventListener('pointerdown', (e) => e.stopPropagation());
     g3.append(this.placeSel);
     const g4 = this.h('div', 'group');
-    g4.append(this.btn('⟲', 'Rotate left (Q)', () => this.rotate(-1)), this.btn('⟳', 'Rotate right (E)', () => this.rotate(1)),
+    this.viewBtn = this.btn('◩', "Bird's-eye / isometric view (V)", () => this.toggleView());
+    g4.append(this.viewBtn, this.btn('⟲', 'Rotate left (Q)', () => this.rotate(-1)), this.btn('⟳', 'Rotate right (E)', () => this.rotate(1)),
       this.btn('−', 'Zoom out (-)', () => this.zoom(-1)), this.btn('+', 'Zoom in (+)', () => this.zoom(1)));
     const g5 = this.h('div', 'group');
-    g5.append(this.btn('👁', 'Follow a random person (F)', () => this.followRandom()), this.btn('✸', 'Fireworks! (X)', () => this.fireworks()));
+    this.playAsBtn = this.btn('PLAY', 'Take control of a person: walk, borrow cars, outrun the police (P)', () => this.togglePlay(), 'small');
+    g5.append(this.playAsBtn, this.btn('👁', 'Follow a random person (F)', () => this.followRandom()), this.btn('✸', 'Fireworks! (X)', () => this.fireworks()));
     bar.append(g1, g2, g3, g4, g5);
     R.append(bar);
     // follow card
@@ -121,12 +124,23 @@ export class UI {
     // toast
     this.toastEl = this.h('div', 'toast hidden');
     R.append(this.toastEl);
+    // play-mode HUD: who you are, what you're in, the heat, prompts and news
+    this.hudEl = this.h('div', 'panel playhud hidden', `
+      <div class="ph-row"><span class="ph-name"></span><span class="ph-heat"><span class="ph-label">HEAT</span>${'<i></i>'.repeat(5)}</span></div>
+      <div class="ph-status"></div><div class="ph-prompt"></div>`);
+    R.append(this.hudEl);
+    this.hudMsg = this.h('div', 'playmsg hidden');
+    R.append(this.hudMsg);
+    this.hudBig = this.h('div', 'playbig hidden');
+    R.append(this.hudBig);
     // help
     this.help = this.h('div', 'panel help hidden', `
       <div class="htitle">PIXEL NYC — CONTROLS</div>
       <div class="hrow"><b>Drag</b> pan the city</div>
       <div class="hrow"><b>Wheel / pinch / + −</b> zoom</div>
       <div class="hrow"><b>Q / E</b> rotate the view</div>
+      <div class="hrow"><b>V</b> bird's-eye / isometric view</div>
+      <div class="hrow"><b>P</b> play as someone: <b>WASD</b> move, <b>Shift</b> run, <b>F</b> get in/out of cars, <b>Space</b> handbrake, <b>Esc</b> quit</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
       <div class="hrow"><b>GO TO menu</b> glide to a place</div>
@@ -169,6 +183,42 @@ export class UI {
     this.app.city.activities?.seed();
   }
   rotate(d) { this.app.camera.rotate(d); }
+  togglePlay() {
+    const pl = this.app.city.player, app = this.app;
+    if (pl.active) {
+      pl.stop();
+      this.playAsBtn.classList.remove('on');
+      this.hudEl.classList.add('hidden');
+      this.toast('Back to watching the city');
+      return;
+    }
+    // the person being followed, or whoever is nearest the middle of the screen
+    let p = this.following;
+    if (!p) {
+      const cam = app.camera;
+      let bd = Infinity;
+      for (const q of app.city.people.list) {
+        if (q.alpha < 0.9 || q.state === 'vanish' || q.state === 'appear' || q.z < 0) continue;
+        const d = (q.x - cam.x) ** 2 + (q.y - cam.y) ** 2;
+        if (d < bd) { bd = d; p = q; }
+      }
+    }
+    if (!p) return;
+    this.unfollow();
+    if (!pl.start(p)) return;
+    this.playAsBtn.classList.add('on');
+    this.hudEl.classList.remove('hidden');
+    if (app.camera.mode !== 'bird') this.toggleView('bird');
+    const z = this.zoomLevels.find((v) => v >= 3 * (window.devicePixelRatio || 1) - 0.01) || this.zoomLevels[this.zoomLevels.length - 1];
+    app.camera.zoomTo(z);
+    this.toast('WASD/arrows move · SHIFT run · F get in/out · SPACE handbrake · ESC quit');
+  }
+  toggleView(mode) {
+    const cam = this.app.camera;
+    cam.mode = mode ?? (cam.mode === 'bird' ? 'iso' : 'bird');
+    this.viewBtn.classList.toggle('on', cam.mode === 'bird');
+    this.toast(cam.mode === 'bird' ? "Bird's-eye view" : 'Isometric view');
+  }
   zoom(d) {
     const cam = this.app.camera;
     const L = this.zoomLevels;
@@ -206,7 +256,26 @@ export class UI {
     this.toastT = 3.5;
   }
   // ---- per frame ------------------------------------------------------------------
+  updateHud() {
+    const h = this.app.city.player.hud();
+    if (!h) { if (!this.hudEl.classList.contains('hidden')) this.hudEl.classList.add('hidden'); this.hudMsg.classList.add('hidden'); this.hudBig.classList.add('hidden'); this.playAsBtn?.classList.remove('on'); this.titleEl.classList.remove('hidden'); this.root.classList.remove('playing'); return; }
+    this.hudEl.classList.remove('hidden');
+    this.titleEl.classList.add('hidden');
+    this.root.classList.add('playing');
+    this.hudEl.querySelector('.ph-name').textContent = h.name.toUpperCase();
+    this.hudEl.querySelector('.ph-status').textContent = h.status;
+    this.hudEl.querySelector('.ph-prompt').textContent = h.prompt;
+    const lit = Math.ceil(h.heat - 1e-6), flash = Math.floor(performance.now() / 250) % 2;
+    this.hudEl.querySelectorAll('.ph-heat i').forEach((el, i) => { el.className = i < lit ? (flash ^ (i & 1) ? 'red' : 'blue') : ''; });
+    const small = h.msgs.filter((m) => !m.big).map((m) => m.text);
+    this.hudMsg.textContent = small.join('  ·  ');
+    this.hudMsg.classList.toggle('hidden', !small.length);
+    const big = h.msgs.find((m) => m.big);
+    this.hudBig.textContent = big ? big.text : '';
+    this.hudBig.classList.toggle('hidden', !big);
+  }
   update(dt) {
+    this.updateHud();
     const env = this.app.env;
     this.timeEl.textContent = env.timeString();
     const S = SEASONS[env.season];
@@ -291,6 +360,14 @@ export class UI {
       app.audio?.unlock();
       const k = e.key.toLowerCase();
       keys.add(k);
+      const pl = app.city.player;
+      if (pl && pl.active) {
+        // play mode: movement keys are read every frame; these act on press
+        if (k === 'f' || k === 'enter') { if (!e.repeat) pl.action(); e.preventDefault(); return; }
+        if (k === ' ' || k.startsWith('arrow')) { e.preventDefault(); return; }
+        if (k === 'escape' || k === 'p') { if (!e.repeat) this.togglePlay(); return; }
+        if ('wasd'.includes(k) && k.length === 1) return;
+      }
       if (k === 'q') this.rotate(-1);
       else if (k === 'e') this.rotate(1);
       else if (k === '+' || k === '=') this.zoom(1);
@@ -305,12 +382,15 @@ export class UI {
       else if (k === 'h' || k === '?') this.toggleHelp();
       else if (k === 'x') this.fireworks();
       else if (k === 'n') { app.env.hour = (app.env.hour + 3) % 24; }
+      else if (k === 'v') this.toggleView();
+      else if (k === 'p') this.togglePlay();
     });
     window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
     this.keys = keys;
   }
   click(cx, cy) {
     const app = this.app;
+    if (app.city.player.active) return;
     const p = app.city.people.pick(cx, cy, app.canvas.clientWidth, app.canvas.clientHeight);
     if (p) this.follow(p);
     else if (this.following) this.unfollow();
@@ -323,6 +403,11 @@ export class UI {
     if (k.has('d') || k.has('arrowright')) sx += 1;
     if (k.has('w') || k.has('arrowup')) sy -= 1;
     if (k.has('s') || k.has('arrowdown')) sy += 1;
+    const pl = this.app.city.player;
+    if (pl && pl.active) {
+      pl.input.x = sx; pl.input.y = sy; pl.input.run = k.has('shift'); pl.input.brake = k.has(' ');
+      return;
+    }
     if (!sx && !sy) return;
     if (this.app.camera.follow) this.unfollow();
     this.app.camera.glide = null;

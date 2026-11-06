@@ -40,10 +40,10 @@
       format = gl.RGBA,
       type = gl.UNSIGNED_BYTE,
       filter = gl.NEAREST,
-      wrap = gl.CLAMP_TO_EDGE,
+      wrap: wrap2 = gl.CLAMP_TO_EDGE,
       data = null
     } = opts, t = gl.createTexture();
-    return gl.bindTexture(gl.TEXTURE_2D, t), gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1), gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, data), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap), t.w = w, t.h = h, t;
+    return gl.bindTexture(gl.TEXTURE_2D, t), gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1), gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, data), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrap2), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrap2), t.w = w, t.h = h, t;
   }
   function setFilter(gl, tex, filter) {
     gl.bindTexture(gl.TEXTURE_2D, tex), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, filter), gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, filter);
@@ -746,7 +746,7 @@ void main() {
       scale < 1 && (k = Math.min(1, scale * 2, 4096 * scale / (canvasW + 8), 4096 * scale / (canvasH + 8)));
       let bs = scale / k, linear = bs < 0.999, bw = Math.ceil(canvasW / bs) + 4, bh = Math.ceil(canvasH / bs) + 4;
       bw += bw & 1, bh += bh & 1, bw = Math.min(bw, 4096), bh = Math.min(bh, 4096), this._ensureTargets(bw, bh);
-      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir, { camera, w: bw / k, h: bh / k }), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
+      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir, { camera, w: bw / k, h: bh / k }), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = camera.screenRight(), ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, squash: camera.squash, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
@@ -762,7 +762,7 @@ void main() {
         gl.useProgram(p2.program), gl.uniform3fv(p2.u.uTop, env.skyTop), gl.uniform3fv(p2.u.uBottom, env.skyBottom), gl.uniform1f(p2.u.uStars, env.stars), gl.uniform1f(p2.u.uTime, time), gl.uniform2f(p2.u.uBuf, bw, bh), gl.uniform1f(p2.u.uRotA, camera.angle), gl.uniform3fv(p2.u.uMoon, env.moon);
         {
           let c = camera.project(171 / 2, 171 / 2, -21), sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
-          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 171 * 32 * 0.62 * k, 171 * (32 / 2) * 0.62 * k);
+          camera.bird ? gl.uniform4f(p2.u.uShadowBlob, sx, sy, 171 * 32 * 0.58 * k, 171 * 32 * 0.58 * k) : gl.uniform4f(p2.u.uShadowBlob, sx, sy, 171 * 32 * 0.62 * k, 171 * (32 / 2) * 0.62 * k);
         }
         gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
@@ -786,9 +786,24 @@ void main() {
   };
 
   // src/render/camera.js
-  var HX = 32, HY = 32 / 2, HZ = 32, CX = 171 / 2, CY = 171 / 2, DEPTH_RANGE = 200, Camera = class {
+  var HX = 32, HY = 32 / 2, HZ = 32, BS = 32, BZ = 32 / 2, CX = 171 / 2, CY = 171 / 2, DEPTH_RANGE = 200, Camera = class {
     constructor() {
-      this.x = CX, this.y = CY, this.angle = 0, this.rot = 0, this.rotFrom = 0, this.rotT = 1, this.scale = 2, this.scaleFrom = 2, this.scaleTo = 2, this.scaleT = 1, this.follow = null, this.vx = 0, this.vy = 0;
+      this.x = CX, this.y = CY, this.angle = 0, this.rot = 0, this.rotFrom = 0, this.rotT = 1, this.scale = 2, this.scaleFrom = 2, this.scaleTo = 2, this.scaleT = 1, this.follow = null, this.vx = 0, this.vy = 0, this.mode = "iso";
+    }
+    get bird() {
+      return this.mode === "bird";
+    }
+    // sprites are drawn this much shorter than their art (bird's-eye squashes heights)
+    get squash() {
+      return this.mode === "bird" ? BZ / 32 : 1;
+    }
+    _rot(x, y) {
+      let c = Math.cos(this.angle), s = Math.sin(this.angle), dx = x - CX, dy = y - CY;
+      return [c * dx - s * dy, s * dx + c * dy];
+    }
+    _unrot(xr, yr) {
+      let c = Math.cos(this.angle), s = Math.sin(this.angle);
+      return [CX + c * xr + s * yr, CY - s * xr + c * yr];
     }
     get settled() {
       return this.rotT >= 1 && this.scaleT >= 1;
@@ -824,33 +839,44 @@ void main() {
       }
       this.x = clamp(this.x, -10, 181), this.y = clamp(this.y, -10, 181);
     }
-    // world -> art pixels (relative to map centre). Returns [sx, sy, depth]
+    // world -> art pixels (relative to map centre). Returns [sx, sy, depth] (smaller depth = nearer)
     project(x, y, z) {
-      let c = Math.cos(this.angle), s = Math.sin(this.angle), dx = x - CX, dy = y - CY, xr = c * dx - s * dy, yr = s * dx + c * dy;
-      return [(xr - yr) * HX, (xr + yr) * HY - z * HZ, -(xr + yr)];
+      let [xr, yr] = this._rot(x, y);
+      return this.mode === "bird" ? [xr * BS, yr * BS - z * BZ, -yr] : [(xr - yr) * HX, (xr + yr) * HY - z * HZ, -(xr + yr)];
     }
     // screen-space direction (art px) of a world direction
     screenDir(nx, ny) {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), xr = c * nx - s * ny, yr = s * nx + c * ny;
-      return [(xr - yr) * HX, (xr + yr) * HY];
+      return this.mode === "bird" ? [xr * BS, yr * BS] : [(xr - yr) * HX, (xr + yr) * HY];
     }
     screenDirX(nx, ny) {
       return this.screenDir(nx, ny)[0];
     }
+    // world xy per art pixel along the screen's horizontal axis (the plane sprites stand in)
+    screenRight() {
+      let c = Math.cos(this.angle), s = Math.sin(this.angle);
+      return this.mode === "bird" ? [c / BS, -s / BS] : [(c - s) / (2 * HX), -(s + c) / (2 * HX)];
+    }
+    // art pixels at height z -> rotated ground coordinates
+    _artToRot(sx, sy, z) {
+      if (this.mode === "bird") return [sx / BS, (sy + z * BZ) / BS];
+      let a = sx / HX, b = (sy + z * HZ) / HY;
+      return [(a + b) / 2, (b - a) / 2];
+    }
     // art-pixel screen delta -> world delta on the ground plane
     unprojectDelta(dsx, dsy) {
-      let a = dsx / HX, b = dsy / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
+      let [xr, yr] = this._artToRot(dsx, dsy, 0), c = Math.cos(this.angle), s = Math.sin(this.angle);
       return [c * xr + s * yr, -s * xr + c * yr];
     }
     // screen pixel (CSS) -> world on plane z
     screenToWorld(px, py, viewW, viewH, z = 0) {
-      let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), sx = t[0] + (px - viewW / 2) / scaleCss, sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ, a = sx / HX, b = sy / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
-      return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+      let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), sx = t[0] + (px - viewW / 2) / scaleCss, sy = t[1] + (py - viewH / 2) / scaleCss;
+      return this.artToWorld(sx, sy, z);
     }
     // art pixels (as returned by project) at height z -> world x, y
     artToWorld(sx, sy, z) {
-      let a = sx / HX, b = (sy + z * HZ) / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
-      return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+      let [xr, yr] = this._artToRot(sx, sy, z);
+      return this._unrot(xr, yr);
     }
     worldToScreen(x, y, z, viewW, viewH) {
       let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), p = this.project(x, y, z);
@@ -858,13 +884,17 @@ void main() {
     }
     // camera view direction in world space (pointing toward the camera)
     viewDir() {
-      let c = Math.cos(this.angle), s = Math.sin(this.angle), xr = 1, yr = 1, wx = c * xr + s * yr, wy = -s * xr + c * yr, l = Math.hypot(wx, wy, 1);
-      return [wx / l, wy / l, 1 / l];
+      let c = Math.cos(this.angle), s = Math.sin(this.angle), [xr, yr, zr] = this.mode === "bird" ? [0, BZ, BS] : [1, 1, 1], wx = c * xr + s * yr, wy = -s * xr + c * yr, l = Math.hypot(wx, wy, zr);
+      return [wx / l, wy / l, zr / l];
     }
     // Build view-projection for a buffer of bw x bh pixels holding k buffer pixels per art pixel
     // (k = 1 normally; below 1 when zoomed far out, so the buffer never grows past ~2x the canvas).
     matrices(bw, bh, k = 1) {
       let c = Math.cos(this.angle), s = Math.sin(this.angle), t0 = this.project(this.x, this.y, 0), t = [t0[0] * k, t0[1] * k], tsx = Math.floor(t[0]), tsy = Math.floor(t[1]), fx = t[0] - tsx, fy = t[1] - tsy, HXk = HX * k, HYk = HY * k, HZk = HZ * k, D = DEPTH_RANGE, m = new Float32Array(16), kx = 2 / bw, ky = 2 / bh;
+      if (this.mode === "bird") {
+        let BSk = BS * k, BZk = BZ * k;
+        return m[0] = BSk * c * kx, m[4] = -BSk * s * kx, m[8] = 0, m[12] = (BSk * (-c * CX + s * CY) - tsx) * kx, m[1] = -BSk * s * ky, m[5] = -BSk * c * ky, m[9] = BZk * ky, m[13] = (BSk * (s * CX + c * CY) + tsy) * ky, m[2] = -s / D, m[6] = -c / D, m[10] = 0, m[14] = (s * CX + c * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
+      }
       return m[0] = HXk * (c - s) * kx, m[4] = -HXk * (s + c) * kx, m[8] = 0, m[12] = (HXk * ((c - s) * -CX - (s + c) * -CY) - tsx) * kx, m[1] = -HYk * (c + s) * ky, m[5] = -HYk * (c - s) * ky, m[9] = HZk * ky, m[13] = -(HYk * ((c + s) * -CX + (c - s) * -CY) - tsy) * ky, m[2] = -(c + s) / D, m[6] = -(c - s) / D, m[10] = 0, m[14] = ((c + s) * CX + (c - s) * CY) / D, m[3] = 0, m[7] = 0, m[11] = 0, m[15] = 1, { viewProj: m, frac: [fx, fy], tsx, tsy };
     }
   };
@@ -2503,6 +2533,7 @@ void main() {
     }
   };
   function markHeight(world, x0, y0, x1, y1, h) {
+    world.solids && h > 0.7 && world.solids.push([x0, y0, x1, y1, h]);
     for (let y = Math.max(0, Math.floor(y0)); y < Math.min(171, Math.ceil(y1)); y++)
       for (let x = Math.max(0, Math.floor(x0)); x < Math.min(171, Math.ceil(x1)); x++) {
         let i = y * 171 + x;
@@ -3469,10 +3500,12 @@ void main() {
   }
   function parkWall(C, x0, y0, x1, y1) {
     let P = propTex(C);
-    C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + 0.7, { px: P.stoneWall, nx: P.stoneWall, py: P.stoneWall, ny: P.stoneWall, pz: { t: P.stoneWallTop, world: !0 } });
+    C.world.solids.push([x0, y0, x1, y1, 0.125 + 0.7]), C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + 0.7, { px: P.stoneWall, nx: P.stoneWall, py: P.stoneWall, ny: P.stoneWall, pz: { t: P.stoneWallTop, world: !0 } });
   }
   function chainFence(C, xa, ya, xb, yb, h = 2.5, low = !1) {
-    let P = propTex(C), tex = low ? P.chainLow : P.chain, z = 0.125;
+    let P = propTex(C);
+    C.world.solids.push([Math.min(xa, xb) - 0.06, Math.min(ya, yb) - 0.06, Math.max(xa, xb) + 0.06, Math.max(ya, yb) + 0.06, 0.125 + h]);
+    let tex = low ? P.chainLow : P.chain, z = 0.125;
     C.mb.vquad(xa, ya, xb, yb, z, z + h, tex, { mat: MAT.FLAT });
     let len = Math.hypot(xb - xa, yb - ya), n = Math.max(1, Math.round(len / 2));
     for (let k = 0; k <= n; k++) {
@@ -4994,6 +5027,7 @@ void main() {
       grates: [],
       canopies: [],
       extraNets: [],
+      solids: [],
       blocks: []
     };
     for (let by = 0; by < 6; by++)
@@ -6185,6 +6219,7 @@ uniform mat4 uViewProj;
 uniform vec2 uBuf;
 uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
 uniform float uK;    // buffer pixels per art pixel (below 1 when zoomed far out)
+uniform float uSquash; // vertical scale of sprites on screen (bird's-eye shows heights at half size)
 out vec2 vUV;
 flat out vec4 vInfo;
 out vec3 vWorld;   // on the vertical axis through the anchor
@@ -6196,7 +6231,7 @@ void main() {
   bool flip = mod(flags, 2.0) >= 1.0;
   float w = iRect.z, h = iRect.w;
   float ax = flip ? w - iA.x : iA.x;
-  vec2 off = vec2(aCorner.x * w - ax, iA.y - aCorner.y * h) * uK;
+  vec2 off = vec2(aCorner.x * w - ax, (iA.y - aCorner.y * h) * uSquash) * uK;
   vec2 sp = px + off;
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
@@ -6338,7 +6373,7 @@ void main() {
     draw(ctx) {
       if (!this.count) return;
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uShadowKS, ctx.shadowKS), gl.uniform2fv(u.uRight, ctx.right), gl.uniform1f(u.uK, ctx.k), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.activeTexture(gl.TEXTURE5), gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS), gl.uniform1i(u.uShadowS, 5), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uShadowKS, ctx.shadowKS), gl.uniform2fv(u.uRight, ctx.right), gl.uniform1f(u.uK, ctx.k), gl.uniform1f(u.uSquash, ctx.squash ?? 1), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.activeTexture(gl.TEXTURE5), gl.bindTexture(gl.TEXTURE_2D, r.shadowTexS), gl.uniform1i(u.uShadowS, 5), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.count);
     }
   };
 
@@ -7293,12 +7328,12 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return r.weighted(opts);
     }
     makeCar(type, link, s, opts = {}) {
-      let T2 = CAR_TYPES[type], car = {
+      let T3 = CAR_TYPES[type], car = {
         id: this.nextId++,
         type,
-        len: T2.len,
-        wid: T2.wid,
-        v0: T2.speed * this.rng.range(0.9, 1.08),
+        len: T3.len,
+        wid: T3.wid,
+        v0: T3.speed * this.rng.range(0.9, 1.08),
         v: 0,
         piece: link,
         s,
@@ -7413,7 +7448,17 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       car.x = x + lx, car.y = y + ly, car.h = h, (car.state === "pullout" || car.state === "pullin") && (car.h += (car.lat - car.latTarget) * 0.25 * (car.state === "pullout" ? -1 : 1));
     }
     leaderGap(car) {
-      let P = car.piece, best = 1e9, bestV = 0;
+      let P = car.piece, best = 1e9, bestV = 0, obs = this.city.player?.obstacles;
+      if (obs && obs.length) {
+        let hx = Math.cos(car.h), hy = Math.sin(car.h);
+        for (let o of obs) {
+          if (o.car === car) continue;
+          let dx = o.x - car.x, dy = o.y - car.y, ahead = dx * hx + dy * hy;
+          if (ahead <= 0 || ahead > 14 || Math.abs(dx * hy - dy * hx) > 0.9 + o.r * 0.6 || o.v < 0.3 && car.wait > 6) continue;
+          let g = ahead - car.len / 2 - o.r;
+          g < best && (best = Math.max(0, g), bestV = 0);
+        }
+      }
       for (let o of P.cars) {
         if (o === car || o.state === "parked") continue;
         let ds = o.s - car.s;
@@ -7472,12 +7517,12 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     update(dt) {
       this.clock += dt;
-      let env = this.city.env, dark = env.darkness > 0.45, moving = this.cars.filter((c) => c.state !== "parked" && !c.special && c.type !== "bus").length, target = this.targetCount(env);
+      let env = this.city.env, dark = env.darkness > 0.45, moving = this.cars.filter((c) => c.state !== "parked" && !c.free && !c.special && c.type !== "bus").length, target = this.targetCount(env);
       moving < target && this.rng.chance(dt * 1.2) && (this.spawnMoving(!1) || this.rng.chance(0.2) && this.spawnMoving(!0)), this.updateSpecials(dt, env);
       for (let car of [...this.cars])
-        car.state !== "parked" && this.stepCar(car, dt, moving > target + 3);
+        car.state === "parked" || car.free || this.stepCar(car, dt, moving > target + 3);
       for (let car of this.cars)
-        car.lights = car.state !== "parked" && dark;
+        car.lights = car.state !== "parked" && car.state !== "abandoned" && dark;
     }
     updateSpecials(dt, env) {
       let sp = this.special, W = this.city.world, h = env.hour;
@@ -7534,7 +7579,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         rem > -0.3 && rem + S0 < gap && (gap = rem + S0, lv = 0, rem < 0.4 && car.v < 0.2 && (car.stopDone = 0, car.dwell = 35, this.city.onIceCreamStop?.(car)));
       }
       car.stopDone === 0 && car.dwell != null && (car.dwell -= dt, gap = 0, lv = 0, car.dwell <= 0 && (car.dwell = null, car.stopDone = 1, this.city.onIceCreamLeave?.(car))), car.leftStop && car.type === "bus" && (gap = Math.max(gap, 0));
-      let a = 2.6, b = 4, s0 = 0.9, T2 = 0.9, v = car.v, sStar = s0 + v * T2 + v * (v - lv) / (2 * Math.sqrt(a * b)), acc = a * (1 - Math.pow(v / vMax, 4) - Math.pow(Math.max(0, sStar) / Math.max(0.05, gap), 2));
+      let a = 2.6, b = 4, s0 = 0.9, T3 = 0.9, v = car.v, sStar = s0 + v * T3 + v * (v - lv) / (2 * Math.sqrt(a * b)), acc = a * (1 - Math.pow(v / vMax, 4) - Math.pow(Math.max(0, sStar) / Math.max(0.05, gap), 2));
       if (acc = clamp(acc, -9, a), car.v = Math.max(0, v + acc * dt), gap < 0.05 && (car.v = 0), car.brake = acc < -0.6 || car.v < 0.1 && gap < 3, car.v < 0.1 ? (car.wait += dt, P.kind === "link" && car.next && car.wait > 1.2 && gap > 1.5 && gap < 4 && lv < 0.1 && this.rng.chance(dt * 0.12) && car.honked <= 0 && (this.honks.push(car), car.honked = 8)) : car.wait = 0, car.honked -= dt, car.s += car.v * dt, car.state === "pullout" || car.state === "pullin") {
         let k = Math.min(1, dt * (car.state === "pullout" ? 0.9 : 1.1) * Math.max(0.6, car.v));
         if (car.lat += (car.latTarget - car.lat) * k, car.state === "pullout" && Math.abs(car.lat) < 0.05 && (car.lat = 0, car.state = "drive"), car.state === "pullin" && car.s >= car.spot.s - 0.05) {
@@ -8240,6 +8285,27 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         case "busWait":
           p.timer -= dt, p.anim = "idle", p.timer <= 0 && (p.plan = [{ t: "go", node: this.nearestOf(this.poi().subways, p.x, p.y) }, { t: "enter" }], this.nextStep(p));
           break;
+        case "player":
+          break;
+        case "dodge": {
+          let d = p.dodge, C = this.city.player?.coll;
+          d.t -= dt;
+          let nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
+          (!C || C.free(nx, ny, 0.18)) && (p.x = nx, p.y = ny, p.dist += 3.4 * dt), p.dx = d.x, p.dy = d.y, p.anim = "run", p.animFrame = null, d.t <= 0 && (p.state = d.back === "flee" ? "flee" : d.back === "walk" && p.path ? "walk" : "idle", p.timer = 0.3, p.dodge = null);
+          break;
+        }
+        case "knocked":
+          p.timer -= dt, p.anim = "lie", p.animFrame = 0, p.timer <= 0 && (p.anim = "idle", p.animFrame = null, p.node = this.nearestOf(this.nav.nodes, p.x, p.y), p.state = "idle", p.timer = 0.6, p.plan.length || (p.plan = [{ t: "go", node: p.home || this.pickHome(), thought: "What a city..." }, { t: "enter" }]));
+          break;
+        case "flee": {
+          let C = this.city.player?.coll, f = p.fleeFrom;
+          p.timer -= dt;
+          let ax = p.x - f.x, ay = p.y - f.y, l = Math.hypot(ax, ay) || 1;
+          ax /= l, ay /= l;
+          let nx = p.x + ax * 2.4 * dt, ny = p.y + ay * 2.4 * dt;
+          !C || C.free(nx, ny, 0.18) ? (p.x = nx, p.y = ny) : C.free(p.x + ay * 2.4 * dt, p.y - ax * 2.4 * dt, 0.18) && (p.x += ay * 2.4 * dt, p.y -= ax * 2.4 * dt), p.dx = ax, p.dy = ay, p.anim = "run", p.dist += 2.4 * dt, p.animFrame = null, C && (p.z += (C.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 12)), p.timer <= 0 && (p.node = this.nearestOf(this.nav.nodes, p.x, p.y), p.state = "idle", p.timer = 0.2);
+          break;
+        }
       }
       p.dog && this.city.animals?.followOwner(p.dog, p, dt);
     }
@@ -8536,8 +8602,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
             let d = dist(p.x, p.y, hoop2.x, hoop2.y);
             if (p.shootT = (p.shootT ?? this.rng.range(1.5, 4)) - dt, d < 1.6 || p.shootT <= 0 && d < 5.5) {
               p.anim = "shoot", p.animFrame = 1, p.shootPose = 0.45, b.state = "shot", b.holder = null, b.team = p.team, b.target = hoop2, b.make = this.rng.chance(clamp(0.75 - d * 0.08, 0.3, 0.75));
-              let T2 = 0.65 + d * 0.08;
-              b.flight = T2, b.x = p.x, b.y = p.y, b.z = p.z + 1.1, b.vx = (hoop2.x - b.x) / T2, b.vy = (hoop2.y - b.y) / T2, b.vz = (hoop2.z + 0.05 - b.z + 0.5 * G2 * T2 * T2) / T2, p.shootT = null, this.face(p, hoop2.x, hoop2.y);
+              let T3 = 0.65 + d * 0.08;
+              b.flight = T3, b.x = p.x, b.y = p.y, b.z = p.z + 1.1, b.vx = (hoop2.x - b.x) / T3, b.vy = (hoop2.y - b.y) / T3, b.vz = (hoop2.z + 0.05 - b.z + 0.5 * G2 * T3 * T3) / T3, p.shootT = null, this.face(p, hoop2.x, hoop2.y);
               continue;
             }
             let tx = hoop2.x - hoop2.fx * -1.4 + Math.sin(b.t + p.id) * 1.2, ty = hoop2.y + Math.cos(b.t * 0.7 + p.id) * 1.6;
@@ -8575,8 +8641,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           p.anim = "crouch", p.animFrame = 0, p.sbTimer <= 0 && (p.sbState = "throw", p.sbTimer = 0.5);
         else if (p.sbState === "throw") {
           if (p.anim = "throw", p.animFrame = p.sbTimer > 0.25 ? 0 : 1, p.sbTimer <= 0.25 && !p.thrown && (p.thrown = !0, foe)) {
-            let T2 = 0.55 + dist(p.x, p.y, foe.x, foe.y) * 0.06, tx = foe.x + this.rng.range(-0.5, 0.5), ty = foe.y + this.rng.range(-0.5, 0.5);
-            this.snowballs.push({ x: p.x, y: p.y, z: p.z + 0.9, vx: (tx - p.x) / T2, vy: (ty - p.y) / T2, vz: (foe.z + 0.5 - p.z - 0.9 + 0.5 * G2 * T2 * T2) / T2, t: T2, target: foe }), audio?.event("throw", p);
+            let T3 = 0.55 + dist(p.x, p.y, foe.x, foe.y) * 0.06, tx = foe.x + this.rng.range(-0.5, 0.5), ty = foe.y + this.rng.range(-0.5, 0.5);
+            this.snowballs.push({ x: p.x, y: p.y, z: p.z + 0.9, vx: (tx - p.x) / T3, vy: (ty - p.y) / T3, vz: (foe.z + 0.5 - p.z - 0.9 + 0.5 * G2 * T3 * T3) / T3, t: T3, target: foe }), audio?.event("throw", p);
           }
           p.sbTimer <= 0 && (p.thrown = !1, p.sbState = this.rng.chance(0.3) ? "move" : "make", p.sbTimer = this.rng.range(0.8, 2.2), p.sbState === "move" && (this.placeInArea(p, a, p.team), p.sbState = "make"));
         } else p.sbState === "hit" && (p.anim = "idle", p.animFrame = 0, p.sbTimer <= 0 && (p.sbState = "make", p.sbTimer = this.rng.range(0.6, 1.5)));
@@ -9034,8 +9100,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // random point currently on screen at height z
     screenPoint(view, z) {
-      let cam = this.city.camera, sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2), sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2), a = sx / 32, b = (sy + z * 32) / (32 / 2), xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(cam.angle), s = Math.sin(cam.angle);
-      return [171 / 2 + c * xr + s * yr, 171 / 2 - s * xr + c * yr];
+      let cam = this.city.camera, sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2), sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2);
+      return cam.artToWorld(sx, sy, z);
     }
     groundZ(x, y) {
       let W = this.city.world, ix = Math.floor(x), iy = Math.floor(y);
@@ -9312,6 +9378,446 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
   };
 
+  // src/sim/collide.js
+  var RES = 4, Collision = class {
+    constructor(world) {
+      this.n = 171 * RES, this.solid = new Uint8Array(this.n * this.n);
+      for (let [x0, y0, x1, y1] of world.solids) {
+        let cx0 = Math.max(0, Math.floor(Math.min(x0, x1) * RES)), cx1 = Math.min(this.n - 1, Math.floor(Math.max(x0, x1) * RES - 1e-6)), cy0 = Math.max(0, Math.floor(Math.min(y0, y1) * RES)), cy1 = Math.min(this.n - 1, Math.floor(Math.max(y0, y1) * RES - 1e-6));
+        for (let y = cy0; y <= cy1; y++) this.solid.fill(1, y * this.n + cx0, y * this.n + cx1 + 1);
+      }
+      this.ground = new Uint8Array(171 * 171);
+      for (let [x0, y0, x1, y1] of plinthRects())
+        for (let y = Math.max(0, Math.floor(y0)); y < Math.min(171, Math.ceil(y1)); y++)
+          this.ground.fill(1, y * 171 + Math.max(0, Math.floor(x0)), y * 171 + Math.min(171, Math.ceil(x1)));
+    }
+    isSolid(x, y) {
+      return x < 0.3 || y < 0.3 || x > 171 - 0.3 || y > 171 - 0.3 ? !0 : this.solid[Math.floor(y * RES) * this.n + Math.floor(x * RES)] === 1;
+    }
+    // is a circle of radius r at (x, y) clear of walls?
+    free(x, y, r) {
+      if (this.isSolid(x, y)) return !1;
+      for (let k = 0; k < 8; k++) {
+        let a = k / 8 * Math.PI * 2;
+        if (this.isSolid(x + Math.cos(a) * r, y + Math.sin(a) * r)) return !1;
+      }
+      return !0;
+    }
+    groundZ(x, y) {
+      let ix = Math.floor(x), iy = Math.floor(y);
+      return ix < 0 || iy < 0 || ix >= 171 || iy >= 171 ? 0 : this.ground[iy * 171 + ix] ? 0.125 : 0;
+    }
+    // is (x, y) on a roadway (not raised)?
+    onRoad(x, y) {
+      return this.groundZ(x, y) === 0;
+    }
+  };
+
+  // src/sim/player.js
+  var WALK = 1.3, RUN = 2.8, R_FOOT = 0.2, MAX_HEAT = 5, wrap = (a) => {
+    for (; a > Math.PI; ) a -= 2 * Math.PI;
+    for (; a < -Math.PI; ) a += 2 * Math.PI;
+    return a;
+  }, NAMES2 = { sedan: "SEDAN", taxi: "TAXI", suv: "SUV", van: "VAN", police: "POLICE CAR", bus: "BUS", truck: "TRUCK", fire: "FIRE TRUCK", icecream: "ICE-CREAM TRUCK", garbage: "GARBAGE TRUCK", plow: "SNOW PLOW" }, Player = class {
+    constructor(city) {
+      this.city = city, this.coll = new Collision(city.world), this.rng = new RNG(4321), this.active = !1, this.p = null, this.car = null, this.heat = 0, this.cool = 0, this.chasers = [], this.leaving = [], this.abandoned = [], this.recruitT = 0, this.flowT = 0, this.bustT = 0, this.busted = 0, this.msgs = [], this.input = { x: 0, y: 0, run: !1, brake: !1 }, this.camTarget = { x: 0, y: 0, z: 0 }, this.obstacles = [], this.ramT = 0, this.speedT = 0, this.buildCells();
+    }
+    // ---- control --------------------------------------------------------------------------------
+    start(p) {
+      let P = this.city.people;
+      return !p || p.state === "vanish" || p.dead ? !1 : (this.active && this.stop(), p.actKind && this.city.activities.leave(p), p.seat && (p.seat.b.used[p.seat.k] = !1, p.seat = null), p.stoopSeat && (p.stoopSeat.used = !1, p.stoopSeat = null), p.crossing && P.endCross(p), p.state = "player", p.plan = [], p.path = null, p.alpha = 1, p.anim = "idle", p.animFrame = null, p.forceFace = !1, p.z = this.coll.groundZ(p.x, p.y), p.thought = "", this.p = p, this.active = !0, this.heat = 0, this.cool = 0, this.bustT = 0, this.busted = 0, this.camTarget.x = p.x, this.camTarget.y = p.y, this.city.camera.follow = this.camTarget, this.say(`You are ${p.name}`, 3), !0);
+    }
+    stop() {
+      if (!this.active) return;
+      this.car && this.exitCar(!0);
+      let p = this.p, P = this.city.people;
+      if (p) {
+        p.state = "idle", p.timer = 0.4, p.alpha = 1, p.inCar = !1, p.node = P.nearestOf(P.nav.nodes, p.x, p.y);
+        let home = p.home || P.pickHome();
+        p.plan = [{ t: "go", node: home, thought: "What a day" }, { t: "enter" }];
+      }
+      this.endChase(!0), this.heat = 0, this.active = !1, this.p = null, this.city.camera.follow === this.camTarget && (this.city.camera.follow = null);
+    }
+    // F / Enter: get in or out
+    action() {
+      if (!this.active || this.busted > 0) return;
+      if (this.car) {
+        this.exitCar();
+        return;
+      }
+      let c = this.nearCar();
+      c ? this.enterCar(c) : this.say("No car close enough", 1.5);
+    }
+    nearCar() {
+      let p = this.p, best = null, bd = 2.4 * 2.4;
+      for (let c of this.city.traffic.cars) {
+        if (c.fadeOut != null || c.type === "subway") continue;
+        let d = dist2(c.x, c.y, p.x, p.y) - (c.len * 0.35) ** 2;
+        d < bd && (bd = d, best = c);
+      }
+      return best;
+    }
+    say(text, t = 2.2, big = !1) {
+      this.msgs = this.msgs.filter((m) => m.text !== text), this.msgs.push({ text, t, big }), this.msgs.length > 3 && this.msgs.shift();
+    }
+    // ---- cars -----------------------------------------------------------------------------------
+    detach(c) {
+      let tr = this.city.traffic;
+      if (c.piece && c.piece.cars) {
+        let i = c.piece.cars.indexOf(c);
+        i >= 0 && c.piece.cars.splice(i, 1);
+      }
+      for (let [k, v] of tr.exitLock) v === c && tr.exitLock.delete(k);
+      c.spot && (c.spot.car = null, c.spot = null), c.piece = null, c.next = null, c.route = null, c.lat = 0, c.latTarget = 0, c.dwell = null, c.stopAt = null, c.free = !0;
+    }
+    enterCar(c) {
+      let was = c.state, ci = this.chasers.indexOf(c);
+      ci >= 0 && this.chasers.splice(ci, 1);
+      let li = this.leaving.indexOf(c);
+      li >= 0 && this.leaving.splice(li, 1);
+      let ai = this.abandoned.indexOf(c);
+      ai >= 0 && this.abandoned.splice(ai, 1), this.detach(c), was === "drive" || was === "pullin" || was === "pullout" || was === "chase" || was === "leaving" ? (this.ejectDriver(c), this.addHeat(c.type === "police" ? 2 : 1, c.type === "police" ? "Stole a police car!" : "Carjacked!")) : was === "parked" && (this.rng.chance(0.35) ? (this.city.audio?.event("alarm", c), this.say("Car alarm!", 1.6), this.policeNear(c.x, c.y, 26) && this.addHeat(1, "Somebody saw that!")) : this.say(`Got into a ${NAMES2[c.type] || "car"}`, 1.6)), c.state = "player", c.special = c.type === "icecream" ? "icecream" : null, c.siren = !1, c.v = Math.max(0, c.v * 0.3), c.fadeIn = 0, c.fadeOut = null, c.life = 1e9, this.car = c;
+      let p = this.p;
+      p.alpha = 0, p.inCar = !0, p.anim = "idle", p.dog && (p.dog.gone = !0, p.dog = null);
+    }
+    exitCar(force = !1) {
+      let c = this.car, p = this.p;
+      if (!c) return;
+      let hx = Math.cos(c.h), hy = Math.sin(c.h), cands = [[hy, -hx], [-hy, hx], [hx, hy], [-hx, -hy]], spot = null;
+      for (let [nx, ny] of cands) {
+        let off = (Math.abs(nx * hx + ny * hy) > 0.5 ? c.len / 2 : c.wid / 2) + 0.45, x = c.x + nx * off, y = c.y + ny * off;
+        if (this.coll.free(x, y, R_FOOT)) {
+          spot = [x, y];
+          break;
+        }
+      }
+      if (!spot && !force) {
+        this.say("Can't open the door here", 1.5);
+        return;
+      }
+      spot || (spot = [c.x, c.y]), p.x = spot[0], p.y = spot[1], p.z = this.coll.groundZ(p.x, p.y), p.alpha = 1, p.inCar = !1, p.state = "player", c.state = "abandoned", c.v = 0, c.brake = !1, c.siren = !1, c.abandonT = 0, c.free = !0, this.abandoned.push(c), this.car = null;
+    }
+    ejectDriver(c) {
+      let P = this.city.people, q = P.create(this.rng.chance(0.15) ? "elder" : "resident"), hx = Math.cos(c.h), hy = Math.sin(c.h), x = c.x + hy * (c.wid / 2 + 0.4), y = c.y - hx * (c.wid / 2 + 0.4);
+      this.coll.free(x, y, 0.2) || (x = c.x - hy * (c.wid / 2 + 0.4), y = c.y + hx * (c.wid / 2 + 0.4)), q.x = x, q.y = y, q.z = this.coll.groundZ(x, y), q.alpha = 1, q.home = P.pickHome(), q.state = "flee", q.timer = 2.2, q.fleeFrom = { x: c.x, y: c.y }, q.plan = [{ t: "go", node: q.home, thought: "Somebody stole my car!" }, { t: "enter" }], q.thought = this.rng.pick(["HEY! MY CAR!", "STOP! THIEF!", "Not again...", "Call the cops!"]), P.list.push(q);
+    }
+    // collision circles along a car's length
+    circles(c, x, y, h) {
+      let L = c.len, r = c.wid * 0.5, n = Math.max(2, Math.ceil(L / (c.wid * 0.9))), out = [];
+      for (let k = 0; k < n; k++) {
+        let t = -L / 2 + r + (L - 2 * r) * k / (n - 1);
+        out.push([x + Math.cos(h) * t, y + Math.sin(h) * t, r]);
+      }
+      return out;
+    }
+    carFree(c, x, y, h) {
+      for (let [cx, cy, r] of this.circles(c, x, y, h)) if (!this.coll.free(cx, cy, r * 0.9)) return !1;
+      return !0;
+    }
+    // move a free car along its heading; slide along walls, bounce off them head-on
+    physMove(c, dt) {
+      let dx = Math.cos(c.h) * c.v * dt, dy = Math.sin(c.h) * c.v * dt;
+      if (!this.carFree(c, c.x, c.y, c.h) || this.carFree(c, c.x + dx, c.y + dy, c.h))
+        return c.x += dx, c.y += dy, 0;
+      if (Math.abs(dx) > 1e-4 && this.carFree(c, c.x + dx, c.y, c.h))
+        return c.x += dx, c.v *= 1 - Math.min(1, dt * 4), 1;
+      if (Math.abs(dy) > 1e-4 && this.carFree(c, c.x, c.y + dy, c.h))
+        return c.y += dy, c.v *= 1 - Math.min(1, dt * 4), 1;
+      let hit = Math.abs(c.v);
+      return c.v = -c.v * 0.3, hit > 2.5 && this.city.audio?.event("crash", c), hit > 2.5 ? 2 : 1;
+    }
+    // push this car out of any other car it overlaps; returns what it hit
+    collideCars(c) {
+      let mine = this.circles(c, c.x, c.y, c.h), hitCar = null;
+      for (let o of this.city.traffic.cars) {
+        if (o === c || o.fadeOut != null || o.type === "subway") continue;
+        let R2 = (c.len + o.len) / 2 + 0.4;
+        if (dist2(o.x, o.y, c.x, c.y) > R2 * R2) continue;
+        let best = 0, nx = 0, ny = 0;
+        for (let [ax, ay, ar] of mine) for (let [bx, by, br] of this.circles(o, o.x, o.y, o.h)) {
+          let d = Math.hypot(ax - bx, ay - by), pen = ar + br - d;
+          pen > best && (best = pen, nx = (ax - bx) / (d || 1), ny = (ay - by) / (d || 1));
+        }
+        if (best <= 0) continue;
+        let movable = o.free || o.state === "parked", share = movable ? 0.55 : 1, px = nx * best * share, py = ny * best * share;
+        if (this.carFree(c, c.x + px, c.y + py, c.h) && (c.x += px, c.y += py), movable) {
+          let qx = o.x - nx * best * 0.45, qy = o.y - ny * best * 0.45;
+          this.carFree(o, qx, qy, o.h) && (o.x = qx, o.y = qy), o.free && o !== this.car && (o.v *= 0.6);
+        } else
+          o.v = 0;
+        Math.abs(c.v) > 2.5 && this.city.audio?.event("crash", c), c.v *= movable ? 0.82 : 0.55, hitCar = o;
+      }
+      return hitCar;
+    }
+    // people in front of a moving car dive out of the way (or get knocked over and get back up)
+    shovePeople(c) {
+      if (Math.abs(c.v) < 1) return;
+      let sg = Math.sign(c.v), hx = Math.cos(c.h) * sg, hy = Math.sin(c.h) * sg;
+      for (let q of this.city.people.list) {
+        if (q === this.p || q.alpha < 0.5 || q.inCar) continue;
+        let dx = q.x - c.x, dy = q.y - c.y;
+        if (dx * dx + dy * dy > 20 || !(q.state === "walk" || q.state === "idle" || q.state === "wait" || q.state === "return" || q.state === "busWait" || q.state === "arrived" || q.state === "flee")) continue;
+        let ahead = dx * hx + dy * hy, lat = hx * dy - hy * dx;
+        if (ahead < -c.len / 2 || ahead > c.len / 2 + 2.2 || Math.abs(lat) > c.wid / 2 + 0.55) continue;
+        let s = lat >= 0 ? 1 : -1;
+        ahead < c.len / 2 + 0.15 && Math.abs(lat) < c.wid / 2 + 0.1 && Math.abs(c.v) > 3 ? (q.state = "knocked", q.timer = 2.4, q.anim = "lie", q.animFrame = 0, q.thought = this.rng.pick(["OUCH!", "Watch it!", "My back...", "Hey!"]), c === this.car && this.addHeat(1, "Hit and run!")) : (q.dodge = { x: -hy * s, y: hx * s, t: 0.55, back: q.state }, q.state = "dodge", q.thought = this.rng.pick(["WHOA!", "HEY!", "Look out!", "Crazy driver!"]));
+      }
+    }
+    // ---- update ---------------------------------------------------------------------------------
+    update(dt) {
+      if (this.msgs = this.msgs.filter((m) => (m.t -= dt) > 0), this.updateAbandoned(dt), this.updateLeaving(dt), !this.active) {
+        this.obstacles = this.abandoned.map((c) => ({ x: c.x, y: c.y, r: c.len / 2, v: 0, car: c }));
+        return;
+      }
+      let p = this.p;
+      if (!p || p.dead) {
+        this.active = !1;
+        return;
+      }
+      if (this.busted > 0) {
+        this.busted -= dt, p.anim = "wave";
+        for (let c of this.chasers)
+          c.v *= 1 - Math.min(1, dt * 3);
+        this.busted <= 0 && this.release();
+      } else this.car ? this.drive(dt) : this.walk(dt);
+      this.updateHeat(dt), this.updatePolice(dt), this.busted <= 0 && this.checkBust(dt);
+      let t = this.car || p, lead = this.car ? 0.55 : 0.25, vx = this.car ? Math.cos(this.car.h) * this.car.v : 0, vy = this.car ? Math.sin(this.car.h) * this.car.v : 0;
+      this.camTarget.x = t.x + vx * lead, this.camTarget.y = t.y + vy * lead, this.city.camera.follow !== this.camTarget && (this.city.camera.follow = this.camTarget);
+      let obs = [];
+      this.car ? obs.push({ x: this.car.x, y: this.car.y, r: this.car.len / 2, v: Math.abs(this.car.v), car: this.car }) : p.z < 0.05 && obs.push({ x: p.x, y: p.y, r: 0.3, v: 1 });
+      for (let c of this.chasers) obs.push({ x: c.x, y: c.y, r: c.len / 2, v: Math.abs(c.v), car: c });
+      for (let c of this.abandoned) obs.push({ x: c.x, y: c.y, r: c.len / 2, v: 0, car: c });
+      this.obstacles = obs;
+    }
+    walk(dt) {
+      let p = this.p, inp = this.input, mx = inp.x, my = inp.y;
+      if (mx || my) {
+        let l = Math.hypot(mx, my);
+        mx /= l, my /= l;
+        let [wx, wy] = this.city.camera.unprojectDelta(mx * 32, my * 32), wl = Math.hypot(wx, wy) || 1, dx = wx / wl, dy = wy / wl, sp = (inp.run ? RUN : WALK) * dt;
+        this.moveFoot(p, dx * sp, dy * sp), p.dx = dx, p.dy = dy, p.anim = inp.run ? "run" : "walk", p.dist += sp, p.animFrame = null;
+      } else
+        p.anim = "idle", p.animFrame = null;
+      p.z += (this.coll.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 14);
+    }
+    moveFoot(p, dx, dy) {
+      let C = this.coll, blocked = (x, y) => !C.free(x, y, R_FOOT) || this.city.traffic.cars.some((c) => c !== this.car && c.type !== "subway" && dist2(c.x, c.y, x, y) < (c.len / 2 + 0.3) ** 2 && this.circles(c, c.x, c.y, c.h).some(([cx, cy, r]) => dist2(cx, cy, x, y) < (r + R_FOOT) ** 2));
+      if (!blocked(p.x + dx, p.y + dy)) {
+        p.x += dx, p.y += dy;
+        return;
+      }
+      if (!blocked(p.x + dx, p.y)) {
+        p.x += dx;
+        return;
+      }
+      blocked(p.x, p.y + dy) || (p.y += dy);
+    }
+    drive(dt) {
+      let c = this.car, p = this.p, inp = this.input, maxF = c.type === "bus" || c.type === "garbage" || c.type === "fire" ? 5.2 : c.type === "police" ? 8.4 : c.type === "taxi" ? 8 : 7.6, accel = c.type === "bus" ? 3.2 : 5.6, throttle = -inp.y, v = c.v;
+      throttle > 0 ? v += (v >= 0 ? accel : 10) * dt : throttle < 0 ? v -= (v > 0.05 ? 10 : accel * 0.6) * dt : v -= Math.sign(v) * Math.min(Math.abs(v), (0.35 * Math.abs(v) + 1) * dt), inp.brake && (v -= Math.sign(v) * Math.min(Math.abs(v), 9 * dt)), c.v = clamp(v, -3.2, maxF);
+      let steer = inp.x * (1.9 + (inp.brake ? 1.3 : 0)) * clamp(Math.abs(c.v) / 3, inp.y ? 0.3 : 0, 1) * (c.v < -0.05 ? -1 : 1) * dt, nh = c.h + steer;
+      (this.carFree(c, c.x, c.y, nh) || !this.carFree(c, c.x, c.y, c.h)) && (c.h = nh);
+      let vBefore = Math.abs(c.v);
+      this.physMove(c, dt);
+      let hit = this.collideCars(c);
+      hit && vBefore > 2.5 && hit.type === "police" && hit.state !== "parked" && this.ramT <= 0 && (this.addHeat(0.6, "Rammed the police!"), this.ramT = 3), this.ramT -= dt, this.shovePeople(c), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = throttle < 0 && c.v > 0.2 || inp.brake, p.x = c.x, p.y = c.y, p.z = c.z, this.speedT -= dt, Math.abs(c.v) > 6.4 && this.speedT <= 0 && this.policeNear(c.x, c.y, 9, !0) && (this.addHeat(0.5, "Speeding past the cops!"), this.speedT = 6);
+    }
+    updateAbandoned(dt) {
+      let view = this.city.view;
+      for (let i = this.abandoned.length - 1; i >= 0; i--) {
+        let c = this.abandoned[i];
+        if (c.abandonT = (c.abandonT || 0) + dt, c.fadeOut != null) {
+          c.fadeOut -= dt, c.fadeOut <= 0 && (this.city.traffic.removeCar(c), this.abandoned.splice(i, 1));
+          continue;
+        }
+        (c.abandonT > 40 && !view.visible(c.x, c.y, 0, 4) || c.abandonT > 150) && (c.fadeOut = 1);
+      }
+    }
+    // ---- heat and the police -------------------------------------------------------------------
+    addHeat(v, why) {
+      let before = Math.ceil(this.heat - 1e-6);
+      this.heat = Math.min(MAX_HEAT, this.heat + v), this.cool = 0, why && this.say(why, 2.2), Math.ceil(this.heat - 1e-6) > before && before === 0 && this.say("The police are on to you!", 2.5);
+    }
+    policeNear(x, y, r, patrolOnly = !1) {
+      for (let c of this.city.traffic.cars) if (c.type === "police" && c.state !== "parked" && c.state !== "player" && (!patrolOnly || !c.free) && dist2(c.x, c.y, x, y) < r * r) return c;
+      return null;
+    }
+    target() {
+      return this.car || this.p;
+    }
+    updateHeat(dt) {
+      if (this.heat <= 0) return;
+      let t = this.target(), dmin = 1e9;
+      for (let c of this.chasers) dmin = Math.min(dmin, dist(c.x, c.y, t.x, t.y));
+      dmin > 30 ? this.cool += dt : this.cool = 0, this.cool > 8 && (this.heat = Math.max(0, this.heat - dt / 5), this.heat <= 0 && (this.endChase(), this.say("You lost them!", 3)));
+    }
+    updatePolice(dt) {
+      let want = this.heat > 0 ? Math.min(7, Math.ceil(this.heat - 1e-6) + (this.heat > 2.5 ? 1 : 0)) : 0;
+      if (this.recruitT -= dt, this.chasers.length < want && this.recruitT <= 0 && this.busted <= 0) {
+        this.recruitT = this.chasers.length ? 3 : 0.8;
+        let t = this.target(), best = null, bd = 60 * 60;
+        for (let c of this.city.traffic.cars) {
+          if (c.type !== "police" || c.free || c.state === "parked" || c.fadeOut != null) continue;
+          let d = dist2(c.x, c.y, t.x, t.y);
+          d < bd && (bd = d, best = c);
+        }
+        best ? this.makeChaser(best) : this.spawnChaser();
+      }
+      if (this.chasers.length) {
+        if (this.flowT -= dt, this.flowT <= 0) {
+          this.flowT = 0.5;
+          let t = this.target();
+          this.buildFlow(t.x, t.y);
+        }
+        for (let c of this.chasers) this.drivePolice(c, dt);
+      }
+    }
+    makeChaser(c) {
+      this.detach(c), c.state = "chase", c.siren = !0, c.special = null, c.revT = 0, c.stuckT = 0, c.life = 1e9, c.fadeIn = 0, c.v < 0 && (c.v = 0), this.chasers.push(c), this.city.audio?.event("siren", c);
+    }
+    spawnChaser() {
+      let tr = this.city.traffic, t = this.target(), links = [...tr.links.values()].filter((L2) => {
+        let d = Math.hypot(L2.pts[0][0] - t.x, L2.pts[0][1] - t.y);
+        return d > 30 && d < 58 && !L2.cars.some((o) => o.s < 4);
+      });
+      if (!links.length) return;
+      let L = this.rng.pick(links), car = tr.makeCar("police", L, 0.6, { siren: !0 });
+      car.v = 3, tr.addCar(car), this.makeChaser(car);
+    }
+    endChase(now = !1) {
+      for (let c of this.chasers)
+        c.state = "leaving", c.siren = !1, c.leaveT = now ? 0.01 : 7;
+      this.leaving.push(...this.chasers), this.chasers = [];
+    }
+    updateLeaving(dt) {
+      let view = this.city.view;
+      for (let i = this.leaving.length - 1; i >= 0; i--) {
+        let c = this.leaving[i];
+        if (c.fadeOut != null) {
+          c.fadeOut -= dt, c.fadeOut <= 0 && (this.city.traffic.removeCar(c), this.leaving.splice(i, 1));
+          continue;
+        }
+        c.leaveT -= dt, c.v += (2.5 - c.v) * Math.min(1, dt), this.physMove(c, dt), c.leaveT <= 0 && (!view.visible(c.x, c.y, 0, 4) || c.leaveT < -12) && (c.fadeOut = 1);
+      }
+    }
+    // per-cell travel cost for pursuit: 0 = blocked, 1 = road, 3 = sidewalk / plaza / park
+    buildCells() {
+      let C = this.coll;
+      this.cells = new Uint8Array(171 * 171);
+      for (let y = 0; y < 171; y++)
+        for (let x = 0; x < 171; x++) {
+          let solid = !1;
+          for (let [ox, oy] of [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]]) if (C.isSolid(x + ox, y + oy)) {
+            solid = !0;
+            break;
+          }
+          this.cells[y * 171 + x] = solid ? 0 : C.onRoad(x + 0.5, y + 0.5) ? 1 : 3;
+        }
+      this.flow = new Float32Array(171 * 171), this.queue = new Int32Array(171 * 171 * 4);
+    }
+    // distance field (Dial's algorithm, 4-neighbour, integer costs) from the player's cell
+    buildFlow(tx, ty) {
+      let N = 171, D = this.flow, cells = this.cells;
+      D.fill(1e9);
+      let s = clamp(Math.floor(ty), 0, N - 1) * N + clamp(Math.floor(tx), 0, N - 1), buckets = [[s]];
+      D[s] = 0;
+      for (let d = 0; d < buckets.length; d++) {
+        let b = buckets[d];
+        if (b)
+          for (let k = 0; k < b.length; k++) {
+            let i = b[k];
+            if (D[i] < d) continue;
+            let x = i % N, y = i / N | 0;
+            for (let j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < N - 1 ? i + N : -1]) {
+              if (j < 0) continue;
+              let cst = cells[j];
+              if (!cst) continue;
+              let nd = d + cst;
+              nd < D[j] && (D[j] = nd, (buckets[nd] || (buckets[nd] = [])).push(j));
+            }
+          }
+      }
+    }
+    flowAt(x, y) {
+      let ix = Math.floor(x), iy = Math.floor(y);
+      return ix < 0 || iy < 0 || ix >= 171 || iy >= 171 ? 1e9 : this.flow[iy * 171 + ix];
+    }
+    // which way the distance field falls fastest around (x, y)
+    flowDir(x, y) {
+      let best = this.flowAt(x, y), bx = 0, by = 0;
+      for (let k = 0; k < 16; k++) {
+        let a = k / 16 * Math.PI * 2;
+        for (let r of [1.4, 2.6]) {
+          let v = this.flowAt(x + Math.cos(a) * r, y + Math.sin(a) * r) + r * 0.05;
+          v < best && (best = v, bx = Math.cos(a), by = Math.sin(a));
+        }
+      }
+      return [bx, by];
+    }
+    lineClear(x0, y0, x1, y1) {
+      let d = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(d / 0.5);
+      for (let k = 1; k < n; k++) if (this.coll.isSolid(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n)) return !1;
+      return !0;
+    }
+    drivePolice(c, dt) {
+      let t = this.target(), d = dist(c.x, c.y, t.x, t.y), dir;
+      d < 10 && this.lineClear(c.x, c.y, t.x, t.y) ? dir = [(t.x - c.x) / (d || 1), (t.y - c.y) / (d || 1)] : dir = this.flowDir(c.x, c.y), !dir[0] && !dir[1] && (dir = [(t.x - c.x) / (d || 1), (t.y - c.y) / (d || 1)]);
+      let dh = wrap(Math.atan2(dir[1], dir[0]) - c.h);
+      c.stuckT > 0.9 && (c.revT = 0.9, c.stuckT = 0);
+      let turn;
+      if (c.revT > 0)
+        c.revT -= dt, c.v = Math.max(c.v - 7 * dt, -2.6), turn = clamp(-dh, -1, 1) * 2.2 * dt;
+      else {
+        let vmax = (this.busted > 0 ? 0 : d < 3.2 ? Math.max(0.8, d - 1.4) : 8) * (1 - Math.min(0.62, Math.abs(dh) / Math.PI * 1.3));
+        c.v += clamp(vmax - c.v, -10 * dt, 5 * dt), turn = clamp(dh, -1, 1) * 2.8 * dt * clamp(Math.abs(c.v) / 2, 0.35, 1);
+      }
+      let nh = c.h + turn;
+      (this.carFree(c, c.x, c.y, nh) || !this.carFree(c, c.x, c.y, c.h)) && (c.h = nh);
+      let res = this.physMove(c, dt), hit = this.collideCars(c);
+      c.stuckT = (res > 0 || hit && Math.abs(c.v) < 1.5 || Math.abs(c.v) < 0.35 && d > 4) && c.revT <= 0 ? (c.stuckT || 0) + dt : 0, this.shovePeople(c), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = c.v < 0.3 || Math.abs(dh) > 1.2;
+    }
+    checkBust(dt) {
+      if (!this.chasers.length) {
+        this.bustT = 0;
+        return;
+      }
+      let t = this.target(), slow = this.car ? Math.abs(this.car.v) < 0.9 : !0, half = this.car ? this.car.len / 2 : 0.25;
+      this.chasers.some((c) => {
+        let r = half + c.len / 2 + (this.car ? 1.3 : 1);
+        return dist2(c.x, c.y, t.x, t.y) < r * r && Math.abs(c.v) < 3;
+      }) && slow ? this.bustT += dt : this.bustT = Math.max(0, this.bustT - dt * 0.6), this.bustT > (this.car ? 2 : 1.1) && this.bust();
+    }
+    bust() {
+      this.busted = 3.4, this.bustT = 0, this.say("BUSTED!", 3.4, !0), this.car && this.exitCar(!0), this.city.audio?.event("busted", this.p);
+    }
+    // after a night downtown: released a few blocks away, the slate wiped clean
+    release() {
+      let P = this.city.people, p = this.p, nodes = P.nav.nodes.filter((n2) => (n2.kind === "walk" || n2.kind === "corner") && dist(n2.x, n2.y, p.x, p.y) > 30), n = nodes.length ? this.rng.pick(nodes) : null;
+      n && (p.x = n.x, p.y = n.y, p.z = n.z), this.heat = 0, this.cool = 0, this.endChase(!0), this.camTarget.x = p.x, this.camTarget.y = p.y;
+      let cam = this.city.camera;
+      cam.x = p.x, cam.y = p.y, this.say("Released. Keep your nose clean!", 3);
+    }
+    // ---- HUD ------------------------------------------------------------------------------------
+    hud() {
+      if (!this.active) return null;
+      let c = this.car, prompt = "";
+      if (this.busted > 0) prompt = "";
+      else if (c) prompt = "F \xB7 GET OUT";
+      else {
+        let n = this.nearCar();
+        n && (prompt = n.state === "parked" || n.state === "abandoned" ? "F \xB7 GET IN" : "F \xB7 STEAL IT");
+      }
+      return {
+        heat: this.heat,
+        status: c ? `${NAMES2[c.type] || "CAR"} \xB7 ${Math.round(Math.abs(c.v) * 2 * 2.237)} MPH` : this.input.run ? "ON FOOT \xB7 RUNNING" : "ON FOOT",
+        prompt,
+        msgs: this.msgs,
+        busted: this.busted > 0,
+        name: this.p ? this.p.name : ""
+      };
+    }
+  };
+
   // src/sim/city.js
   var City = class {
     constructor(gl, renderer, world, env, camera) {
@@ -9322,7 +9828,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         draw: (ctx) => {
           this.carLayer.draw(ctx), this.sprites.draw(ctx);
         }
-      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.traffic.init(), this.people.init();
+      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.traffic.init(), this.people.init();
     }
     addSystem(s) {
       return this.systems.push(s), s;
@@ -9379,7 +9885,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let clock = this.h("div", "panel clock");
       this.timeEl = this.h("div", "time", ""), this.dayEl = this.h("div", "day", ""), this.wxEl = this.h("div", "wx", ""), clock.append(this.timeEl, this.dayEl, this.wxEl), R2.append(clock);
       let title = this.h("div", "title", "PIXEL<span>NYC</span>");
-      R2.append(title);
+      R2.append(title), this.titleEl = title;
       let tr = this.h("div", "topright");
       this.soundBtn = this.btn("\u266A OFF", "Sound on/off (M)", () => this.toggleSound()), tr.append(this.soundBtn, this.btn("?", "Help (H)", () => this.toggleHelp())), R2.append(tr);
       let bar = this.h("div", "panel toolbar"), g1 = this.h("div", "group");
@@ -9410,18 +9916,23 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         pl && pl[1] && (this.app.camera.follow && this.unfollow(), this.app.camera.vx = this.app.camera.vy = 0, this.app.camera.glide = { x: pl[1][0], y: pl[1][1] }), this.placeSel.value = "0";
       }), this.placeSel.addEventListener("pointerdown", (e) => e.stopPropagation()), g3.append(this.placeSel);
       let g4 = this.h("div", "group");
-      g4.append(
+      this.viewBtn = this.btn("\u25E9", "Bird's-eye / isometric view (V)", () => this.toggleView()), g4.append(
+        this.viewBtn,
         this.btn("\u27F2", "Rotate left (Q)", () => this.rotate(-1)),
         this.btn("\u27F3", "Rotate right (E)", () => this.rotate(1)),
         this.btn("\u2212", "Zoom out (-)", () => this.zoom(-1)),
         this.btn("+", "Zoom in (+)", () => this.zoom(1))
       );
       let g5 = this.h("div", "group");
-      g5.append(this.btn("\u{1F441}", "Follow a random person (F)", () => this.followRandom()), this.btn("\u2738", "Fireworks! (X)", () => this.fireworks())), bar.append(g1, g2, g3, g4, g5), R2.append(bar), this.card = this.h("div", "panel card hidden"), R2.append(this.card), this.toastEl = this.h("div", "toast hidden"), R2.append(this.toastEl), this.help = this.h("div", "panel help hidden", `
+      this.playAsBtn = this.btn("PLAY", "Take control of a person: walk, borrow cars, outrun the police (P)", () => this.togglePlay(), "small"), g5.append(this.playAsBtn, this.btn("\u{1F441}", "Follow a random person (F)", () => this.followRandom()), this.btn("\u2738", "Fireworks! (X)", () => this.fireworks())), bar.append(g1, g2, g3, g4, g5), R2.append(bar), this.card = this.h("div", "panel card hidden"), R2.append(this.card), this.toastEl = this.h("div", "toast hidden"), R2.append(this.toastEl), this.hudEl = this.h("div", "panel playhud hidden", `
+      <div class="ph-row"><span class="ph-name"></span><span class="ph-heat"><span class="ph-label">HEAT</span>${"<i></i>".repeat(5)}</span></div>
+      <div class="ph-status"></div><div class="ph-prompt"></div>`), R2.append(this.hudEl), this.hudMsg = this.h("div", "playmsg hidden"), R2.append(this.hudMsg), this.hudBig = this.h("div", "playbig hidden"), R2.append(this.hudBig), this.help = this.h("div", "panel help hidden", `
       <div class="htitle">PIXEL NYC \u2014 CONTROLS</div>
       <div class="hrow"><b>Drag</b> pan the city</div>
       <div class="hrow"><b>Wheel / pinch / + \u2212</b> zoom</div>
       <div class="hrow"><b>Q / E</b> rotate the view</div>
+      <div class="hrow"><b>V</b> bird's-eye / isometric view</div>
+      <div class="hrow"><b>P</b> play as someone: <b>WASD</b> move, <b>Shift</b> run, <b>F</b> get in/out of cars, <b>Space</b> handbrake, <b>Esc</b> quit</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
       <div class="hrow"><b>GO TO menu</b> glide to a place</div>
@@ -9458,6 +9969,30 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     rotate(d) {
       this.app.camera.rotate(d);
     }
+    togglePlay() {
+      let pl = this.app.city.player, app = this.app;
+      if (pl.active) {
+        pl.stop(), this.playAsBtn.classList.remove("on"), this.hudEl.classList.add("hidden"), this.toast("Back to watching the city");
+        return;
+      }
+      let p = this.following;
+      if (!p) {
+        let cam = app.camera, bd = 1 / 0;
+        for (let q of app.city.people.list) {
+          if (q.alpha < 0.9 || q.state === "vanish" || q.state === "appear" || q.z < 0) continue;
+          let d = (q.x - cam.x) ** 2 + (q.y - cam.y) ** 2;
+          d < bd && (bd = d, p = q);
+        }
+      }
+      if (!p || (this.unfollow(), !pl.start(p))) return;
+      this.playAsBtn.classList.add("on"), this.hudEl.classList.remove("hidden"), app.camera.mode !== "bird" && this.toggleView("bird");
+      let z = this.zoomLevels.find((v) => v >= 3 * (window.devicePixelRatio || 1) - 0.01) || this.zoomLevels[this.zoomLevels.length - 1];
+      app.camera.zoomTo(z), this.toast("WASD/arrows move \xB7 SHIFT run \xB7 F get in/out \xB7 SPACE handbrake \xB7 ESC quit");
+    }
+    toggleView(mode) {
+      let cam = this.app.camera;
+      cam.mode = mode ?? (cam.mode === "bird" ? "iso" : "bird"), this.viewBtn.classList.toggle("on", cam.mode === "bird"), this.toast(cam.mode === "bird" ? "Bird's-eye view" : "Isometric view");
+    }
     zoom(d) {
       let cam = this.app.camera, L = this.zoomLevels, i = L.findIndex((v) => v >= cam.scaleTo - 0.01);
       i < 0 && (i = L.length - 1), i = clamp(i + d, 0, L.length - 1), L[i] !== cam.scaleTo && cam.zoomTo(L[i]);
@@ -9480,7 +10015,24 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       this.toastEl.textContent = msg, this.toastEl.classList.remove("hidden"), this.toastT = 3.5;
     }
     // ---- per frame ------------------------------------------------------------------
+    updateHud() {
+      let h = this.app.city.player.hud();
+      if (!h) {
+        this.hudEl.classList.contains("hidden") || this.hudEl.classList.add("hidden"), this.hudMsg.classList.add("hidden"), this.hudBig.classList.add("hidden"), this.playAsBtn?.classList.remove("on"), this.titleEl.classList.remove("hidden"), this.root.classList.remove("playing");
+        return;
+      }
+      this.hudEl.classList.remove("hidden"), this.titleEl.classList.add("hidden"), this.root.classList.add("playing"), this.hudEl.querySelector(".ph-name").textContent = h.name.toUpperCase(), this.hudEl.querySelector(".ph-status").textContent = h.status, this.hudEl.querySelector(".ph-prompt").textContent = h.prompt;
+      let lit = Math.ceil(h.heat - 1e-6), flash = Math.floor(performance.now() / 250) % 2;
+      this.hudEl.querySelectorAll(".ph-heat i").forEach((el, i) => {
+        el.className = i < lit ? flash ^ i & 1 ? "red" : "blue" : "";
+      });
+      let small = h.msgs.filter((m) => !m.big).map((m) => m.text);
+      this.hudMsg.textContent = small.join("  \xB7  "), this.hudMsg.classList.toggle("hidden", !small.length);
+      let big = h.msgs.find((m) => m.big);
+      this.hudBig.textContent = big ? big.text : "", this.hudBig.classList.toggle("hidden", !big);
+    }
     update(dt) {
+      this.updateHud();
       let env = this.app.env;
       this.timeEl.textContent = env.timeString();
       let S2 = SEASONS[env.season];
@@ -9534,18 +10086,43 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT")) return;
         app.audio?.unlock();
         let k = e.key.toLowerCase();
-        keys.add(k), k === "q" ? this.rotate(-1) : k === "e" ? this.rotate(1) : k === "+" || k === "=" ? this.zoom(1) : k === "-" || k === "_" ? this.zoom(-1) : k === " " ? (this.togglePause(), e.preventDefault()) : k === "t" ? this.cycleSpeed() : k >= "1" && k <= "4" ? this.setSeason(+k - 1) : k === "0" ? this.setSeason(null) : k === "f" ? this.followRandom() : k === "escape" ? (this.unfollow(), this.toggleHelp(!1)) : k === "m" ? this.toggleSound() : k === "h" || k === "?" ? this.toggleHelp() : k === "x" ? this.fireworks() : k === "n" && (app.env.hour = (app.env.hour + 3) % 24);
+        keys.add(k);
+        let pl = app.city.player;
+        if (pl && pl.active) {
+          if (k === "f" || k === "enter") {
+            e.repeat || pl.action(), e.preventDefault();
+            return;
+          }
+          if (k === " " || k.startsWith("arrow")) {
+            e.preventDefault();
+            return;
+          }
+          if (k === "escape" || k === "p") {
+            e.repeat || this.togglePlay();
+            return;
+          }
+          if ("wasd".includes(k) && k.length === 1) return;
+        }
+        k === "q" ? this.rotate(-1) : k === "e" ? this.rotate(1) : k === "+" || k === "=" ? this.zoom(1) : k === "-" || k === "_" ? this.zoom(-1) : k === " " ? (this.togglePause(), e.preventDefault()) : k === "t" ? this.cycleSpeed() : k >= "1" && k <= "4" ? this.setSeason(+k - 1) : k === "0" ? this.setSeason(null) : k === "f" ? this.followRandom() : k === "escape" ? (this.unfollow(), this.toggleHelp(!1)) : k === "m" ? this.toggleSound() : k === "h" || k === "?" ? this.toggleHelp() : k === "x" ? this.fireworks() : k === "n" ? app.env.hour = (app.env.hour + 3) % 24 : k === "v" ? this.toggleView() : k === "p" && this.togglePlay();
       }), window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase())), this.keys = keys;
     }
     click(cx, cy) {
-      let app = this.app, p = app.city.people.pick(cx, cy, app.canvas.clientWidth, app.canvas.clientHeight);
+      let app = this.app;
+      if (app.city.player.active) return;
+      let p = app.city.people.pick(cx, cy, app.canvas.clientWidth, app.canvas.clientHeight);
       p ? this.follow(p) : this.following && this.unfollow();
     }
     pan(dt) {
       let k = this.keys;
       if (!k) return;
       let sx = 0, sy = 0;
-      if ((k.has("a") || k.has("arrowleft")) && (sx -= 1), (k.has("d") || k.has("arrowright")) && (sx += 1), (k.has("w") || k.has("arrowup")) && (sy -= 1), (k.has("s") || k.has("arrowdown")) && (sy += 1), !sx && !sy) return;
+      (k.has("a") || k.has("arrowleft")) && (sx -= 1), (k.has("d") || k.has("arrowright")) && (sx += 1), (k.has("w") || k.has("arrowup")) && (sy -= 1), (k.has("s") || k.has("arrowdown")) && (sy += 1);
+      let pl = this.app.city.player;
+      if (pl && pl.active) {
+        pl.input.x = sx, pl.input.y = sy, pl.input.run = k.has("shift"), pl.input.brake = k.has(" ");
+        return;
+      }
+      if (!sx && !sy) return;
       this.app.camera.follow && this.unfollow(), this.app.camera.glide = null;
       let cam = this.app.camera, speed = 420 / (cam.scale / (window.devicePixelRatio || 1)), [wx, wy] = cam.unprojectDelta(sx * speed * dt, sy * speed * dt);
       cam.x += wx, cam.y += wy;
@@ -9608,7 +10185,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         crickets: loop(this.crickets, [["highpass", 2e3]], 0),
         water: loop(this.white, [["bandpass", 1800, 0.6]], 0),
         steam: loop(this.white, [["highpass", 2400], ["lowpass", 6e3]], 0),
-        siren: null
+        siren: null,
+        engine: null
       }, !0;
     }
     unlock() {
@@ -9793,6 +10371,23 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
         case "siren":
           break;
+        case "crash": {
+          if (!this.throttle("crash", 0.35)) return;
+          let o = O(0.9);
+          this.noise(t, 0.35, o, [["lowpass", 1400, 0.7, 300]], 0.8, 4e-3, this.brown), this.osc("sine", 90, t, 0.25, o, 0.6, 4e-3, 40);
+          for (let k = 0; k < 5; k++) this.noise(t + 0.05 + r.range(0, 0.25), 0.04, o, [["bandpass", r.range(2e3, 4500), 3]], r.range(0.1, 0.25));
+          break;
+        }
+        case "alarm": {
+          let o = O(0.35);
+          for (let k = 0; k < 10; k++) this.osc("square", k % 2 ? 1250 : 880, t + k * 0.22, 0.18, o, 0.18, 0.01, k % 2 ? 900 : 1300);
+          break;
+        }
+        case "busted": {
+          let o = this.out(0.35, 0);
+          [523, 466, 392, 311].forEach((f, k) => this.osc("square", f, t + k * 0.2, k === 3 ? 0.6 : 0.18, o, 0.16, 0.01));
+          break;
+        }
       }
     }
     thunder(dist4) {
@@ -9848,7 +10443,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       for (let c of city.traffic.honks) this.event("horn", c);
       city.traffic.honks.length = 0;
-      let fire = cars.find((c) => c.siren);
+      let fire = null, fg = 0;
+      for (let c of cars) if (c.siren) {
+        let w = this.where(c);
+        (!fire || w.g > fg) && (fire = c, fg = w.g);
+      }
       if (fire) {
         if (!L.siren) {
           let o = this.ctx.createOscillator();
@@ -9875,6 +10474,30 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           } catch {
           }
         }, 1500), L.siren = null;
+      }
+      let pc = city.player && city.player.active ? city.player.car : null;
+      if (pc) {
+        if (!L.engine) {
+          let o = this.ctx.createOscillator();
+          o.type = "sawtooth";
+          let o2 = this.ctx.createOscillator();
+          o2.type = "square";
+          let lp = this.ctx.createBiquadFilter();
+          lp.type = "lowpass", lp.frequency.value = 420;
+          let g = this.ctx.createGain();
+          g.gain.value = 0, o.connect(lp), o2.connect(lp), lp.connect(g).connect(this.sfx), o.start(), o2.start(), L.engine = { o, o2, lp, g };
+        }
+        let v = Math.abs(pc.v);
+        L.engine.o.frequency.setTargetAtTime(34 + v * 9, t, 0.08), L.engine.o2.frequency.setTargetAtTime(17 + v * 4.5, t, 0.08), L.engine.lp.frequency.setTargetAtTime(300 + v * 90, t, 0.1), L.engine.g.gain.setTargetAtTime(0.05 + v * 8e-3, t, 0.1);
+      } else if (L.engine) {
+        L.engine.g.gain.setTargetAtTime(0, t, 0.15);
+        let e = L.engine;
+        setTimeout(() => {
+          try {
+            e.o.stop(), e.o2.stop();
+          } catch {
+          }
+        }, 800), L.engine = null;
       }
       let ice = cars.find((c) => c.special === "icecream");
       if (this.jingleT -= dt, ice && this.jingleT <= 0) {
@@ -9932,7 +10555,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     let renderer = new Renderer(gl);
     renderer.setStatic(world.mesh, world.atlas, world.groundPage);
     let q = new URLSearchParams(location.search), env = new Environment(), camera = new Camera(), dpr = window.devicePixelRatio || 1;
-    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 89, camera.y = 91, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
+    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 89, camera.y = 91, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.get("view") === "bird" && (camera.mode = "bird"), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
     let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
     app.audio = audio, city.audio = audio, env.onEvent((ev, d) => {
       ev === "lightning" && audio.thunder(d.dist), ev === "season" && city.activities?.seed();

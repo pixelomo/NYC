@@ -413,12 +413,14 @@ export function subwayEntrance(C, x, y, axis) {
 // Low wall segment (park)
 export function parkWall(C, x0, y0, x1, y1) {
   const P = propTex(C);
+  C.world.solids.push([x0, y0, x1, y1, CURB + 0.7]);
   C.mb.box(x0, y0, CURB, x1, y1, CURB + 0.7, { px: P.stoneWall, nx: P.stoneWall, py: P.stoneWall, ny: P.stoneWall, pz: { t: P.stoneWallTop, world: true } });
 }
 
 // Chain-link fence run (double-sided quad)
 export function chainFence(C, xa, ya, xb, yb, h = 2.5, low = false) {
   const P = propTex(C);
+  C.world.solids.push([Math.min(xa, xb) - 0.06, Math.min(ya, yb) - 0.06, Math.max(xa, xb) + 0.06, Math.max(ya, yb) + 0.06, CURB + h]);
   const tex = low ? P.chainLow : P.chain;
   const z = CURB;
   C.mb.vquad(xa, ya, xb, yb, z, z + h, tex, { mat: MAT.FLAT });

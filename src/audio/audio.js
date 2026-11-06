@@ -88,6 +88,7 @@ export class AudioEngine {
       water: loop(this.white, [['bandpass', 1800, 0.6]], 0),
       steam: loop(this.white, [['highpass', 2400], ['lowpass', 6000]], 0),
       siren: null,
+      engine: null,
     };
     return true;
   }
@@ -317,6 +318,27 @@ export class AudioEngine {
       }
       case 'siren':
         break;
+      case 'crash': {
+        // metal crunch: a thump under a burst of filtered noise and a few rattles
+        if (!this.throttle('crash', 0.35)) return;
+        const o = O(0.9);
+        this.noise(t, 0.35, o, [['lowpass', 1400, 0.7, 300]], 0.8, 0.004, this.brown);
+        this.osc('sine', 90, t, 0.25, o, 0.6, 0.004, 40);
+        for (let k = 0; k < 5; k++) this.noise(t + 0.05 + r.range(0, 0.25), 0.04, o, [['bandpass', r.range(2000, 4500), 3]], r.range(0.1, 0.25));
+        break;
+      }
+      case 'alarm': {
+        // car alarm: alternating two-tone whoops
+        const o = O(0.35);
+        for (let k = 0; k < 10; k++) this.osc('square', k % 2 ? 1250 : 880, t + k * 0.22, 0.18, o, 0.18, 0.01, k % 2 ? 900 : 1300);
+        break;
+      }
+      case 'busted': {
+        // a short, sorry little fanfare
+        const o = this.out(0.35, 0);
+        [523, 466, 392, 311].forEach((f, k) => this.osc('square', f, t + k * 0.2, k === 3 ? 0.6 : 0.18, o, 0.16, 0.01));
+        break;
+      }
     }
   }
   thunder(dist) {
@@ -392,8 +414,9 @@ export class AudioEngine {
     // honks
     for (const c of city.traffic.honks) this.event('horn', c);
     city.traffic.honks.length = 0;
-    // sirens
-    const fire = cars.find((c) => c.siren);
+    // sirens: the loudest one on screen (a chase can have several)
+    let fire = null, fg = 0;
+    for (const c of cars) if (c.siren) { const w = this.where(c); if (!fire || w.g > fg) { fire = c; fg = w.g; } }
     if (fire) {
       if (!L.siren) {
         const o = this.ctx.createOscillator(); o.type = 'sawtooth';
@@ -416,6 +439,29 @@ export class AudioEngine {
       const s = L.siren;
       setTimeout(() => { try { s.o.stop(); s.lfo.stop(); } catch (e) { /* already stopped */ } }, 1500);
       L.siren = null;
+    }
+    // engine note of the car the player is driving
+    const pc = city.player && city.player.active ? city.player.car : null;
+    if (pc) {
+      if (!L.engine) {
+        const o = this.ctx.createOscillator(); o.type = 'sawtooth';
+        const o2 = this.ctx.createOscillator(); o2.type = 'square';
+        const lp = this.ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 420;
+        const g = this.ctx.createGain(); g.gain.value = 0;
+        o.connect(lp); o2.connect(lp); lp.connect(g).connect(this.sfx);
+        o.start(); o2.start();
+        L.engine = { o, o2, lp, g };
+      }
+      const v = Math.abs(pc.v);
+      L.engine.o.frequency.setTargetAtTime(34 + v * 9, t, 0.08);
+      L.engine.o2.frequency.setTargetAtTime(17 + v * 4.5, t, 0.08);
+      L.engine.lp.frequency.setTargetAtTime(300 + v * 90, t, 0.1);
+      L.engine.g.gain.setTargetAtTime(0.05 + v * 0.008, t, 0.1);
+    } else if (L.engine) {
+      L.engine.g.gain.setTargetAtTime(0, t, 0.15);
+      const e = L.engine;
+      setTimeout(() => { try { e.o.stop(); e.o2.stop(); } catch (err) { /* already stopped */ } }, 800);
+      L.engine = null;
     }
     // ice cream truck jingle (original tune)
     const ice = cars.find((c) => c.special === 'icecream');

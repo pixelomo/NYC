@@ -146,3 +146,21 @@ html, body {
   .toolbar { gap: 4px; padding: 6px; bottom: 8px; }
   .group { padding: 0 2px; }
 }
+
+/* play mode HUD */
+.playhud { position: absolute; top: calc(16px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); padding: 8px 14px; min-width: 280px; text-align: center; }
+.playhud.hidden, .playmsg.hidden, .playbig.hidden { display: none; }
+.ph-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.ph-name { font-size: 15px; color: var(--taxi); }
+.ph-heat { display: inline-flex; align-items: center; gap: 4px; }
+.ph-label { font-size: 10px; color: var(--sky); margin-right: 4px; letter-spacing: 1px; }
+.ph-heat i { display: inline-block; width: 12px; height: 12px; border: 2px solid #4a5480; background: #1a2040; }
+.ph-heat i.red { background: #ff3a3a; border-color: #ffb0b0; box-shadow: 0 0 8px #ff3a3a; }
+.ph-heat i.blue { background: #3a7aff; border-color: #b0c8ff; box-shadow: 0 0 8px #3a7aff; }
+.ph-status { font-family: var(--font-digits); font-size: 22px; line-height: 22px; margin-top: 4px; color: var(--ink); }
+.ph-prompt { font-size: 11px; color: var(--taxi); min-height: 14px; margin-top: 2px; }
+.playmsg { position: absolute; top: calc(104px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); font-size: 13px; color: var(--ink); text-shadow: 2px 2px 0 #000; white-space: nowrap; pointer-events: none; }
+.playbig { position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%); font-size: 64px; letter-spacing: 6px; color: #ff4a3a; text-shadow: 4px 4px 0 #1b2a6a, 8px 8px 0 #000; pointer-events: none; }
+@media (max-width: 600px) { .playbig { font-size: 40px; } .playmsg { white-space: normal; width: 90%; text-align: center; } }
+.title.hidden { display: none; }
+#ui.playing .toast { top: calc(132px + env(safe-area-inset-top, 0px)); }

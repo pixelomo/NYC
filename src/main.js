@@ -47,6 +47,7 @@ async function boot() {
   if (q.has('x')) camera.x = parseFloat(q.get('x'));
   if (q.has('y')) camera.y = parseFloat(q.get('y'));
   if (q.has('rot')) { camera.rot = parseInt(q.get('rot'), 10); camera.angle = (camera.rot * Math.PI) / 2; }
+  if (q.get('view') === 'bird') camera.mode = 'bird';
   if (q.has('hour')) env.hour = parseFloat(q.get('hour'));
   if (q.has('season')) env.setSeason(parseInt(q.get('season'), 10));
   if (q.has('weather')) env.setWeather(q.get('weather'));

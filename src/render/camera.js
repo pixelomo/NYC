@@ -1,8 +1,12 @@
-// Isometric camera: 2:1 pixel projection with smooth 90-degree rotations and integer pixel zoom.
+// Camera with two projections, both pixel-exact on the ground and with smooth 90-degree rotations:
+//  'iso'  - 2:1 isometric (x half-width HX, y HY, height HZ per world unit)
+//  'bird' - bird's-eye oblique: the ground is drawn straight down at T px per unit (north up at
+//           rotation 0) and heights at half scale, so the camera-facing walls show "a little".
 
 import { MAP, T } from '../world/layout.js';
 
-const HX = T, HY = T / 2, HZ = T; // screen px per world unit (x half-width, y, height)
+const HX = T, HY = T / 2, HZ = T; // iso: screen px per world unit (x half-width, y, height)
+const BS = T, BZ = T / 2; // bird's-eye: px per unit on the ground, px per unit of height
 import { clamp, easeInOut } from '../core/math.js';
 
 const CX = MAP / 2, CY = MAP / 2;
@@ -23,6 +27,19 @@ export class Camera {
     this.follow = null;
     this.vx = 0;
     this.vy = 0;
+    this.mode = 'iso';
+  }
+  get bird() { return this.mode === 'bird'; }
+  // sprites are drawn this much shorter than their art (bird's-eye squashes heights)
+  get squash() { return this.mode === 'bird' ? BZ / T : 1; }
+  _rot(x, y) {
+    const c = Math.cos(this.angle), s = Math.sin(this.angle);
+    const dx = x - CX, dy = y - CY;
+    return [c * dx - s * dy, s * dx + c * dy];
+  }
+  _unrot(xr, yr) {
+    const c = Math.cos(this.angle), s = Math.sin(this.angle);
+    return [CX + c * xr + s * yr, CY - s * xr + c * yr];
   }
   get settled() {
     return this.rotT >= 1 && this.scaleT >= 1;
@@ -75,26 +92,37 @@ export class Camera {
     this.x = clamp(this.x, -10, MAP + 10);
     this.y = clamp(this.y, -10, MAP + 10);
   }
-  // world -> art pixels (relative to map centre). Returns [sx, sy, depth]
+  // world -> art pixels (relative to map centre). Returns [sx, sy, depth] (smaller depth = nearer)
   project(x, y, z) {
-    const c = Math.cos(this.angle), s = Math.sin(this.angle);
-    const dx = x - CX, dy = y - CY;
-    const xr = c * dx - s * dy, yr = s * dx + c * dy;
+    const [xr, yr] = this._rot(x, y);
+    if (this.mode === 'bird') return [xr * BS, yr * BS - z * BZ, -yr];
     return [(xr - yr) * HX, (xr + yr) * HY - z * HZ, -(xr + yr)];
   }
   // screen-space direction (art px) of a world direction
   screenDir(nx, ny) {
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     const xr = c * nx - s * ny, yr = s * nx + c * ny;
+    if (this.mode === 'bird') return [xr * BS, yr * BS];
     return [(xr - yr) * HX, (xr + yr) * HY];
   }
   screenDirX(nx, ny) {
     return this.screenDir(nx, ny)[0];
   }
+  // world xy per art pixel along the screen's horizontal axis (the plane sprites stand in)
+  screenRight() {
+    const c = Math.cos(this.angle), s = Math.sin(this.angle);
+    if (this.mode === 'bird') return [c / BS, -s / BS];
+    return [(c - s) / (2 * HX), -(s + c) / (2 * HX)];
+  }
+  // art pixels at height z -> rotated ground coordinates
+  _artToRot(sx, sy, z) {
+    if (this.mode === 'bird') return [sx / BS, (sy + z * BZ) / BS];
+    const a = sx / HX, b = (sy + z * HZ) / HY;
+    return [(a + b) / 2, (b - a) / 2];
+  }
   // art-pixel screen delta -> world delta on the ground plane
   unprojectDelta(dsx, dsy) {
-    const a = dsx / HX, b = dsy / HY; // a = xr - yr, b = xr + yr
-    const xr = (a + b) / 2, yr = (b - a) / 2;
+    const [xr, yr] = this._artToRot(dsx, dsy, 0);
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     return [c * xr + s * yr, -s * xr + c * yr];
   }
@@ -103,18 +131,13 @@ export class Camera {
     const scaleCss = this.scale / (window.devicePixelRatio || 1);
     const t = this.project(this.x, this.y, 0);
     const sx = t[0] + (px - viewW / 2) / scaleCss;
-    const sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ;
-    const a = sx / HX, b = sy / HY;
-    const xr = (a + b) / 2, yr = (b - a) / 2;
-    const c = Math.cos(this.angle), s = Math.sin(this.angle);
-    return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+    const sy = t[1] + (py - viewH / 2) / scaleCss;
+    return this.artToWorld(sx, sy, z);
   }
   // art pixels (as returned by project) at height z -> world x, y
   artToWorld(sx, sy, z) {
-    const a = sx / HX, b = (sy + z * HZ) / HY;
-    const xr = (a + b) / 2, yr = (b - a) / 2;
-    const c = Math.cos(this.angle), s = Math.sin(this.angle);
-    return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+    const [xr, yr] = this._artToRot(sx, sy, z);
+    return this._unrot(xr, yr);
   }
   worldToScreen(x, y, z, viewW, viewH) {
     const scaleCss = this.scale / (window.devicePixelRatio || 1);
@@ -125,11 +148,11 @@ export class Camera {
   // camera view direction in world space (pointing toward the camera)
   viewDir() {
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
-    // rotated-space direction (1,1,1) -> world: inverse rotation
-    const xr = 1, yr = 1;
+    // rotated-space direction toward the camera -> world: inverse rotation
+    const [xr, yr, zr] = this.mode === 'bird' ? [0, BZ, BS] : [1, 1, 1];
     const wx = c * xr + s * yr, wy = -s * xr + c * yr;
-    const l = Math.hypot(wx, wy, 1);
-    return [wx / l, wy / l, 1 / l];
+    const l = Math.hypot(wx, wy, zr);
+    return [wx / l, wy / l, zr / l];
   }
   // Build view-projection for a buffer of bw x bh pixels holding k buffer pixels per art pixel
   // (k = 1 normally; below 1 when zoomed far out, so the buffer never grows past ~2x the canvas).
@@ -143,6 +166,15 @@ export class Camera {
     const D = DEPTH_RANGE;
     const m = new Float32Array(16);
     const kx = 2 / bw, ky = 2 / bh;
+    if (this.mode === 'bird') {
+      // screen x = xr*BS, screen y = yr*BS - z*BZ, depth = -yr
+      const BSk = BS * k, BZk = BZ * k;
+      m[0] = BSk * c * kx; m[4] = -BSk * s * kx; m[8] = 0; m[12] = (BSk * (-c * CX + s * CY) - tsx) * kx;
+      m[1] = -BSk * s * ky; m[5] = -BSk * c * ky; m[9] = BZk * ky; m[13] = (BSk * (s * CX + c * CY) + tsy) * ky;
+      m[2] = -s / D; m[6] = -c / D; m[10] = 0; m[14] = (s * CX + c * CY) / D;
+      m[3] = 0; m[7] = 0; m[11] = 0; m[15] = 1;
+      return { viewProj: m, frac: [fx, fy], tsx, tsy };
+    }
     // clip_x
     m[0] = HXk * (c - s) * kx;
     m[4] = -HXk * (s + c) * kx;
