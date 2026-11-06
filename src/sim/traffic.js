@@ -316,7 +316,8 @@ export class Traffic {
     let best = 1e9, bestV = 0;
     // things off the lanes (the player on foot or driving, chasing police, abandoned cars): brake
     // for them, but after a long stand-off creep past a car that isn't going anywhere
-    const obs = this.city.player?.obstacles;
+    // (a stalled car is never driven through: lane traffic queues behind it until it is towed)
+    const obs = this.city.vehicles?.obstacles;
     if (obs && obs.length) {
       const hx = Math.cos(car.h), hy = Math.sin(car.h);
       for (const o of obs) {
@@ -325,9 +326,9 @@ export class Traffic {
         const ahead = dx * hx + dy * hy;
         if (ahead <= 0 || ahead > 14) continue;
         if (Math.abs(dx * hy - dy * hx) > 0.9 + o.r * 0.6) continue;
-        if (o.v < 0.3 && car.wait > 6) continue;
         const g = ahead - car.len / 2 - o.r;
         if (g < best) { best = Math.max(0, g); bestV = 0; }
+        if (o.car && car.wait > 2) o.car.blockT = this.city.time;
       }
     }
     for (const o of P.cars) {
@@ -425,7 +426,7 @@ export class Traffic {
     }
     // lights/palette states
     for (const car of this.cars) {
-      car.lights = car.state !== 'parked' && car.state !== 'abandoned' && dark;
+      car.lights = dark && !car.wreck && car.state !== 'parked' && car.state !== 'abandoned' && car.state !== 'loose' && car.state !== 'stopped';
     }
   }
   updateSpecials(dt, env) {
@@ -592,6 +593,39 @@ export class Traffic {
   }
   // a car has waited long enough to turn across this crosswalk: hold pedestrians at the kerb
   holdingPeds(key) { return (this.pedHold.get(key) ?? -1) > this.clock; }
+  // take a car off the lane graph (it becomes a free physics body)
+  detach(c) {
+    if (c.piece && c.piece.cars) { const i = c.piece.cars.indexOf(c); if (i >= 0) c.piece.cars.splice(i, 1); }
+    for (const [k, v] of this.exitLock) if (v === c) this.exitLock.delete(k);
+    if (c.spot) { c.spot.car = null; c.spot = null; }
+    c.piece = null; c.next = null; c.route = null; c.lat = 0; c.latTarget = 0; c.dwell = null; c.stopAt = null;
+    c.free = true;
+  }
+  // put a nudged car back on the nearest lane if it is close to one and facing along it
+  reattach(car) {
+    let best = null, bd = 0.32 * 0.32;
+    const ch = Math.cos(car.h), sh = Math.sin(car.h);
+    for (const L of this.links.values()) {
+      for (let i = 1; i < L.pts.length; i++) {
+        const a = L.pts[i - 1], b = L.pts[i];
+        const sx = b[0] - a[0], sy = b[1] - a[1], sl = Math.hypot(sx, sy);
+        if (sl < 1e-6) continue;
+        const ux = sx / sl, uy = sy / sl;
+        if (ch * ux + sh * uy < 0.95) continue;
+        const t = clamp((car.x - a[0]) * ux + (car.y - a[1]) * uy, 0, sl);
+        const d = (car.x - a[0] - ux * t) ** 2 + (car.y - a[1] - uy * t) ** 2;
+        if (d < bd) { bd = d; best = { L, s: L.cum[i - 1] + t }; }
+      }
+    }
+    if (!best || best.s < car.len / 2 || best.s > best.L.len - car.len / 2) return false;
+    if (best.L.cars.some((o) => Math.abs(o.s - best.s) < (o.len + car.len) / 2 + 0.8)) return false;
+    car.free = false; car.piece = best.L; car.s = best.s; car.lat = 0; car.latTarget = 0;
+    car.state = 'drive'; car.v = 0; car.wait = 0; car.life = this.rng.range(30, 90); car.idleT = 0;
+    best.L.cars.push(car);
+    this.chooseNext(car);
+    this.place(car);
+    return true;
+  }
   carAt(x, y, r = 1.2) {
     for (const c of this.cars) if (dist2(c.x, c.y, x, y) < r * r) return c;
     return null;

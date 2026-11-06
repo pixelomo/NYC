@@ -110,6 +110,17 @@ export class Animals {
     // height above the straight line: none to speak of when gliding down from a roof or a wheel
     pg.arc = clamp(0.08 + d * 0.11, 0.12, 1.3) * this.rng.range(0.8, 1.2) * (dz < -0.5 ? 0.2 : 1);
   }
+  // a gunshot or a blast: every pigeon on the ground nearby takes to the air
+  scare(x, y, r) {
+    let n = 0;
+    for (const pg of this.pigeons) {
+      if (pg.state !== 'ground' || dist2(pg.x, pg.y, x, y) > r * r) continue;
+      const perch = this.rng.chance(0.6) ? this.perchFor(pg) : null;
+      const a = Math.atan2(pg.y - y, pg.x - x) + this.rng.range(-0.5, 0.5);
+      this.takeOff(pg, perch || { x: pg.x + Math.cos(a) * this.rng.range(4, 8), y: pg.y + Math.sin(a) * this.rng.range(4, 8), z: CURB });
+      if (n++ < 2) this.city.audio?.event('flutter', pg);
+    }
+  }
   perchFor(pg) {
     const W = this.city.world;
     let best = null, bd = 900;

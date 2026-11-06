@@ -31,9 +31,10 @@ void main() {
   vec2 px = floor((c.xy * 0.5 + 0.5) * uBuf + 0.5);
   float flags = iA.w;
   bool flip = mod(flags, 2.0) >= 1.0;
+  bool onGround = mod(floor(flags / 64.0), 2.0) >= 1.0; // lying on the ground: never squashed
   float w = iRect.z, h = iRect.w;
   float ax = flip ? w - iA.x : iA.x;
-  vec2 off = vec2(aCorner.x * w - ax, (iA.y - aCorner.y * h) * uSquash) * uK;
+  vec2 off = vec2(aCorner.x * w - ax, (iA.y - aCorner.y * h) * (onGround ? 1.0 : uSquash)) * uK;
   vec2 sp = px + off;
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
@@ -153,7 +154,7 @@ void main() {
   o = vec4(1.0);
 }`;
 
-export const SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32 };
+export const SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32, FLAT: 64 };
 const STRIDE = 13;
 
 export class SpriteLayer {

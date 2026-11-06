@@ -12,6 +12,9 @@ import { Animals } from './animals.js';
 import { Particles } from './particles.js';
 import { Subway } from './subway.js';
 import { Player } from './player.js';
+import { Vehicles } from './vehicles.js';
+import { Collision } from './collide.js';
+import { DecalLayer } from '../render/decalLayer.js';
 import { T } from '../world/layout.js';
 
 export class City {
@@ -25,7 +28,9 @@ export class City {
     buildPropSprites(this.atlas);
     this.pal = new PaletteBank(2048);
     this.statics = new Statics(this);
+    this.coll = new Collision(world);
     this.carLayer = new CarLayer(gl, this);
+    this.decals = new DecalLayer(gl, this);
     this.traffic = new Traffic(this);
     this.systems = [];
     this.sprites = new SpriteLayer(gl, this.atlas, this.pal);
@@ -33,7 +38,7 @@ export class City {
     renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) });
     renderer.addLayer({
       shadow: (ctx) => { this.carLayer.shadow(ctx); this.sprites.shadow(ctx); },
-      draw: (ctx) => { this.carLayer.draw(ctx); this.sprites.draw(ctx); },
+      draw: (ctx) => { this.decals.draw(ctx); this.carLayer.draw(ctx); this.sprites.draw(ctx); },
     });
     this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => true };
     this.time = 0;
@@ -50,6 +55,10 @@ export class City {
     this.addSystem(this.subway);
     this.player = new Player(this);
     this.addSystem(this.player);
+    // car physics after everyone has moved: contacts, damage, fires, wrecks
+    this.vehicles = new Vehicles(this);
+    this.addSystem(this.vehicles);
+    this.addSystem({ update: (dt) => this.decals.update(dt) });
     this.traffic.init();
     this.people.init();
   }
@@ -86,6 +95,7 @@ export class City {
     for (const s of this.systems) s.emit && s.emit(L, view);
     L.end();
     this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
+    this.decals.prepare(view);
     const LL = this.lightLayer;
     LL.begin();
     this.statics.lights(LL, env, this.time);

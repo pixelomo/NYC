@@ -1,7 +1,7 @@
 // Pedestrians: roles, daily routines, path following, crossings, seating, rendering.
 
 import { buildNav } from './nav.js';
-import { personTemplate, S } from '../render/sprites.js';
+import { personTemplate, personPose, S } from '../render/sprites.js';
 import { SF } from '../render/spriteLayer.js';
 import { RNG, clamp, dist, dist2 } from '../core/math.js';
 import { CURB } from '../world/layout.js';
@@ -427,6 +427,89 @@ export class People {
       }
     return out;
   }
+  // everyone within r of (x, y), from the spatial hash
+  near(x, y, r) {
+    const out = [];
+    const c0x = Math.floor((x - r) / 1.5), c1x = Math.floor((x + r) / 1.5), c0y = Math.floor((y - r) / 1.5), c1y = Math.floor((y + r) / 1.5);
+    for (let cx = c0x; cx <= c1x; cx++)
+      for (let cy = c0y; cy <= c1y; cy++) {
+        const c = this.grid.get((cx << 16) | cy);
+        if (c) for (const o of c) if (dist2(o.x, o.y, x, y) < r * r) out.push(o);
+      }
+    return out;
+  }
+  // stop whatever someone was doing (activity, seat, crosswalk) before something happens to them
+  detachPerson(p) {
+    if (p.actKind) this.city.activities?.leave(p);
+    if (p.seat) { p.seat.b.used[p.seat.k] = false; p.seat = null; }
+    if (p.stoopSeat) { p.stoopSeat.used = false; p.stoopSeat = null; }
+    if (p.crossing) this.endCross(p);
+    p.feeding = false; p.dodge = null; p.forceFace = false; p.animFrame = null;
+    if (p.z < -0.05 && p.state !== 'vanish') p.z = CURB;
+  }
+  // shot, or hit hard by a car: down for good, a pool of blood spreading underneath
+  kill(p, dx = 0, dy = 0, cause = 'shot') {
+    if (p.state === 'dead' || p.state === 'player' || p.state === 'vanish' || p.state === 'inside') return false;
+    const wasCop = p.state === 'cop';
+    this.detachPerson(p);
+    personPose(this.city.atlas, p.frames, 'down');
+    p.state = 'dead'; p.deadT = 0; p.anim = 'down'; p.animFrame = 0; p.thought = ''; p.umbrella = false;
+    p.plan = []; p.path = null; p.step = null;
+    const k = cause === 'car' ? 3.4 : cause === 'blast' ? 4.2 : 0.7;
+    p.kvx = dx * k; p.kvy = dy * k;
+    const d = this.city.camera.screenDir(dx || 1, dy);
+    p.flip = d[0] < 0; p.front = true;
+    const r = this.rng;
+    this.city.decals?.add('pool', p.x + dx * (k * 0.12 + 0.15), p.y + dy * (k * 0.12 + 0.15), p.z, r.range(0, 6.28), p.kid ? 0.5 : 0.68, 1, 5);
+    if (cause !== 'blast') this.city.particles?.blood(p.x, p.y, p.z + (p.kid ? 0.6 : 0.85), dx, dy, cause === 'car' ? 18 : 14);
+    this.city.audio?.event(cause === 'shot' ? 'hit' : 'thud', p);
+    if (wasCop) this.city.player?.onCopDown(p);
+    // anyone nearby runs for it
+    for (const q of this.near(p.x, p.y, 9)) if (q !== p) this.panic(q, p.x, p.y, r.range(2.5, 4.5));
+    return true;
+  }
+  // knocked flat (by a car or a blast): lies there a moment, then gets up grumbling
+  knock(p, vx = 0, vy = 0) {
+    if (p.state === 'dead' || p.state === 'player' || p.state === 'knocked') return;
+    const wasCop = p.state === 'cop';
+    this.detachPerson(p);
+    personPose(this.city.atlas, p.frames, 'down');
+    p.state = 'knocked'; p.timer = 2.4; p.anim = 'down'; p.animFrame = 0; p.kvx = vx * 2; p.kvy = vy * 2; p.wasCop = wasCop;
+    p.thought = this.rng.pick(['OUCH!', 'Watch it!', 'My back...', 'Hey!']);
+    this.city.audio?.event('thud', p);
+  }
+  // a frightened person runs away from (fx, fy), then picks up where they left off
+  panic(p, fx, fy, t = 3) {
+    const st = p.state;
+    if (st === 'dead' || st === 'player' || st === 'cop' || st === 'vanish' || st === 'inside' || st === 'appear' || st === 'knocked' || st === 'vendor') return false;
+    if (p.alpha < 0.5 || p.inCar) return false;
+    if (st === 'flee') { p.timer = Math.max(p.timer, t); p.fleeFrom = { x: fx, y: fy }; return true; }
+    if (p.step && p.step.t === 'go' && (st === 'walk' || st === 'wait')) p.plan.unshift(p.step);
+    this.detachPerson(p);
+    p.state = 'flee'; p.timer = t; p.fleeFrom = { x: fx, y: fy }; p.path = null;
+    p.thought = this.rng.pick(['AAAH!', 'RUN!', 'Somebody call 911!', 'Oh no oh no', 'GET DOWN!', 'Not in my city!']);
+    if (p.dog) p.dog.mode = 'follow';
+    return true;
+  }
+  // a patrol officer in uniform
+  createCop() {
+    const r = this.rng;
+    const tpl = { body: 'adult', hair: r.pick(['short', 'short', 'bun', 'bald', 'pony']), top: 'uniform', bottom: 'pants', hat: 'police' };
+    const frames = personTemplate(this.city.atlas, tpl);
+    const P = {
+      [S.SKIN]: r.pick(SKIN), [S.HAIR]: r.pick(HAIR.slice(0, 7)), [S.TOP]: 0x23365e, [S.TOP2]: 0x2c4372, [S.BOTTOM]: 0x1b2440,
+      [S.SHOES]: 0x141416, [S.COAT]: 0x23365e, [S.HAT]: 0x1b2747, [S.SCARF]: 0x23365e, [S.BAG]: 0x141416,
+      [S.DARK]: 0x141414, [S.WHITE]: 0xf2f2ee, [S.ITEM]: 0xe8c24a, [S.ITEM2]: 0x6a7fa8, [S.SOCK]: 0x141416,
+    };
+    const p = {
+      id: this.nextId++, role: 'cop', kid: false, elder: false, tpl, frames, pal: this.city.pal.alloc(P), name: 'Officer ' + r.pick(['Diaz', 'Kowalski', 'Chen', 'Murphy', 'Okafor', 'Russo', 'Patel', 'Lee', 'Brooks', 'Santos']),
+      age: r.int(24, 55), x: 0, y: 0, z: 0, node: null, path: null, pi: 0, state: 'cop', timer: 0, plan: [], step: null,
+      speed: 1, lane: 0.3, anim: 'idle', animT: r.next() * 4, front: true, flip: false, dx: 0, dy: 1,
+      alpha: 1, fade: 0, dist: 0, thought: '', umbrella: false, crossing: null, hp: 2,
+    };
+    personPose(this.city.atlas, frames, 'aim');
+    return p;
+  }
   stepPerson(p, dt, env) {
     p.animT += dt;
     if (p.umbrella && !env.raining && this.rng.chance(dt * 0.1)) p.umbrella = false;
@@ -532,7 +615,7 @@ export class People {
         break;
       case 'dodge': {
         // diving out of the way of a car, then carrying on
-        const d = p.dodge, C = this.city.player?.coll;
+        const d = p.dodge, C = this.city.coll;
         d.t -= dt;
         const nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
         if (!C || C.free(nx, ny, 0.18)) { p.x = nx; p.y = ny; p.dist += 3.4 * dt; }
@@ -543,12 +626,29 @@ export class People {
       case 'knocked':
         // knocked flat by a car: lie there a moment, then get up grumbling and carry on
         p.timer -= dt;
-        p.anim = 'lie'; p.animFrame = 0;
-        if (p.timer <= 0) { p.anim = 'idle'; p.animFrame = null; p.node = this.nearestOf(this.nav.nodes, p.x, p.y); p.state = 'idle'; p.timer = 0.6; if (!p.plan.length) p.plan = [{ t: 'go', node: p.home || this.pickHome(), thought: 'What a city...' }, { t: 'enter' }]; }
+        p.anim = 'down'; p.animFrame = 0;
+        this.slide(p, dt);
+        if (p.timer <= 0) {
+          p.anim = 'idle'; p.animFrame = null;
+          if (p.wasCop) { p.state = 'cop'; p.wasCop = false; break; }
+          p.node = this.nearestOf(this.nav.nodes, p.x, p.y); p.state = 'idle'; p.timer = 0.6;
+          if (!p.plan.length) p.plan = [{ t: 'go', node: p.home || this.pickHome(), thought: 'What a city...' }, { t: 'enter' }];
+        }
+        break;
+      case 'dead': {
+        // stays down; once nobody is looking (or after a while) the body is taken away
+        p.deadT += dt;
+        p.anim = 'down'; p.animFrame = 0;
+        this.slide(p, dt);
+        if (p.deadT > 55 || (p.deadT > 14 && !this.city.view.visible(p.x, p.y, p.z, 3))) { p.alpha -= dt * 0.7; if (p.alpha <= 0) p.dead = true; }
+        break;
+      }
+      case 'cop':
+        // moved by the player system (police on foot)
         break;
       case 'flee': {
         // a driver who has just had their car taken: run away from it, then head home
-        const C = this.city.player?.coll, f = p.fleeFrom;
+        const C = this.city.coll, f = p.fleeFrom;
         p.timer -= dt;
         let ax = p.x - f.x, ay = p.y - f.y;
         const l = Math.hypot(ax, ay) || 1; ax /= l; ay /= l;
@@ -562,6 +662,17 @@ export class People {
       }
     }
     if (p.dog) this.city.animals?.followOwner(p.dog, p, dt);
+  }
+  // momentum from a hit carries a body along the ground for a moment
+  slide(p, dt) {
+    if (!p.kvx && !p.kvy) return;
+    const C = this.city.coll;
+    const nx = p.x + p.kvx * dt, ny = p.y + p.kvy * dt;
+    if (!C || C.free(nx, ny, 0.15)) { p.x = nx; p.y = ny; } else { p.kvx = 0; p.kvy = 0; }
+    const k = Math.exp(-dt * 5);
+    p.kvx *= k; p.kvy *= k;
+    if (Math.abs(p.kvx) + Math.abs(p.kvy) < 0.02) { p.kvx = 0; p.kvy = 0; }
+    if (C) p.z += (C.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 12);
   }
   faceSeat(p) {
     const f = p.seat ? p.seat.b.seats[p.seat.k].face : p.stoopSeat ? p.stoopSeat.n : [0, 1];
@@ -660,7 +771,7 @@ export class People {
     const f = arr[fi] || arr[0];
     let alpha = p.alpha;
     if (p.z < CURB - 0.15) alpha *= clamp(1 + (p.z - CURB + 0.15) * 1.6, 0, 1);
-    L.push(p.x, p.y, p.z, f, p.pal, p.flip ? SF.FLIP : 0, alpha, 0.003);
+    L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === 'down' || p.anim === 'lie' ? SF.FLAT : 0), alpha, p.anim === 'down' ? 0.002 : 0.003);
     if (p.umbrella) {
       const hz = p.z + (p.kid ? 0.82 : 1.12);
       L.push(p.x, p.y, hz, this.umbrellaFrame, p.pal, 0, alpha, 0.004);

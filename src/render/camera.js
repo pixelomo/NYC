@@ -54,7 +54,10 @@ export class Camera {
     this.scaleTo = s;
     this.scaleT = 0;
   }
+  // a jolt from an explosion: decays over half a second or so
+  shake(a) { this.shakeA = Math.max(this.shakeA || 0, a); }
   update(dt) {
+    if (this._sx || this._sy) { this.x -= this._sx; this.y -= this._sy; this._sx = 0; this._sy = 0; }
     if (this.rotT < 1) {
       this.rotT = Math.min(1, this.rotT + dt / 0.7);
       const target = (this.rot * Math.PI) / 2;
@@ -91,6 +94,12 @@ export class Camera {
     }
     this.x = clamp(this.x, -10, MAP + 10);
     this.y = clamp(this.y, -10, MAP + 10);
+    if (this.shakeA > 0.01) {
+      const a = this.shakeA;
+      this._sx = (Math.random() * 2 - 1) * a; this._sy = (Math.random() * 2 - 1) * a;
+      this.x += this._sx; this.y += this._sy;
+      this.shakeA *= Math.exp(-dt * 5);
+    } else this.shakeA = 0;
   }
   // world -> art pixels (relative to map centre). Returns [sx, sy, depth] (smaller depth = nearer)
   project(x, y, z) {

@@ -19,6 +19,25 @@ export class Particles {
     this.row = pal.alloc({ [S.C1]: 0xf0f2f6, [S.C2]: 0xd0e4f8, [S.C3]: 0xffffff, [S.C4]: 0xe07a20, [S.C5]: 0xc8402a, [S.C6]: 0xf0c030, [S.C7]: 0xffb8d8, [S.C8]: 0xd8f0ff, [S.C9]: 0x9a9a9a });
     this.fwRows = [0xff4040, 0x40ff80, 0x5080ff, 0xffd040, 0xff70e0, 0xffffff, 0xff9030, 0x60f0ff].map((c) => pal.alloc({ [S.C1]: [c, 128] }));
     this.flyRow = pal.alloc({ [S.C1]: [0xd8ff60, 128] });
+    // smoke, fire and the rest of the mayhem
+    const row = (c) => pal.alloc({ [S.C1]: c, [S.C2]: c, [S.C3]: c });
+    this.rows = {
+      smokeGrey: row(0x8e8b88), smokeDark: row(0x3e3a36), smokeBlack: row(0x201e1c), dust: row(0x9c9488),
+      fire: pal.alloc({ [S.C1]: [0xffe070, 128], [S.C2]: [0xffa030, 128], [S.C3]: [0xe8501c, 128] }),
+      fbYellow: row([0xffe890, 128]), fbOrange: row([0xffa040, 128]), fbRed: row([0xd8481a, 128]),
+      debris: row(0x2c2824), blood: row(0x8c0c0e), brass: row(0xdcaa34), glass: row(0xcdeaff), tracer: row([0xfff2b8, 128]),
+    };
+    // flickering flame tongues: yellow core, orange body, red tips
+    this.fr.flame = [[8, 12], [6, 10], [5, 8]].map(([w, h], k) => A.add('flame' + k, w, h, (sp) => {
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const v = y / (h - 1), half = (w / 2) * Math.pow(v, 0.7) * (1 - 0.25 * Math.max(0, v - 0.75) * 4);
+          const dx = Math.abs(x + 0.5 - w / 2 + Math.sin(y * 1.7 + k) * 0.6);
+          if (dx > half) continue;
+          const t = dx / Math.max(0.5, half) * 0.6 + (1 - v) * 0.7;
+          sp.set(x, y, t < 0.45 ? S.C1 : t < 0.8 ? S.C2 : S.C3, 128);
+        }
+    }, w >> 1, h - 1));
     this.p = [];
     this.emitters = [];
     this.rain = [];
@@ -38,6 +57,119 @@ export class Particles {
       this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: this.rng.range(0.5, 1.6), g: 4, life: 0.5, max: 0.5, f: this.fr.dot2, row: this.row, slot: 0, kind: 'spark' });
     }
     void color;
+  }
+  // ---- mayhem ---------------------------------------------------------------------------------
+  sparks(x, y, z, n) {
+    const r = this.rng;
+    for (let i = 0; i < n; i++) {
+      const a = r.range(0, 6.28), s = r.range(1, 4);
+      this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(0.5, 2.5), g: 9, life: r.range(0.2, 0.45), max: 0.45, f: this.fr.dot, row: this.fwRows[3], kind: 'spark' });
+    }
+  }
+  glass(x, y, z, n) {
+    const r = this.rng;
+    for (let i = 0; i < n; i++) {
+      const a = r.range(0, 6.28), s = r.range(0.6, 2.4);
+      this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(0.5, 2), g: 9, life: r.range(1.2, 2.2), max: 2.2, f: this.fr.dot, row: this.rows.glass, kind: 'bit' });
+    }
+  }
+  dust(x, y, z, n) {
+    const r = this.rng;
+    for (let i = 0; i < n; i++) this.add({ x: x + r.range(-0.1, 0.1), y: y + r.range(-0.1, 0.1), z, vx: r.range(-0.5, 0.5), vy: r.range(-0.5, 0.5), vz: r.range(0.2, 0.7), g: 0.5, life: r.range(0.4, 0.8), max: 0.8, kind: 'smoke', row: this.rows.dust, grow: 1.5 });
+  }
+  blood(x, y, z, dx, dy, n) {
+    const r = this.rng;
+    for (let i = 0; i < n; i++) {
+      const s = r.range(0.8, 3.2), a = r.range(-0.7, 0.7), ca = Math.cos(a), sa = Math.sin(a);
+      const vx = (dx * ca - dy * sa) * s + r.range(-0.4, 0.4), vy = (dx * sa + dy * ca) * s + r.range(-0.4, 0.4);
+      this.add({ x, y, z: z + r.range(-0.15, 0.15), vx, vy, vz: r.range(0.2, 1.8), g: 9, life: 2, max: 2, f: r.chance(0.4) ? this.fr.dot2 : this.fr.dot, row: this.rows.blood, kind: 'blood', splat: i % 3 === 0 });
+    }
+  }
+  muzzle(x, y, z, dx, dy) {
+    const r = this.rng;
+    for (let i = 0; i < 4; i++) {
+      const s = r.range(0.5, 3);
+      this.add({ x: x + dx * 0.05 * i, y: y + dy * 0.05 * i, z, vx: dx * s + r.range(-0.4, 0.4), vy: dy * s + r.range(-0.4, 0.4), vz: r.range(-0.3, 0.3), g: 0, life: 0.06, max: 0.06, f: i ? this.fr.dot : this.fr.dot2, row: this.rows.fbYellow, kind: 'spark' });
+    }
+    this.add({ x: x + dx * 0.1, y: y + dy * 0.1, z, vx: r.range(-0.2, 0.2), vy: r.range(-0.2, 0.2), vz: 0.4, g: 0, life: 0.5, max: 0.5, kind: 'smoke', row: this.rows.smokeGrey, grow: 1.2, a: 0.5 });
+    this.flashes.push({ x, y, k: 0.9, color: [1, 0.8, 0.45], r: 3.2, decay: 12 });
+  }
+  tracer(x0, y0, z0, x1, y1, z1) {
+    const d = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.ceil(d / 0.3));
+    for (let i = 1; i < n; i++) {
+      const t = i / n;
+      this.add({ x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t, z: z0 + (z1 - z0) * t, vx: 0, vy: 0, vz: 0, g: 0, life: 0.03 + t * 0.05, max: 0.08, f: this.fr.dot, row: this.rows.tracer, kind: 'spark' });
+    }
+  }
+  shell(x, y, z, dx, dy) {
+    const r = this.rng;
+    this.add({ x, y, z, vx: -dy * r.range(1, 1.8) + dx * 0.2, vy: dx * r.range(1, 1.8) + dy * 0.2, vz: r.range(1.2, 2), g: 9, life: 1.6, max: 1.6, f: this.fr.dot, row: this.rows.brass, kind: 'bit' });
+  }
+  explosion(x, y, z, car) {
+    const r = this.rng, R = this.rows;
+    // fireball: a ball of flame puffs that balloons out and lifts, then rolls into black smoke
+    for (let i = 0; i < 34; i++) {
+      const a = r.range(0, 6.28), b = Math.acos(r.range(-0.2, 1)), s = r.range(1.2, 4.2);
+      this.add({ x, y, z: z + r.range(0, 0.4), vx: Math.cos(a) * Math.sin(b) * s, vy: Math.sin(a) * Math.sin(b) * s, vz: Math.cos(b) * s * 0.8 + 0.8, g: -0.4, drag: 3.2,
+        life: r.range(0.45, 1.0), max: 1.0, kind: 'fireball', row: i % 3 === 0 ? R.fbYellow : i % 3 === 1 ? R.fbOrange : R.fbRed, grow: 4, delay: r.range(0, 0.12) });
+    }
+    for (let i = 0; i < 22; i++) {
+      const a = r.range(0, 6.28), s = r.range(0.3, 1.6);
+      this.add({ x: x + Math.cos(a) * 0.4, y: y + Math.sin(a) * 0.4, z: z + r.range(0.3, 1.2), vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(0.8, 2.2), g: -0.1, drag: 0.8,
+        life: r.range(2.4, 4.5), max: 4.5, kind: 'smoke', row: i % 2 ? R.smokeBlack : R.smokeDark, grow: 4, delay: r.range(0.25, 0.7) });
+    }
+    // debris: dark chunks and bits of the body in its own paint
+    for (let i = 0; i < 26; i++) {
+      const a = r.range(0, 6.28), s = r.range(1.5, 6);
+      this.add({ x, y, z: z + 0.3, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(2, 6.5), g: 9.8, life: r.range(1.6, 3), max: 3,
+        f: r.chance(0.5) ? this.fr.dot2 : this.fr.dot, row: car && car.palRow >= 0 && i % 3 === 0 ? car.palRow : R.debris, kind: 'bit' });
+    }
+    this.sparks(x, y, z + 0.4, 34);
+    this.glass(x, y, z + 0.6, 14);
+    // a ring of dust kicked along the ground
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * 6.28, s = r.range(3, 5);
+      this.add({ x, y, z: 0.05, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 0.1, g: 0, drag: 3.5, life: 0.9, max: 0.9, kind: 'smoke', row: R.dust, grow: 3 });
+    }
+    this.flashes.push({ x, y, k: 2.2, color: [1, 0.6, 0.25], r: 11, decay: 2.4 });
+  }
+  // engines that smoke, cars on fire, wrecks smouldering
+  carFx(dt, view) {
+    const V = this.city.vehicles, r = this.rng, R = this.rows;
+    if (!V) return;
+    const wx = Math.cos(this.city.env.windDir) * this.city.env.wind * 0.5, wy = Math.sin(this.city.env.windDir) * this.city.env.wind * 0.5;
+    for (const c of V.damaged) {
+      if (c.fadeOut != null || !view.visible(c.x, c.y, 1, 4)) continue;
+      const ch = Math.cos(c.h), sh = Math.sin(c.h);
+      const big = c.type === 'bus' || c.type === 'truck' || c.type === 'fire' || c.type === 'garbage' || c.type === 'plow';
+      const ef = c.type === 'bus' ? -0.4 : 0.36; // engine at the front (the bus has it at the back)
+      const ex = c.x + ch * c.len * ef, ey = c.y + sh * c.len * ef;
+      const ez = (c.z || 0) + (c.hopZ || 0) + (big ? 1.0 : c.type === 'van' || c.type === 'icecream' ? 0.8 : 0.55);
+      const frac = c.hp / c.maxHp;
+      let smoke = 0, fire = 0, row = R.smokeGrey;
+      if (c.wreck) {
+        if (c.burnT > 0) { fire = 10 + c.burnT * 2; smoke = 9; row = R.smokeBlack; }
+        else if (c.smolderT > 0) { smoke = 2 + c.smolderT * 0.08; row = R.smokeDark; }
+      } else if (c.fireT != null) { fire = 14 + (c.fireT / c.fuse) * 26; smoke = 10; row = R.smokeBlack; }
+      else if (frac < 0.3) { smoke = 7; row = R.smokeDark; }
+      else if (frac < 0.5) smoke = 3.5;
+      c.fxSmoke = (c.fxSmoke || 0) + smoke * dt;
+      while (c.fxSmoke > 1) {
+        c.fxSmoke -= 1;
+        this.add({ x: ex + r.range(-0.15, 0.15), y: ey + r.range(-0.15, 0.15), z: ez, vx: wx + r.range(-0.15, 0.15), vy: wy + r.range(-0.15, 0.15), vz: r.range(0.6, 1.1), g: -0.05, drag: 0.3,
+          life: r.range(1.6, 2.8) * (row === R.smokeGrey ? 0.8 : 1), max: 2.8, kind: 'smoke', row, grow: 3.2, a: row === R.smokeGrey ? 0.75 : 1 });
+      }
+      c.fxFire = (c.fxFire || 0) + fire * dt;
+      // flames start at the engine and spread over the whole car as it burns
+      const spread = c.wreck ? 1 : Math.min(1, 0.25 + (c.fireT || 0) / (c.fuse || 1));
+      while (c.fxFire > 1) {
+        c.fxFire -= 1;
+        const u = r.range(-0.5, 0.5) * spread, v = r.range(-0.4, 0.4) * spread;
+        const fx = c.wreck ? c.x + ch * u * c.len - sh * v * c.wid : ex + ch * u * c.len * 0.6 - sh * v * c.wid, fy = c.wreck ? c.y + sh * u * c.len + ch * v * c.wid : ey + sh * u * c.len * 0.6 + ch * v * c.wid;
+        this.add({ x: fx, y: fy, z: ez - 0.15 + r.range(0, 0.2), vx: wx * 0.5 + r.range(-0.1, 0.1), vy: wy * 0.5 + r.range(-0.1, 0.1), vz: r.range(1.0, 2.0), g: 0, life: r.range(0.25, 0.55), max: 0.55, kind: 'fire', f: r.pick(this.fr.flame), row: R.fire });
+        if (r.chance(0.08)) this.add({ x: fx, y: fy, z: ez + 0.3, vx: r.range(-0.6, 0.6), vy: r.range(-0.6, 0.6), vz: r.range(1.5, 3), g: 1, life: 0.6, max: 0.6, f: this.fr.dot, row: this.fwRows[3], kind: 'spark' });
+      }
+    }
   }
   addEmitter(kind, data) {
     this.emitters = this.emitters.filter((e) => e.kind !== kind);
@@ -61,6 +193,7 @@ export class Particles {
     const wind = env.wind;
     const wx = Math.cos(env.windDir) * wind * 0.8, wy = Math.sin(env.windDir) * wind * 0.8;
     if (!view || !view.bw) return;
+    this.carFx(dt, view);
     // --- precipitation ---
     const want = env.precip > 0.05 ? Math.floor((env.snowing ? 1400 : 1700) * env.precip * Math.min(1.6, (view.bw * view.bh) / 600000)) : 0;
     while (this.rain.length < want) {
@@ -212,7 +345,23 @@ export class Particles {
     // integrate particles
     for (let i = this.p.length - 1; i >= 0; i--) {
       const q = this.p[i];
+      if (q.delay > 0) { q.delay -= dt; continue; }
       q.life -= dt;
+      if (q.drag) { const k = Math.exp(-q.drag * dt); q.vx *= k; q.vy *= k; q.vz *= k; }
+      if (q.kind === 'bit' || q.kind === 'blood') {
+        q.vz -= q.g * dt;
+        q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
+        const gz = this.groundZ(q.x, q.y);
+        if (q.z <= gz + 0.01 && q.vz < 0) {
+          q.z = gz + 0.01;
+          if (q.kind === 'blood') {
+            if (q.splat && gz > -50) this.city.decals?.add('splat', q.x, q.y, gz, r.range(0, 6.28), r.range(0.1, 0.18), 1);
+            q.life = 0;
+          } else if (q.vz < -1.5) { q.vz = -q.vz * 0.3; q.vx *= 0.5; q.vy *= 0.5; } else { q.vz = 0; q.vx = 0; q.vy = 0; q.g = 0; }
+        }
+        if (q.life <= 0) this.p.splice(i, 1);
+        continue;
+      }
       if (q.kind === 'leaf') {
         q.ph += dt * 3;
         q.x += (q.vx + Math.sin(q.ph) * 0.4) * dt; q.y += (q.vy + Math.cos(q.ph * 0.8) * 0.3) * dt; q.z += q.vz * dt;
@@ -236,7 +385,7 @@ export class Particles {
       if (q.life <= 0) this.p.splice(i, 1);
     }
     // light flashes decay
-    for (let i = this.flashes.length - 1; i >= 0; i--) { this.flashes[i].k -= dt * 2.2; if (this.flashes[i].k <= 0) this.flashes.splice(i, 1); }
+    for (let i = this.flashes.length - 1; i >= 0; i--) { const f = this.flashes[i]; f.k -= dt * (f.decay || 2.2); if (f.k <= 0) this.flashes.splice(i, 1); }
   }
   burst(x, y, z) {
     const r = this.rng;
@@ -256,8 +405,17 @@ export class Particles {
     const env = this.city.env;
     const pf = this.fr.puff;
     for (const q of this.p) {
-      if (!view.visible(q.x, q.y, q.z, 2)) continue;
+      if (q.delay > 0 || !view.visible(q.x, q.y, q.z, 2)) continue;
       const t = q.max ? q.life / q.max : 1;
+      if (q.kind === 'smoke' || q.kind === 'fireball') {
+        const age = 1 - t;
+        const si = Math.min(pf.length - 1, Math.floor(age * q.grow));
+        const a = (q.a ?? 1) * Math.min(1, t * (q.kind === 'smoke' ? 2.2 : 3));
+        L.push(q.x, q.y, q.z, pf[si], q.row, q.kind === 'fireball' ? SF.EMISSIVE | SF.NOSHADOW : SF.NOSHADOW, a, 0.001);
+        continue;
+      }
+      if (q.kind === 'fire') { L.push(q.x, q.y, q.z, q.f, q.row, SF.EMISSIVE | SF.NOSHADOW, Math.min(1, t * 2.5), 0.002); continue; }
+      if (q.kind === 'bit' || q.kind === 'blood') { L.push(q.x, q.y, q.z, q.f, q.row, SF.NOSHADOW, Math.min(1, q.life * 2), 0.002); continue; }
       if (q.kind === 'steam') {
         const age = 1 - t;
         const si = Math.min(pf.length - 1, Math.floor(age * q.grow));
@@ -291,7 +449,14 @@ export class Particles {
     return this._slotRows[slot];
   }
   lights(LL, env) {
-    for (const f of this.flashes) LL.add(f.x, f.y, 14, f.color, f.k * 0.8);
+    for (const f of this.flashes) LL.add(f.x, f.y, f.r || 14, f.color, f.k * 0.8);
+    const V = this.city.vehicles;
+    if (V) for (const c of V.damaged) {
+      const burning = c.fireT != null || (c.wreck && c.burnT > 0);
+      if (!burning || c.fadeOut != null) continue;
+      const fl = 0.75 + 0.25 * Math.sin(this.city.time * 23 + c.id) * Math.sin(this.city.time * 7.3 + c.id * 2);
+      LL.add(c.x, c.y, 3.6, [1, 0.55, 0.2], 0.6 * fl);
+    }
     for (const q of this.p) if (q.kind === 'rocket') LL.add(q.x, q.y, 1.2, [1, 0.8, 0.5], 0.5);
     void env;
   }

@@ -89,6 +89,7 @@ export class AudioEngine {
       steam: loop(this.white, [['highpass', 2400], ['lowpass', 6000]], 0),
       siren: null,
       engine: null,
+      fire: null,
     };
     return true;
   }
@@ -320,8 +321,8 @@ export class AudioEngine {
         break;
       case 'crash': {
         // metal crunch: a thump under a burst of filtered noise and a few rattles
-        if (!this.throttle('crash', 0.35)) return;
-        const o = O(0.9);
+        if (!this.throttle('crash', 0.25)) return;
+        const o = O(clamp(0.45 + (src.k || 4) * 0.09, 0.45, 1.2));
         this.noise(t, 0.35, o, [['lowpass', 1400, 0.7, 300]], 0.8, 0.004, this.brown);
         this.osc('sine', 90, t, 0.25, o, 0.6, 0.004, 40);
         for (let k = 0; k < 5; k++) this.noise(t + 0.05 + r.range(0, 0.25), 0.04, o, [['bandpass', r.range(2000, 4500), 3]], r.range(0.1, 0.25));
@@ -331,6 +332,67 @@ export class AudioEngine {
         // car alarm: alternating two-tone whoops
         const o = O(0.35);
         for (let k = 0; k < 10; k++) this.osc('square', k % 2 ? 1250 : 880, t + k * 0.22, 0.18, o, 0.18, 0.01, k % 2 ? 900 : 1300);
+        break;
+      }
+      case 'gunshot': {
+        // sharp crack, a body thump, and the street throwing it back twice
+        const o = O(1.1);
+        this.noise(t, 0.05, o, [['highpass', 1400]], 0.9, 0.001);
+        this.noise(t, 0.14, o, [['bandpass', 520, 0.9, 260]], 0.8, 0.001, this.brown);
+        this.osc('sine', 150, t, 0.1, o, 0.55, 0.001, 55);
+        const e = this.out(w.g * 0.35, -w.pan * 0.5);
+        this.noise(t + 0.13, 0.12, e, [['lowpass', 1600]], 0.35, 0.004);
+        this.noise(t + 0.29, 0.16, e, [['lowpass', 1000]], 0.2, 0.006);
+        break;
+      }
+      case 'explosion': {
+        // a deep boom, a roar of fire, then debris raining down
+        const o = O(1.3);
+        this.noise(t, 2.4, o, [['lowpass', 1100, 0.7, 70]], 1.0, 0.004, this.brown);
+        this.osc('sine', 70, t, 1.4, o, 0.9, 0.004, 24);
+        this.noise(t, 0.3, o, [['highpass', 900]], 0.6, 0.002);
+        this.noise(t + 0.15, 1.6, O(0.5), [['bandpass', 700, 0.6]], 0.35, 0.2);
+        for (let k = 0; k < 14; k++) this.noise(t + 0.5 + r.range(0, 1.4), 0.03, O(0.6), [['bandpass', r.range(1800, 5000), 3]], r.range(0.08, 0.25));
+        this.noise(t + 0.5, 2.5, this.out(w.g * 0.4, -w.pan * 0.4), [['lowpass', 300]], 0.5, 0.3, this.brown);
+        break;
+      }
+      case 'hit': {
+        if (!this.throttle('hit', 0.08)) return;
+        const o = O(0.8);
+        this.noise(t, 0.07, o, [['lowpass', 900]], 0.6, 0.002, this.brown);
+        this.osc('sine', 110, t, 0.08, o, 0.4, 0.002, 60);
+        break;
+      }
+      case 'thud': {
+        if (!this.throttle('thud', 0.1)) return;
+        this.noise(t, 0.12, O(0.6), [['lowpass', 500]], 0.6, 0.003, this.brown);
+        break;
+      }
+      case 'ping': {
+        // bullet into sheet metal
+        if (!this.throttle('ping', 0.05)) return;
+        const o = O(0.5);
+        this.osc('triangle', r.range(1900, 2600), t, 0.09, o, 0.25, 0.001, 1200);
+        this.noise(t, 0.04, o, [['bandpass', 3200, 2]], 0.3, 0.001);
+        break;
+      }
+      case 'ricochet': {
+        const o = O(0.45);
+        this.osc('sine', r.range(2600, 3400), t, 0.22, o, 0.18, 0.002, r.range(700, 1000));
+        break;
+      }
+      case 'reload': {
+        const o = O(0.5);
+        this.noise(t, 0.03, o, [['bandpass', 2400, 3]], 0.4, 0.001);
+        this.noise(t + 0.55, 0.03, o, [['bandpass', 1800, 3]], 0.45, 0.001);
+        this.noise(t + 0.9, 0.04, o, [['bandpass', 2800, 3]], 0.5, 0.001);
+        break;
+      }
+      case 'star': {
+        // the wanted level goes up: a tense little two-note sting
+        const o = this.out(0.22, 0);
+        this.osc('square', 220, t, 0.12, o, 0.2, 0.005);
+        this.osc('square', 311, t + 0.13, 0.22, o, 0.2, 0.005);
         break;
       }
       case 'busted': {
@@ -452,7 +514,7 @@ export class AudioEngine {
         o.start(); o2.start();
         L.engine = { o, o2, lp, g };
       }
-      const v = Math.abs(pc.v);
+      const v = Math.min(10, Math.abs(pc.v || 0));
       L.engine.o.frequency.setTargetAtTime(34 + v * 9, t, 0.08);
       L.engine.o2.frequency.setTargetAtTime(17 + v * 4.5, t, 0.08);
       L.engine.lp.frequency.setTargetAtTime(300 + v * 90, t, 0.1);
@@ -462,6 +524,29 @@ export class AudioEngine {
       const e = L.engine;
       setTimeout(() => { try { e.o.stop(); e.o2.stop(); } catch (err) { /* already stopped */ } }, 800);
       L.engine = null;
+    }
+    // burning cars: a low roar with crackles, from the loudest one on screen
+    let burn = 0, bpan = 0;
+    const V = city.vehicles;
+    if (V) for (const c of V.damaged) if (c.fireT != null || (c.wreck && c.burnT > 0)) { const w = this.where(c); if (w.g > burn) { burn = w.g; bpan = w.pan; } }
+    if (burn > 0.02) {
+      if (!L.fire) {
+        const src = this.ctx.createBufferSource(); src.buffer = this.brown; src.loop = true;
+        const bp = this.ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 520; bp.Q.value = 0.5;
+        const g = this.ctx.createGain(); g.gain.value = 0;
+        const p = this.ctx.createStereoPanner();
+        src.connect(bp).connect(g).connect(p).connect(this.sfx);
+        src.start();
+        L.fire = { src, g, p };
+      }
+      L.fire.g.gain.setTargetAtTime(burn * 0.35, t, 0.3);
+      L.fire.p.pan.setTargetAtTime(bpan, t, 0.3);
+      if (this.rng.chance(dt * 9)) this.noise(t + this.rng.range(0, 0.05), 0.015, this.out(burn * 0.5, bpan), [['bandpass', this.rng.range(1500, 4000), 2]], this.rng.range(0.1, 0.35), 0.001);
+    } else if (L.fire) {
+      L.fire.g.gain.setTargetAtTime(0, t, 0.4);
+      const f = L.fire;
+      setTimeout(() => { try { f.src.stop(); } catch (e) { /* already stopped */ } }, 1500);
+      L.fire = null;
     }
     // ice cream truck jingle (original tune)
     const ice = cars.find((c) => c.special === 'icecream');

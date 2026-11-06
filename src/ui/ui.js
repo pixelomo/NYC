@@ -124,10 +124,12 @@ export class UI {
     // toast
     this.toastEl = this.h('div', 'toast hidden');
     R.append(this.toastEl);
-    // play-mode HUD: who you are, what you're in, the heat, prompts and news
+    // play-mode HUD: who you are, what you're in, how wanted you are, the pistol, prompts and news
     this.hudEl = this.h('div', 'panel playhud hidden', `
-      <div class="ph-row"><span class="ph-name"></span><span class="ph-heat"><span class="ph-label">HEAT</span>${'<i></i>'.repeat(5)}</span></div>
-      <div class="ph-status"></div><div class="ph-prompt"></div>`);
+      <div class="ph-row"><span class="ph-name"></span><span class="ph-stars" title="Wanted level">${'<i></i>'.repeat(5)}</span></div>
+      <div class="ph-status"></div>
+      <div class="ph-row ph-sub"><span class="ph-gun"></span><span class="ph-car"><span class="ph-label">CAR</span><b><u></u></b></span></div>
+      <div class="ph-prompt"></div>`);
     R.append(this.hudEl);
     this.hudMsg = this.h('div', 'playmsg hidden');
     R.append(this.hudMsg);
@@ -141,6 +143,7 @@ export class UI {
       <div class="hrow"><b>Q / E</b> rotate the view</div>
       <div class="hrow"><b>V</b> bird's-eye / isometric view</div>
       <div class="hrow"><b>P</b> play as someone: <b>WASD</b> move, <b>Shift</b> run, <b>F</b> get in/out of cars, <b>Space</b> handbrake, <b>Esc</b> quit</div>
+      <div class="hrow"><b>Click</b> (or <b>Space</b> on foot) shoot · <b>R</b> reload · crimes bring police and wanted stars</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
       <div class="hrow"><b>GO TO menu</b> glide to a place</div>
@@ -211,7 +214,7 @@ export class UI {
     if (app.camera.mode !== 'bird') this.toggleView('bird');
     const z = this.zoomLevels.find((v) => v >= 3 * (window.devicePixelRatio || 1) - 0.01) || this.zoomLevels[this.zoomLevels.length - 1];
     app.camera.zoomTo(z);
-    this.toast('WASD/arrows move · SHIFT run · F get in/out · SPACE handbrake · ESC quit');
+    this.toast('WASD move · SHIFT run · F get in/out · CLICK shoot · R reload · SPACE handbrake · ESC quit');
   }
   toggleView(mode) {
     const cam = this.app.camera;
@@ -258,15 +261,26 @@ export class UI {
   // ---- per frame ------------------------------------------------------------------
   updateHud() {
     const h = this.app.city.player.hud();
-    if (!h) { if (!this.hudEl.classList.contains('hidden')) this.hudEl.classList.add('hidden'); this.hudMsg.classList.add('hidden'); this.hudBig.classList.add('hidden'); this.playAsBtn?.classList.remove('on'); this.titleEl.classList.remove('hidden'); this.root.classList.remove('playing'); return; }
+    if (!h) { if (!this.hudEl.classList.contains('hidden')) this.hudEl.classList.add('hidden'); this.hudMsg.classList.add('hidden'); this.hudBig.classList.add('hidden'); this.playAsBtn?.classList.remove('on'); this.titleEl.classList.remove('hidden'); this.root.classList.remove('playing'); this.app.canvas.classList.remove('aiming'); return; }
     this.hudEl.classList.remove('hidden');
     this.titleEl.classList.add('hidden');
     this.root.classList.add('playing');
     this.hudEl.querySelector('.ph-name').textContent = h.name.toUpperCase();
     this.hudEl.querySelector('.ph-status').textContent = h.status;
     this.hudEl.querySelector('.ph-prompt').textContent = h.prompt;
-    const lit = Math.ceil(h.heat - 1e-6), flash = Math.floor(performance.now() / 250) % 2;
-    this.hudEl.querySelectorAll('.ph-heat i').forEach((el, i) => { el.className = i < lit ? (flash ^ (i & 1) ? 'red' : 'blue') : ''; });
+    // wanted stars: lit gold, blinking while the police are searching for you
+    const blink = h.searching && Math.floor(performance.now() / 300) % 2;
+    this.hudEl.querySelectorAll('.ph-stars i').forEach((el, i) => { el.className = i < h.stars ? (blink ? 'on dim' : 'on') : ''; });
+    const g = h.gun;
+    this.hudEl.querySelector('.ph-gun').textContent = g.reloading ? 'PISTOL · RELOADING' : `PISTOL · ${g.clip}/${g.cap}`;
+    const carEl = this.hudEl.querySelector('.ph-car');
+    carEl.classList.toggle('hidden', !h.car);
+    if (h.car) {
+      const bar = carEl.querySelector('u');
+      bar.style.width = `${Math.round(Math.max(0, h.car.hp) * 100)}%`;
+      bar.className = h.car.fire ? 'fire' : h.car.hp < 0.3 ? 'low' : h.car.hp < 0.6 ? 'mid' : '';
+    }
+    this.app.canvas.classList.add('aiming');
     const small = h.msgs.filter((m) => !m.big).map((m) => m.text);
     this.hudMsg.textContent = small.join('  ·  ');
     this.hudMsg.classList.toggle('hidden', !small.length);
@@ -301,10 +315,29 @@ export class UI {
     const app = this.app, cv = app.canvas;
     const ptrs = new Map();
     let drag = null, pinch = null, moved = 0;
+    // play mode: the mouse aims, a click (or tap) fires
+    const aim = (e) => {
+      const pl = app.city.player;
+      if (!pl || !pl.active) return false;
+      const pz = pl.p ? pl.p.z + 0.8 : 0.8;
+      const [wx, wy] = app.camera.screenToWorld(e.clientX, e.clientY, cv.clientWidth, cv.clientHeight, pz);
+      pl.aimAt(wx, wy);
+      return true;
+    };
+    cv.addEventListener('pointermove', (e) => { if (!ptrs.size) aim(e); });
     cv.addEventListener('pointerdown', (e) => {
+      app.audio?.unlock();
+      const pl = app.city.player;
+      if (pl && pl.active && e.button === 0) {
+        aim(e);
+        pl.trigger = true; pl.clickShot = true;
+        if (e.pointerType !== 'mouse') setTimeout(() => { pl.trigger = false; }, 120);
+        cv.setPointerCapture(e.pointerId);
+        ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, shoot: true });
+        return;
+      }
       cv.setPointerCapture(e.pointerId);
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
-      app.audio?.unlock();
       if (ptrs.size === 1) { drag = { x: e.clientX, y: e.clientY }; moved = 0; }
       if (ptrs.size === 2) {
         const [a, b] = [...ptrs.values()];
@@ -314,6 +347,7 @@ export class UI {
     });
     cv.addEventListener('pointermove', (e) => {
       if (!ptrs.has(e.pointerId)) return;
+      if (ptrs.get(e.pointerId).shoot) { aim(e); return; }
       ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pinch && ptrs.size === 2) {
         const [a, b] = [...ptrs.values()];
@@ -339,7 +373,9 @@ export class UI {
       }
     });
     const up = (e) => {
+      const was = ptrs.get(e.pointerId);
       ptrs.delete(e.pointerId);
+      if (was && was.shoot) { const pl = app.city.player; if (pl && e.pointerType === 'mouse') pl.trigger = false; return; }
       cv.classList.remove('dragging');
       if (drag && moved <= 4) this.click(e.clientX, e.clientY);
       if (ptrs.size < 2) pinch = null;
@@ -364,6 +400,7 @@ export class UI {
       if (pl && pl.active) {
         // play mode: movement keys are read every frame; these act on press
         if (k === 'f' || k === 'enter') { if (!e.repeat) pl.action(); e.preventDefault(); return; }
+        if (k === 'r') { if (!e.repeat) pl.reload(); return; }
         if (k === ' ' || k.startsWith('arrow')) { e.preventDefault(); return; }
         if (k === 'escape' || k === 'p') { if (!e.repeat) this.togglePlay(); return; }
         if ('wasd'.includes(k) && k.length === 1) return;
@@ -405,7 +442,7 @@ export class UI {
     if (k.has('s') || k.has('arrowdown')) sy += 1;
     const pl = this.app.city.player;
     if (pl && pl.active) {
-      pl.input.x = sx; pl.input.y = sy; pl.input.run = k.has('shift'); pl.input.brake = k.has(' ');
+      pl.input.x = sx; pl.input.y = sy; pl.input.run = k.has('shift'); pl.input.brake = k.has(' '); pl.input.space = k.has(' ');
       return;
     }
     if (!sx && !sy) return;

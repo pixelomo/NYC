@@ -400,6 +400,8 @@ function poseParams(anim, f) {
     case 'skate': P.la = 'out'; P.ra = 'out'; P.lx = f ? -3 : 3; P.rx = f ? 5 : -5; P.lean = 1; break;
     case 'phone': P.ra = 'phone'; break;
     case 'lie': P.lie = true; break;
+    case 'aim': P.ra = f ? 'aim2' : 'aim'; P.la = 'aimL'; break;
+    case 'down': P.down = true; break;
   }
   return P;
 }
@@ -414,11 +416,13 @@ const ARMS = {
   fwdb: [[2, 3], [5, 1]], backb: [[-3, 3], [-4, 6]], bent: [[0, 4], [3, 3]],
   up: [[1, -4], [2, -8]], upback: [[-2, -3], [-4, -6]], low: [[1, 4], [3, 9]], fwdlow: [[2, 4], [5, 6]],
   lap: [[0, 4], [4, 5]], phone: [[1, 4], [3, 1]],
+  aim: [[3, 0], [6, -1]], aim2: [[2, -1], [5, -3]], aimL: [[5, 1], [12, 0]],
 };
 
 export function paintPerson(sp, tpl, anim, f, view, ext = 0) {
   const P = poseParams(anim, f);
   if (P.lie) return paintLying(sp, tpl);
+  if (P.down) return paintDown(sp, tpl);
   const kid = tpl.body === 'kid', elder = tpl.body === 'elder';
   const shorts = tpl.bottom === 'shorts', skirt = tpl.bottom === 'skirt', dress = tpl.bottom === 'dress';
   const fem = skirt || dress;
@@ -569,6 +573,19 @@ export function paintPerson(sp, tpl, anim, f, view, ext = 0) {
         tset(cx + 2, hipY - 3, S.DARK, 128); tset(cx + 2, hipY - 1, S.DARK, 128);
       } else for (let y = shoulderY + 2; y < hipY; y++) tset(cx, y, S.TOP, 104);
     }
+    if (tpl.top === 'uniform') {
+      // duty belt with a gold buckle; badge and shoulder patch on the front
+      for (let x = tx0; x < tx0 + tw; x++) tset(x, hipY - 1, S.DARK, x === tx0 ? 120 : 96);
+      if (front) {
+        tset(cx + 1, hipY - 1, S.ITEM, 150);
+        tset(cx + 2, shoulderY + 2, S.ITEM, 165); tset(cx + 2, shoulderY + 3, S.ITEM, 128);
+        for (let y = shoulderY + 1; y < hipY - 1; y++) if ((y - shoulderY) % 2 === 0) tset(cx, y, S.TOP2, 140);
+        tset(tx0 + tw - 2, hipY - 2, S.DARK, 110);
+      } else {
+        for (let y = shoulderY + 1; y < hipY - 1; y++) tset(cx, y, S.TOP, 108);
+        tset(tx0 + 1, shoulderY + 1, S.ITEM2, 120);
+      }
+    }
   } else {
     if (coat === 'jacket' && front) {
       for (let y = shoulderY + 1; y <= hipY; y++) { tset(cx, y, S.TOP, 128); tset(cx + 1, y, S.TOP, 112); }
@@ -694,6 +711,12 @@ export function paintPerson(sp, tpl, anim, f, view, ext = 0) {
       for (let c = Math.round(ccx - half); c <= Math.round(ccx + half); c++) HT(c, -1 - k, c < ccx ? 140 : 118);
     }
     for (let c = 0; c < headW; c++) HT(c, -1, 128, S.ITEM);
+  } else if (hat === 'police') {
+    // peaked uniform cap: flat crown a touch wider than the head, black band and visor, gold badge
+    for (let c = -1; c <= headW; c++) HT(c, -2, c < 1 ? 150 : 134);
+    for (let r = -1; r <= 0; r++) for (let c = 0; c < headW; c++) HT(c, r, r === -1 ? 130 - c * 2 : 114);
+    for (let c = 0; c < headW; c++) HT(c, 1, 84, S.DARK);
+    if (front) { for (let c = 3; c <= headW + 1; c++) HT(c, 2, 70, S.DARK); HT(headW - 2, -1, 165, S.ITEM); }
   } else if (hat === 'helmet') {
     for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : -1; c <= headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 150 : c < 2 ? 140 : 118);
     if (front) for (let c = headW - 1; c <= headW + 1; c++) HT(c, 2, 100);
@@ -701,6 +724,12 @@ export function paintPerson(sp, tpl, anim, f, view, ext = 0) {
   }
   // ---- near arm, held items
   const hand = drawArm(false, P.ra);
+  if (P.ra === 'aim' || P.ra === 'aim2') {
+    // a black pistol held out, kicked up a pixel on the recoil frame
+    const [hx, hy] = hand, up = P.ra === 'aim2' ? 1 : 0;
+    sp.set(hx + 1, hy - up, S.DARK, 132); sp.set(hx + 2, hy - up, S.DARK, 150); sp.set(hx + 3, hy - up - (up ? 1 : 0), S.DARK, 140);
+    sp.set(hx + 1, hy + 1 - up, S.DARK, 92); sp.set(hx, hy + 1, S.DARK, 84);
+  }
   const carrying = P.ra === 'down' || P.ra === 'fwd' || P.ra === 'back';
   if (tpl.bag === 'brief' && carrying) {
     const [hx, hy] = hand;
@@ -737,6 +766,62 @@ function paintLying(sp, tpl) {
   for (let x = 10; x <= 16; x++) sp.set(x, y + 3, S.SKIN, 112);
 }
 
+// sprawled on the ground (knocked down, or worse), head to the left, nothing underneath
+function paintDown(sp, tpl) {
+  const g = sp.h - 1, kid = tpl.body === 'kid';
+  const k = kid ? 0.74 : 1, X = (v) => Math.round(3 + v * k);
+  const y = g - 4;
+  const topC = tpl.coat ? S.COAT : S.TOP;
+  const legC = tpl.bottom === 'shorts' || tpl.bottom === 'skirt' || tpl.bottom === 'dress' ? S.SKIN : S.BOTTOM;
+  const bare = !tpl.coat && (tpl.top === 'tank' || tpl.top === 'jersey' || tpl.top === 'tee');
+  // far arm flung up past the head, far leg bent at the knee
+  for (let i = 0; i <= 5; i++) sp.set(X(7 + i * 0.45), y - 1 - i, i > 2 && bare ? S.SKIN : topC, 100);
+  sp.set(X(9.7), y - 7, S.SKIN, 110); sp.set(X(10.2), y - 7, S.SKIN, 94);
+  for (let i = 0; i <= 4; i++) sp.set(X(18 + i), y - Math.min(i, 2), legC, 98);
+  for (let i = 0; i <= 3; i++) sp.set(X(22 + i), y - 2 + i, legC, 94);
+  sp.set(X(26), y + 1, S.SHOES, 110); sp.set(X(26.7), y + 1, S.SHOES, 90);
+  // torso and hips
+  for (let x = X(7); x <= X(15); x++) for (let r = -1; r <= 2; r++) sp.set(x, y + r, topC, r === -1 ? 146 : r === 2 ? 98 : 124);
+  if (tpl.top === 'uniform') { for (let r = -1; r <= 2; r++) sp.set(X(15), y + r, S.DARK, 100); sp.set(X(10), y - 1, S.ITEM, 165); }
+  for (let x = X(15) + 1; x <= X(18); x++) for (let r = -1; r <= 2; r++) sp.set(x, y + r, S.BOTTOM, r === -1 ? 138 : 108);
+  // near leg straight out, near arm along the side
+  for (let x = X(18) + 1; x <= X(26); x++) { sp.set(x, y + 1, legC, 132); sp.set(x, y + 2, legC, 108); }
+  sp.set(X(27), y + 1, S.SHOES, 128); sp.set(X(27), y + 2, S.SHOES, 100); sp.set(X(27.7), y + 2, S.SHOES, 90);
+  for (let x = X(8); x <= X(13); x++) sp.set(x, y + 3, bare && x > X(10) ? S.SKIN : topC, 112);
+  sp.set(X(14), y + 3, S.SKIN, 120); sp.set(X(14.6), y + 3, S.SKIN, 100);
+  // head on its side
+  sp.ellipse(X(4.2), y + 0.5, 2.7 * (kid ? 0.9 : 1), 2.3, S.SKIN, 124);
+  if (tpl.hair !== 'bald') {
+    for (let x = X(1.6); x <= X(4); x++) { sp.set(x, y - 2, S.HAIR, 136); sp.set(x - 1, y - 1, S.HAIR, 120); }
+    sp.set(X(1.6) - 1, y, S.HAIR, 110); sp.set(X(1.6) - 1, y + 1, S.HAIR, 104);
+    if (tpl.hair === 'long' || tpl.hair === 'pony' || tpl.hair === 'afro') for (let x = X(0.6); x <= X(3.5); x++) sp.set(x, y + 3, S.HAIR, 108);
+  }
+  sp.set(X(5.3), y, S.DARK, 104);
+  // a hat knocked off beside the head
+  if (tpl.hat) for (const [dx, dy] of [[0, 0], [1, 0], [2, 0], [1, -1]]) sp.set(X(-0.6) + dx, g - 1 + dy, S.HAT, 120);
+}
+
+// poses only some people ever need, painted the first time they are asked for
+const LAZY_POSES = { aim: { n: 2, back: true }, down: { n: 1, back: false, w: 32 } };
+export function personPose(atlas, frames, anim) {
+  if (frames.front[anim]) return frames;
+  const L = LAZY_POSES[anim];
+  try {
+    if (!L || !frames.tpl) throw new Error('no pose');
+    for (const view of ['front', 'back']) {
+      if (view === 'back' && !L.back) { frames.back[anim] = frames.front[anim]; continue; }
+      const arr = [], fw = L.w || PW;
+      for (let f = 0; f < L.n; f++) arr.push(atlas.add(null, fw, PH, (sp) => { paintPerson(sp, frames.tpl, anim, f, view, 0); selOut(sp); }, Math.floor(fw / 2), PH - 1));
+      frames[view][anim] = arr;
+    }
+  } catch (e) {
+    // atlas full: make do with an existing pose
+    const alt = anim === 'down' ? 'lie' : 'idle';
+    frames.front[anim] = frames.front[alt]; frames.back[anim] = frames.back[alt] || frames.front[alt];
+  }
+  return frames;
+}
+
 // Generates all frames for a template; returns { front: {anim: [frames]}, back: {...} }
 const TEMPLATE_BUDGET = 110;
 export function personTemplate(atlas, tpl) {
@@ -759,7 +844,7 @@ export function personTemplate(atlas, tpl) {
     }
     if (best) return best.out;
   }
-  const out = { front: {}, back: {} };
+  const out = { front: {}, back: {}, tpl };
   for (const anim in POSES) {
     for (const view of ['front', 'back']) {
       if (view === 'back' && !BACK_POSES[anim]) { out.back[anim] = out.front[anim]; continue; }

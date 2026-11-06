@@ -7,6 +7,7 @@ import { RNG } from '../core/math.js';
 import { T, LIGHT_EXT } from '../world/layout.js';
 
 const CAR_CAP = 768; // instances per vehicle type per frame
+const IS = 16; // floats per instance: position+heading, palette/alpha/snow/lift, crumple, burn/dents/seed
 
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -74,7 +75,32 @@ precision highp int;
 precision highp sampler2DShadow;
 `;
 
-const VS = HEAD + `
+// Crash damage, per instance: crumple at the front and back ends, dents in the sides around where
+// they were hit, a little crumpled jitter on top, and a burnt-out shell that sags.
+const DEFORM = `
+layout(location=7) in vec4 iC; // crumple: front, rear, left, right (0..1)
+layout(location=8) in vec4 iD; // burnt, left dent centre, right dent centre, seed
+uniform vec3 uHalf;            // half length, half width, height of this vehicle type
+float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
+vec3 deform(vec3 lp) {
+  if (iC.x + iC.y + iC.z + iC.w + iD.x < 0.001) return lp;
+  float fx = lp.x / uHalf.x, fy = lp.y / uHalf.y, fz = clamp(lp.z / uHalf.z, 0.0, 1.0);
+  float wf = smoothstep(0.3, 1.0, fx) * iC.x;
+  float wr = smoothstep(0.3, 1.0, -fx) * iC.y;
+  float wl = smoothstep(0.25, 1.0, fy) * exp(-pow((fx - iD.y) * 2.2, 2.0)) * iC.z;
+  float wrt = smoothstep(0.25, 1.0, -fy) * exp(-pow((fx - iD.z) * 2.2, 2.0)) * iC.w;
+  lp.x += (wr - wf) * uHalf.x * 0.2;
+  lp.z -= (wf * 0.14 + wr * 0.08) * fz * uHalf.z;
+  lp.y += (wrt - wl) * uHalf.y * 0.45;
+  float crump = min(1.0, wf + wr + wl + wrt);
+  vec3 j = vec3(hash13(lp * 13.0 + iD.w), hash13(lp.yzx * 11.0 + iD.w * 3.0), hash13(lp.zxy * 9.0 + iD.w * 7.0)) - 0.5;
+  lp += j * 0.05 * crump;
+  lp.z -= iD.x * 0.07 * fz;
+  return lp;
+}
+`;
+
+const VS = HEAD + DEFORM + `
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aUV;
 layout(location=2) in uvec4 aRect;
@@ -88,11 +114,15 @@ out vec2 vUV;
 flat out uvec4 vRect;
 flat out vec3 vNrm;
 out vec3 vWorld;
+out vec3 vLocal;
 flat out vec4 vB;
+flat out vec4 vC;
+flat out vec4 vD;
 flat out uint vMat;
 void main() {
   float c = cos(iA.w), s = sin(iA.w);
-  vec3 lp = aPos;
+  vLocal = aPos; vC = iC; vD = iD;
+  vec3 lp = deform(aPos);
   vec3 wp = vec3(iA.x + lp.x * c - lp.y * s, iA.y + lp.x * s + lp.y * c, iA.z + lp.z + iB.w);
   vNrm = vec3(aNrm.x * c - aNrm.y * s, aNrm.x * s + aNrm.y * c, aNrm.z);
   vUV = aUV; vRect = aRect; vWorld = wp; vB = iB; vMat = aInfo.y;
@@ -109,8 +139,13 @@ in vec2 vUV;
 flat in uvec4 vRect;
 flat in vec3 vNrm;
 in vec3 vWorld;
+in vec3 vLocal;
 flat in vec4 vB;
+flat in vec4 vC;
+flat in vec4 vD;
 flat in uint vMat;
+uniform vec3 uHalf;
+float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
 uniform sampler2D uSprites;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
@@ -148,15 +183,47 @@ void main() {
   int slot = int(t.r * 255.0 + 0.5);
   vec4 pc = texelFetch(uPal, ivec2(slot, row), 0);
   if (pc.a < 0.1) discard;
+  // how hard this spot was hit
+  float fx = vLocal.x / uHalf.x, fy = vLocal.y / uHalf.y, burnt = vD.x;
+  float dmg = smoothstep(0.35, 1.0, fx) * vC.x + smoothstep(0.35, 1.0, -fx) * vC.y
+    + (smoothstep(0.35, 1.0, fy) * exp(-pow((fx - vD.y) * 2.0, 2.0)) * vC.z + smoothstep(0.35, 1.0, -fy) * exp(-pow((fx - vD.z) * 2.0, 2.0)) * vC.w) * 1.15;
+  // smashed lamps on a crushed end, and nothing lights up on a burnt shell
+  if ((slot == 5 && vC.x > 0.4) || (slot == 6 && vC.y > 0.4) || (burnt > 0.5 && (slot == 5 || slot == 6 || slot == 10 || slot == 11 || slot == 12 || slot == 16 || slot == 8))) pc = vec4(0.11, 0.1, 0.1, 1.0);
   vec3 albedo = pc.rgb * (t.g * 255.0 / 128.0);
   vec3 n = normalize(vNrm);
+  float h = hash13(floor(vLocal * 32.0) + vD.w * 17.0);
+  if (dmg > 0.03) {
+    // crumpled panels catch the light facet by facet
+    vec3 dn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+    if (dot(dn, n) < 0.0) dn = -dn;
+    n = normalize(mix(n, dn, clamp(dmg, 0.0, 0.5)));
+    bool paint = slot == 1 || slot == 2 || slot == 8 || slot == 9 || slot == 13;
+    if (paint) {
+      // bare-metal scrapes run along the body; the rest of the hit panel is dented and dull
+      float sc = hash13(floor(vLocal * vec3(9.0, 40.0, 40.0)) + vD.w * 23.0);
+      if (sc < dmg * 0.24) albedo = vec3(0.5, 0.5, 0.52) * (0.8 + 0.4 * h);
+      else albedo *= 1.0 - smoothstep(0.1, 0.9, dmg) * (0.18 + 0.2 * step(h, 0.5));
+    }
+    if (slot == 3 && dmg > 0.22) {
+      float web = hash13(floor(vLocal * 16.0) + 3.0 + vD.w);
+      if (web < dmg * 0.5) albedo = vec3(0.82, 0.86, 0.9) * (0.7 + 0.4 * h);
+      else if (web > 1.0 - dmg * 0.35) albedo = vec3(0.08, 0.09, 0.1);
+    }
+  }
+  if (burnt > 0.0) {
+    vec3 ch = vec3(0.085, 0.078, 0.072) * (0.7 + 0.7 * h);
+    if (h > 0.84) ch = vec3(0.30, 0.15, 0.07);
+    if (slot == 3) ch = vec3(0.03);
+    albedo = mix(albedo, ch, burnt);
+    pc.a = max(pc.a, burnt > 0.5 ? 1.0 : pc.a);
+  }
   if (pc.a < 0.75) {
     oColor = vec4(albedo * 1.15, 1.0);
     oGlow = vec4(albedo, 1.0);
     return;
   }
   // snow on roofs of parked cars
-  if (vB.z > 0.0 && n.z > 0.6) {
+  if (vB.z > 0.0 && n.z > 0.6 && burnt < 0.5) {
     float h = fract(sin(dot(floor(vWorld.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
     float nn = texture(uNoise, vWorld.xy * 0.35).r;
     if (nn * 0.85 + h * 0.15 < vB.z * 1.35) albedo = mix(vec3(0.86, 0.9, 0.97), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nn));
@@ -177,7 +244,7 @@ void main() {
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
   // glossy paint / glass reflection
-  if (slot == 3) {
+  if (slot == 3 && burnt < 0.5 && dmg < 0.5) {
     vec3 r = reflect(-uViewDir, n);
     vec3 sky = mix(uSkyHor, uSkyTop, clamp(r.z * 1.4, 0.0, 1.0));
     col = mix(col, sky * 0.8, 0.45) + lm * 0.3;
@@ -188,14 +255,15 @@ void main() {
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
 }`;
 
-const SHADOW_VS = HEAD + `
+const SHADOW_VS = HEAD + DEFORM + `
 layout(location=0) in vec3 aPos;
 layout(location=5) in vec4 iA;
 layout(location=6) in vec4 iB;
 uniform mat4 uShadowVP;
 void main() {
   float c = cos(iA.w), s = sin(iA.w);
-  vec3 wp = vec3(iA.x + aPos.x * c - aPos.y * s, iA.y + aPos.x * s + aPos.y * c, iA.z + aPos.z + iB.w);
+  vec3 lp = deform(aPos);
+  vec3 wp = vec3(iA.x + lp.x * c - lp.y * s, iA.y + lp.x * s + lp.y * c, iA.z + lp.z + iB.w);
   gl_Position = uShadowVP * vec4(wp, 1.0);
 }`;
 const SHADOW_FS = `#version 300 es
@@ -729,11 +797,13 @@ export class CarLayer {
       makeBuffer(gl, m.idx, gl.ELEMENT_ARRAY_BUFFER);
       const ibuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, ibuf);
-      gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * 8 * 4, gl.DYNAMIC_DRAW);
-      gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.FLOAT, false, 32, 0); gl.vertexAttribDivisor(5, 1);
-      gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.FLOAT, false, 32, 16); gl.vertexAttribDivisor(6, 1);
+      gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * IS * 4, gl.DYNAMIC_DRAW);
+      for (let a = 0; a < 4; a++) { gl.enableVertexAttribArray(5 + a); gl.vertexAttribPointer(5 + a, 4, gl.FLOAT, false, IS * 4, a * 16); gl.vertexAttribDivisor(5 + a, 1); }
       gl.bindVertexArray(null);
-      this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * 8), n: 0 };
+      // extent of the body, for placing damage
+      let hx = 0.5, hy = 0.3, hz = 0.5;
+      for (let i = 0; i < m.pos.length; i += 3) { hx = Math.max(hx, Math.abs(m.pos[i])); hy = Math.max(hy, Math.abs(m.pos[i + 1])); hz = Math.max(hz, m.pos[i + 2]); }
+      this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * IS), n: 0, half: [hx, hy, hz] };
     }
   }
 
@@ -792,10 +862,14 @@ export class CarLayer {
       const t = this.types[c.type];
       if (!t || t.n >= CAR_CAP) continue;
       this.updatePalette(c, time);
-      const o = t.n * 8, d = t.data;
+      const o = t.n * IS, d = t.data;
       d[o] = c.x; d[o + 1] = c.y; d[o + 2] = c.z || 0; d[o + 3] = c.h;
       d[o + 4] = c.palRow; d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0);
-      d[o + 6] = c.state === 'parked' ? snow : snow * 0.25; d[o + 7] = 0.02;
+      d[o + 6] = c.state === 'parked' ? snow : snow * 0.25; d[o + 7] = 0.02 + (c.hopZ || 0) - (c.wreck ? 0.05 : 0);
+      const dm = c.dmg;
+      d[o + 8] = dm ? dm[0] : 0; d[o + 9] = dm ? dm[1] : 0; d[o + 10] = dm ? dm[2] : 0; d[o + 11] = dm ? dm[3] : 0;
+      d[o + 12] = c.wreck ? 1 : c.fireT != null ? Math.min(0.55, (c.fireT / (c.fuse || 6)) * 0.6) : 0;
+      d[o + 13] = c.dentL || 0; d[o + 14] = c.dentR || 0; d[o + 15] = c.seed || 0;
       t.n++;
     }
     const gl = this.gl;
@@ -803,17 +877,18 @@ export class CarLayer {
       const t = this.types[k];
       if (!t.n) continue;
       gl.bindBuffer(gl.ARRAY_BUFFER, t.ibuf);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, t.data.subarray(0, t.n * 8));
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, t.data.subarray(0, t.n * IS));
     }
   }
   lights(LL, cars, env) {
     if (env.darkness < 0.4) return;
     const k = Math.min(1, (env.darkness - 0.4) * 3);
     for (const c of cars) {
-      if (c.state === 'parked') continue;
+      if (c.state === 'parked' || c.wreck || (!c.lights && !c.siren)) continue;
       const dx = Math.cos(c.h), dy = Math.sin(c.h);
-      LL.addDir(c.x + dx * (c.len * 0.5 + 1.8), c.y + dy * (c.len * 0.5 + 1.8), 2.4, 0.95, dx, dy, [1, 0.95, 0.8], 0.55 * k);
-      LL.add(c.x - dx * (c.len * 0.5 + 0.3), c.y - dy * (c.len * 0.5 + 0.3), c.brake ? 1.0 : 0.7, [1, 0.15, 0.1], (c.brake ? 0.6 : 0.25) * k);
+      const dm = c.dmg;
+      if (c.lights && !(dm && dm[0] > 0.4)) LL.addDir(c.x + dx * (c.len * 0.5 + 1.8), c.y + dy * (c.len * 0.5 + 1.8), 2.4, 0.95, dx, dy, [1, 0.95, 0.8], 0.55 * k);
+      if (c.lights && !(dm && dm[1] > 0.4)) LL.add(c.x - dx * (c.len * 0.5 + 0.3), c.y - dy * (c.len * 0.5 + 0.3), c.brake ? 1.0 : 0.7, [1, 0.15, 0.1], (c.brake ? 0.6 : 0.25) * k);
       if (c.siren) {
         const ph = Math.floor(performance.now() / 160) % 2;
         LL.add(c.x, c.y, 3.5, ph ? [1, 0.1, 0.1] : c.type === 'fire' ? [1, 0.2, 0.1] : [0.1, 0.3, 1], 0.7);
@@ -827,6 +902,7 @@ export class CarLayer {
     for (const k in this.types) {
       const t = this.types[k];
       if (!t.n) continue;
+      gl.uniform3fv(p.u.uHalf, t.half);
       gl.bindVertexArray(t.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n);
     }
@@ -859,6 +935,7 @@ export class CarLayer {
     for (const k in this.types) {
       const t = this.types[k];
       if (!t.n) continue;
+      gl.uniform3fv(u.uHalf, t.half);
       gl.bindVertexArray(t.vao);
       gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n);
     }

@@ -104,16 +104,29 @@ nearest the middle of the screen; the camera switches to the bird's-eye view and
 - **F** next to a car gets you in: a parked car (it may set off its alarm) or a moving one — the
   driver gets out and runs off shouting. **F** again gets you out; the car stays where you left it.
 - Drive with **W/S** to accelerate and brake/reverse, **A/D** to steer, **Space** for the
-  handbrake. You can mount the sidewalk; people dive out of the way (or land on their backs and
-  get up grumbling), parked cars get shoved, and traffic stops for you.
-- Crimes raise the **HEAT** (stealing an occupied car, a police car, alarms the police notice,
-  hit-and-runs, ramming patrol cars, speeding past them). Police cars leave their patrols or arrive
-  from out of sight with sirens wailing and steer after you along the streets. Let them box you in
-  and you're **BUSTED** — released across town with a clean slate. Stay well clear of them for a
-  while and the heat cools off.
+  handbrake (the tail slides out). Cars are rigid bodies with momentum and spin: hits push, spin
+  and stop cars instead of passing through them, lane traffic gets knocked off its lane in a real
+  crash (or nudged back onto it after a bump), and parked cars get shoved.
+- **Damage** collects on the side that took the hit: the front or back crumples, the sides dent
+  where they were struck, panels get scraped to bare metal, lamps smash and glass cracks. A badly
+  hurt engine smokes (grey, then black), then catches fire; a burning car explodes a few seconds
+  later — a fireball, debris in the car's own paint, a scorch mark, a jolt of the camera — throwing
+  nearby cars about (chain reactions included) and knocking people flat. What's left is a burnt-out
+  shell that smoulders for a while.
+- **The pistol**: aim with the mouse and **click** to shoot (hold to keep firing), or **Space** on
+  foot to shoot at whoever is in front of you; **R** reloads the 12-round clip. It works out of a
+  car window too. People who are shot go down in a spreading pool of blood; police officers take
+  two hits. Gunfire sends everyone nearby running and the pigeons into the air; shooting a car
+  dents it, breaks its glass and eventually sets it on fire.
+- **Wanted level**: the moment the police come after you, you get **one star** out of five. The
+  longer the chase runs and the more damage you do (cars wrecked, people hurt, officers down),
+  the more stars — and the more police cars, faster and pushier: from three stars they cut you
+  off, from four they ram. Crimes the police don't see still get reported by witnesses a few
+  seconds later. Cars pull up and officers jump out to chase you on foot, guns drawn; if they
+  grab you (or their cars box you in) you're **BUSTED** and released across town with a clean
+  slate. Break line of sight and keep out of view; when the stars start blinking they're
+  searching, and if they don't find you, you've lost them.
 - **Esc** (or **P**) hands the person back to their day.
-
-There are no weapons: the city just gets annoyed with you.
 
 ## Controls
 
@@ -127,6 +140,7 @@ There are no weapons: the city just gets annoyed with you.
 | GO TO menu | Glide to the park, the lake, Times Square, the court… |
 | `V` | Bird's-eye / isometric view |
 | `P` | Play as someone (see Play mode) |
+| Click / `Space` / `R` (playing) | Shoot / shoot on foot or handbrake in a car / reload |
 | `Space` | Pause / resume time |
 | `T` | Time speed (1×, 3×, 10×, 30×) |
 | `1`–`4` / `0` | Pick a season / back to daily seasons |
@@ -155,6 +169,14 @@ URL parameters are handy for jumping straight to a moment, e.g.
   (chamfered corners, sloped hoods and windshields, cabins that narrow towards the roof) with
   10-sided wheels, hubcaps, bumpers, mirrors and light bars. Their textures are projected from the
   palette atlas, so headlights, brake lights, sirens and lit bus windows switch via palette rows.
+  Crash damage is per instance: the vertex shader crumples the ends and dents the sides around
+  the point of impact, the fragment shader scrapes paint, smashes lamps, crazes glass and chars
+  burnt-out shells.
+- `src/render/decalLayer.js` – flat marks on the ground (blood pools that spread, splatter, scorch
+  marks) as instanced quads lying on the ground plane, lit like everything else.
 - `src/sim/` – environment (clock, sun, seasons, weather), traffic, pedestrians and navigation,
-  activities, animals and particles.
+  activities, animals and particles; `vehicles.js` is the car physics (boxes with momentum and
+  spin, tyre grip, wall contacts from the collision grid, separating-axis contacts with impulses
+  between cars, damage, fire and explosions) and `player.js` the play mode (driving, the pistol,
+  the wanted level, police in cars and on foot).
 - `src/audio/` – the procedural sound engine.

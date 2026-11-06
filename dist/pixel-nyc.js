@@ -814,8 +814,12 @@ void main() {
     zoomTo(s) {
       this.scaleFrom = this.scale, this.scaleTo = s, this.scaleT = 0;
     }
+    // a jolt from an explosion: decays over half a second or so
+    shake(a) {
+      this.shakeA = Math.max(this.shakeA || 0, a);
+    }
     update(dt) {
-      if (this.rotT < 1) {
+      if ((this._sx || this._sy) && (this.x -= this._sx, this.y -= this._sy, this._sx = 0, this._sy = 0), this.rotT < 1) {
         this.rotT = Math.min(1, this.rotT + dt / 0.7);
         let target = this.rot * Math.PI / 2;
         this.angle = this.rotFrom + (target - this.rotFrom) * easeInOut(this.rotT), this.rotT >= 1 && (this.angle = target);
@@ -837,7 +841,10 @@ void main() {
         let decay = Math.exp(-dt * 6);
         this.vx *= decay, this.vy *= decay, Math.abs(this.vx) < 0.01 && (this.vx = 0), Math.abs(this.vy) < 0.01 && (this.vy = 0);
       }
-      this.x = clamp(this.x, -10, 181), this.y = clamp(this.y, -10, 181);
+      if (this.x = clamp(this.x, -10, 181), this.y = clamp(this.y, -10, 181), this.shakeA > 0.01) {
+        let a = this.shakeA;
+        this._sx = (Math.random() * 2 - 1) * a, this._sy = (Math.random() * 2 - 1) * a, this.x += this._sx, this.y += this._sy, this.shakeA *= Math.exp(-dt * 5);
+      } else this.shakeA = 0;
     }
     // world -> art pixels (relative to map centre). Returns [sx, sy, depth] (smaller depth = nearer)
     project(x, y, z) {
@@ -5513,6 +5520,12 @@ void main() {
       case "lie":
         P.lie = !0;
         break;
+      case "aim":
+        P.ra = f ? "aim2" : "aim", P.la = "aimL";
+        break;
+      case "down":
+        P.down = !0;
+        break;
     }
     return P;
   }
@@ -5531,11 +5544,15 @@ void main() {
     low: [[1, 4], [3, 9]],
     fwdlow: [[2, 4], [5, 6]],
     lap: [[0, 4], [4, 5]],
-    phone: [[1, 4], [3, 1]]
+    phone: [[1, 4], [3, 1]],
+    aim: [[3, 0], [6, -1]],
+    aim2: [[2, -1], [5, -3]],
+    aimL: [[5, 1], [12, 0]]
   };
   function paintPerson(sp, tpl, anim, f, view, ext = 0) {
     let P = poseParams(anim, f);
     if (P.lie) return paintLying(sp, tpl);
+    if (P.down) return paintDown(sp, tpl);
     let kid = tpl.body === "kid", elder = tpl.body === "elder", shorts = tpl.bottom === "shorts", skirt = tpl.bottom === "skirt", dress = tpl.bottom === "dress", fem = skirt || dress, front = view === "front", coat = tpl.coat, puffer = coat === "puffer", longCoat = coat === "long", cx = Math.floor(sp.w / 2), ground = sp.h - 1 - ext, legH = kid ? 7 : 11, torsoH = kid ? 7 : 10, headRows = HEADS[kid ? "kid" : "adult"], headH = headRows.length, headW = headRows[0].length, tw = (kid ? 6 : fem ? 7 : 8) + (puffer ? 2 : 0), tx0 = cx - Math.ceil(tw / 2), y0 = ground - P.jump, hipY = y0 - 2 - legH - P.bob + (P.crouch ? 5 : P.dip) + (P.sit ? legH - 2 : 0), shoulderY = hipY - torsoH + 1 + (elder ? 1 : 0), lean = P.lean, headY = shoulderY - 1 - headH, hx0 = cx - Math.floor(headW / 2) + (elder ? 1 : 0) + lean, topSlot = coat ? S.COAT : S.TOP, bareArms = !coat && (tpl.top === "tank" || tpl.top === "jersey"), shortSleeve = !coat && tpl.top === "tee", upperArmSlot = bareArms ? S.SKIN : topSlot, foreArmSlot = bareArms || shortSleeve ? S.SKIN : topSlot, legW = kid ? 2 : 3, ls = (y) => lean && y < shoulderY + torsoH / 2 ? 1 : 0, tset = (x, y, slot, sh = 128) => sp.set(x + ls(y), y, slot, sh), limbShade = (base, k, n) => base + (k === 0 ? 14 : k === n - 1 ? -16 : 0), drawLeg = (hx, dx, lift, far) => {
       let base = far ? 96 : 128;
       if (P.sit) {
@@ -5624,6 +5641,17 @@ void main() {
           for (let j = 1; j < 7; j++) tset(cx, shoulderY + j, S.TOP2, j === 1 ? 140 : 122);
           tset(cx + 1, shoulderY + 1, S.TOP2, 110), tset(cx + 2, hipY - 3, S.DARK, 128), tset(cx + 2, hipY - 1, S.DARK, 128);
         } else for (let y = shoulderY + 2; y < hipY; y++) tset(cx, y, S.TOP, 104);
+      if (tpl.top === "uniform") {
+        for (let x = tx0; x < tx0 + tw; x++) tset(x, hipY - 1, S.DARK, x === tx0 ? 120 : 96);
+        if (front) {
+          tset(cx + 1, hipY - 1, S.ITEM, 150), tset(cx + 2, shoulderY + 2, S.ITEM, 165), tset(cx + 2, shoulderY + 3, S.ITEM, 128);
+          for (let y = shoulderY + 1; y < hipY - 1; y++) (y - shoulderY) % 2 === 0 && tset(cx, y, S.TOP2, 140);
+          tset(tx0 + tw - 2, hipY - 2, S.DARK, 110);
+        } else {
+          for (let y = shoulderY + 1; y < hipY - 1; y++) tset(cx, y, S.TOP, 108);
+          tset(tx0 + 1, shoulderY + 1, S.ITEM2, 120);
+        }
+      }
     }
     if (tpl.bag === "back")
       if (front) {
@@ -5727,12 +5755,25 @@ void main() {
         for (let c = Math.round(ccx - half); c <= Math.round(ccx + half); c++) HT(c, -1 - k, c < ccx ? 140 : 118);
       }
       for (let c = 0; c < headW; c++) HT(c, -1, 128, S.ITEM);
+    } else if (hat === "police") {
+      for (let c = -1; c <= headW; c++) HT(c, -2, c < 1 ? 150 : 134);
+      for (let r = -1; r <= 0; r++) for (let c = 0; c < headW; c++) HT(c, r, r === -1 ? 130 - c * 2 : 114);
+      for (let c = 0; c < headW; c++) HT(c, 1, 84, S.DARK);
+      if (front) {
+        for (let c = 3; c <= headW + 1; c++) HT(c, 2, 70, S.DARK);
+        HT(headW - 2, -1, 165, S.ITEM);
+      }
     } else if (hat === "helmet") {
       for (let r = -2; r <= 1; r++) for (let c = r === -2 ? 1 : -1; c <= headW - (r === -2 ? 1 : 0); c++) HT(c, r, r === -2 ? 150 : c < 2 ? 140 : 118);
       if (front) for (let c = headW - 1; c <= headW + 1; c++) HT(c, 2, 100);
       HT(1, -1, 170, S.WHITE);
     }
-    let hand = drawArm(!1, P.ra), carrying = P.ra === "down" || P.ra === "fwd" || P.ra === "back";
+    let hand = drawArm(!1, P.ra);
+    if (P.ra === "aim" || P.ra === "aim2") {
+      let [hx, hy] = hand, up = P.ra === "aim2" ? 1 : 0;
+      sp.set(hx + 1, hy - up, S.DARK, 132), sp.set(hx + 2, hy - up, S.DARK, 150), sp.set(hx + 3, hy - up - (up ? 1 : 0), S.DARK, 140), sp.set(hx + 1, hy + 1 - up, S.DARK, 92), sp.set(hx, hy + 1, S.DARK, 84);
+    }
+    let carrying = P.ra === "down" || P.ra === "fwd" || P.ra === "back";
     if (tpl.bag === "brief" && carrying) {
       let [hx, hy] = hand;
       sp.set(hx, hy + 2, S.BAG, 96), sp.set(hx + 1, hy + 2, S.BAG, 96);
@@ -5764,6 +5805,53 @@ void main() {
     sp.set(29, y, S.SKIN, 128), sp.set(29, y + 1, S.SKIN, 116);
     for (let x = 10; x <= 16; x++) sp.set(x, y + 3, S.SKIN, 112);
   }
+  function paintDown(sp, tpl) {
+    let g = sp.h - 1, kid = tpl.body === "kid", k = kid ? 0.74 : 1, X = (v) => Math.round(3 + v * k), y = g - 4, topC = tpl.coat ? S.COAT : S.TOP, legC = tpl.bottom === "shorts" || tpl.bottom === "skirt" || tpl.bottom === "dress" ? S.SKIN : S.BOTTOM, bare = !tpl.coat && (tpl.top === "tank" || tpl.top === "jersey" || tpl.top === "tee");
+    for (let i = 0; i <= 5; i++) sp.set(X(7 + i * 0.45), y - 1 - i, i > 2 && bare ? S.SKIN : topC, 100);
+    sp.set(X(9.7), y - 7, S.SKIN, 110), sp.set(X(10.2), y - 7, S.SKIN, 94);
+    for (let i = 0; i <= 4; i++) sp.set(X(18 + i), y - Math.min(i, 2), legC, 98);
+    for (let i = 0; i <= 3; i++) sp.set(X(22 + i), y - 2 + i, legC, 94);
+    sp.set(X(26), y + 1, S.SHOES, 110), sp.set(X(26.7), y + 1, S.SHOES, 90);
+    for (let x = X(7); x <= X(15); x++) for (let r = -1; r <= 2; r++) sp.set(x, y + r, topC, r === -1 ? 146 : r === 2 ? 98 : 124);
+    if (tpl.top === "uniform") {
+      for (let r = -1; r <= 2; r++) sp.set(X(15), y + r, S.DARK, 100);
+      sp.set(X(10), y - 1, S.ITEM, 165);
+    }
+    for (let x = X(15) + 1; x <= X(18); x++) for (let r = -1; r <= 2; r++) sp.set(x, y + r, S.BOTTOM, r === -1 ? 138 : 108);
+    for (let x = X(18) + 1; x <= X(26); x++)
+      sp.set(x, y + 1, legC, 132), sp.set(x, y + 2, legC, 108);
+    sp.set(X(27), y + 1, S.SHOES, 128), sp.set(X(27), y + 2, S.SHOES, 100), sp.set(X(27.7), y + 2, S.SHOES, 90);
+    for (let x = X(8); x <= X(13); x++) sp.set(x, y + 3, bare && x > X(10) ? S.SKIN : topC, 112);
+    if (sp.set(X(14), y + 3, S.SKIN, 120), sp.set(X(14.6), y + 3, S.SKIN, 100), sp.ellipse(X(4.2), y + 0.5, 2.7 * (kid ? 0.9 : 1), 2.3, S.SKIN, 124), tpl.hair !== "bald") {
+      for (let x = X(1.6); x <= X(4); x++)
+        sp.set(x, y - 2, S.HAIR, 136), sp.set(x - 1, y - 1, S.HAIR, 120);
+      if (sp.set(X(1.6) - 1, y, S.HAIR, 110), sp.set(X(1.6) - 1, y + 1, S.HAIR, 104), tpl.hair === "long" || tpl.hair === "pony" || tpl.hair === "afro") for (let x = X(0.6); x <= X(3.5); x++) sp.set(x, y + 3, S.HAIR, 108);
+    }
+    if (sp.set(X(5.3), y, S.DARK, 104), tpl.hat) for (let [dx, dy] of [[0, 0], [1, 0], [2, 0], [1, -1]]) sp.set(X(-0.6) + dx, g - 1 + dy, S.HAT, 120);
+  }
+  var LAZY_POSES = { aim: { n: 2, back: !0 }, down: { n: 1, back: !1, w: 32 } };
+  function personPose(atlas, frames2, anim) {
+    if (frames2.front[anim]) return frames2;
+    let L = LAZY_POSES[anim];
+    try {
+      if (!L || !frames2.tpl) throw new Error("no pose");
+      for (let view of ["front", "back"]) {
+        if (view === "back" && !L.back) {
+          frames2.back[anim] = frames2.front[anim];
+          continue;
+        }
+        let arr = [], fw = L.w || PW;
+        for (let f = 0; f < L.n; f++) arr.push(atlas.add(null, fw, PH, (sp) => {
+          paintPerson(sp, frames2.tpl, anim, f, view, 0), selOut(sp);
+        }, Math.floor(fw / 2), PH - 1));
+        frames2[view][anim] = arr;
+      }
+    } catch {
+      let alt = anim === "down" ? "lie" : "idle";
+      frames2.front[anim] = frames2.front[alt], frames2.back[anim] = frames2.back[alt] || frames2.front[alt];
+    }
+    return frames2;
+  }
   var TEMPLATE_BUDGET = 110;
   function personTemplate(atlas, tpl) {
     let key = "p:" + JSON.stringify(tpl), cached = atlas.frames.get(key);
@@ -5776,7 +5864,7 @@ void main() {
       }
       if (best) return best.out;
     }
-    let out = { front: {}, back: {} };
+    let out = { front: {}, back: {}, tpl };
     for (let anim in POSES)
       for (let view of ["front", "back"]) {
         if (view === "back" && !BACK_POSES[anim]) {
@@ -6229,9 +6317,10 @@ void main() {
   vec2 px = floor((c.xy * 0.5 + 0.5) * uBuf + 0.5);
   float flags = iA.w;
   bool flip = mod(flags, 2.0) >= 1.0;
+  bool onGround = mod(floor(flags / 64.0), 2.0) >= 1.0; // lying on the ground: never squashed
   float w = iRect.z, h = iRect.w;
   float ax = flip ? w - iA.x : iA.x;
-  vec2 off = vec2(aCorner.x * w - ax, (iA.y - aCorner.y * h) * uSquash) * uK;
+  vec2 off = vec2(aCorner.x * w - ax, (iA.y - aCorner.y * h) * (onGround ? 1.0 : uSquash)) * uK;
   vec2 sp = px + off;
   float tx = flip ? (1.0 - aCorner.x) * w : aCorner.x * w;
   vUV = iRect.xy + vec2(tx, aCorner.y * h);
@@ -6343,7 +6432,7 @@ out vec4 o;
 void main() {
   if (texelFetch(uSprites, ivec2(floor(vUV)), 0).a < 0.5) discard;
   o = vec4(1.0);
-}`, SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32 }, STRIDE = 13, SpriteLayer = class {
+}`, SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32, FLAT: 64 }, STRIDE = 13, SpriteLayer = class {
     constructor(gl, atlas, pal) {
       this.gl = gl, this.atlas = atlas, this.pal = pal, this.prog = createProgram(gl, VS, FS, "sprites"), this.shadowProg = createProgram(gl, SHADOW_VS2, SHADOW_FS2, "spriteShadow"), this.cap = 16384, this.data = new Float32Array(this.cap * STRIDE), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
       let corner = gl.createBuffer();
@@ -6441,7 +6530,7 @@ void main() {
   };
 
   // src/render/carLayer.js
-  var CAR_CAP = 768, sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross32 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v, bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]], cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
+  var CAR_CAP = 768, IS = 16, sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross32 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v, bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]], cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
   function bboxOf(st) {
     let bb = { x0: 1 / 0, x1: -1 / 0, y0: 1 / 0, y1: -1 / 0, z0: 1 / 0, z1: -1 / 0 };
     for (let s of st) {
@@ -6480,7 +6569,28 @@ void main() {
 precision highp float;
 precision highp int;
 precision highp sampler2DShadow;
-`, VS3 = HEAD3 + `
+`, DEFORM = `
+layout(location=7) in vec4 iC; // crumple: front, rear, left, right (0..1)
+layout(location=8) in vec4 iD; // burnt, left dent centre, right dent centre, seed
+uniform vec3 uHalf;            // half length, half width, height of this vehicle type
+float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
+vec3 deform(vec3 lp) {
+  if (iC.x + iC.y + iC.z + iC.w + iD.x < 0.001) return lp;
+  float fx = lp.x / uHalf.x, fy = lp.y / uHalf.y, fz = clamp(lp.z / uHalf.z, 0.0, 1.0);
+  float wf = smoothstep(0.3, 1.0, fx) * iC.x;
+  float wr = smoothstep(0.3, 1.0, -fx) * iC.y;
+  float wl = smoothstep(0.25, 1.0, fy) * exp(-pow((fx - iD.y) * 2.2, 2.0)) * iC.z;
+  float wrt = smoothstep(0.25, 1.0, -fy) * exp(-pow((fx - iD.z) * 2.2, 2.0)) * iC.w;
+  lp.x += (wr - wf) * uHalf.x * 0.2;
+  lp.z -= (wf * 0.14 + wr * 0.08) * fz * uHalf.z;
+  lp.y += (wrt - wl) * uHalf.y * 0.45;
+  float crump = min(1.0, wf + wr + wl + wrt);
+  vec3 j = vec3(hash13(lp * 13.0 + iD.w), hash13(lp.yzx * 11.0 + iD.w * 3.0), hash13(lp.zxy * 9.0 + iD.w * 7.0)) - 0.5;
+  lp += j * 0.05 * crump;
+  lp.z -= iD.x * 0.07 * fz;
+  return lp;
+}
+`, VS3 = HEAD3 + DEFORM + `
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aUV;
 layout(location=2) in uvec4 aRect;
@@ -6494,11 +6604,15 @@ out vec2 vUV;
 flat out uvec4 vRect;
 flat out vec3 vNrm;
 out vec3 vWorld;
+out vec3 vLocal;
 flat out vec4 vB;
+flat out vec4 vC;
+flat out vec4 vD;
 flat out uint vMat;
 void main() {
   float c = cos(iA.w), s = sin(iA.w);
-  vec3 lp = aPos;
+  vLocal = aPos; vC = iC; vD = iD;
+  vec3 lp = deform(aPos);
   vec3 wp = vec3(iA.x + lp.x * c - lp.y * s, iA.y + lp.x * s + lp.y * c, iA.z + lp.z + iB.w);
   vNrm = vec3(aNrm.x * c - aNrm.y * s, aNrm.x * s + aNrm.y * c, aNrm.z);
   vUV = aUV; vRect = aRect; vWorld = wp; vB = iB; vMat = aInfo.y;
@@ -6513,8 +6627,13 @@ in vec2 vUV;
 flat in uvec4 vRect;
 flat in vec3 vNrm;
 in vec3 vWorld;
+in vec3 vLocal;
 flat in vec4 vB;
+flat in vec4 vC;
+flat in vec4 vD;
 flat in uint vMat;
+uniform vec3 uHalf;
+float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
 uniform sampler2D uSprites;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
@@ -6552,15 +6671,47 @@ void main() {
   int slot = int(t.r * 255.0 + 0.5);
   vec4 pc = texelFetch(uPal, ivec2(slot, row), 0);
   if (pc.a < 0.1) discard;
+  // how hard this spot was hit
+  float fx = vLocal.x / uHalf.x, fy = vLocal.y / uHalf.y, burnt = vD.x;
+  float dmg = smoothstep(0.35, 1.0, fx) * vC.x + smoothstep(0.35, 1.0, -fx) * vC.y
+    + (smoothstep(0.35, 1.0, fy) * exp(-pow((fx - vD.y) * 2.0, 2.0)) * vC.z + smoothstep(0.35, 1.0, -fy) * exp(-pow((fx - vD.z) * 2.0, 2.0)) * vC.w) * 1.15;
+  // smashed lamps on a crushed end, and nothing lights up on a burnt shell
+  if ((slot == 5 && vC.x > 0.4) || (slot == 6 && vC.y > 0.4) || (burnt > 0.5 && (slot == 5 || slot == 6 || slot == 10 || slot == 11 || slot == 12 || slot == 16 || slot == 8))) pc = vec4(0.11, 0.1, 0.1, 1.0);
   vec3 albedo = pc.rgb * (t.g * 255.0 / 128.0);
   vec3 n = normalize(vNrm);
+  float h = hash13(floor(vLocal * 32.0) + vD.w * 17.0);
+  if (dmg > 0.03) {
+    // crumpled panels catch the light facet by facet
+    vec3 dn = normalize(cross(dFdx(vWorld), dFdy(vWorld)));
+    if (dot(dn, n) < 0.0) dn = -dn;
+    n = normalize(mix(n, dn, clamp(dmg, 0.0, 0.5)));
+    bool paint = slot == 1 || slot == 2 || slot == 8 || slot == 9 || slot == 13;
+    if (paint) {
+      // bare-metal scrapes run along the body; the rest of the hit panel is dented and dull
+      float sc = hash13(floor(vLocal * vec3(9.0, 40.0, 40.0)) + vD.w * 23.0);
+      if (sc < dmg * 0.24) albedo = vec3(0.5, 0.5, 0.52) * (0.8 + 0.4 * h);
+      else albedo *= 1.0 - smoothstep(0.1, 0.9, dmg) * (0.18 + 0.2 * step(h, 0.5));
+    }
+    if (slot == 3 && dmg > 0.22) {
+      float web = hash13(floor(vLocal * 16.0) + 3.0 + vD.w);
+      if (web < dmg * 0.5) albedo = vec3(0.82, 0.86, 0.9) * (0.7 + 0.4 * h);
+      else if (web > 1.0 - dmg * 0.35) albedo = vec3(0.08, 0.09, 0.1);
+    }
+  }
+  if (burnt > 0.0) {
+    vec3 ch = vec3(0.085, 0.078, 0.072) * (0.7 + 0.7 * h);
+    if (h > 0.84) ch = vec3(0.30, 0.15, 0.07);
+    if (slot == 3) ch = vec3(0.03);
+    albedo = mix(albedo, ch, burnt);
+    pc.a = max(pc.a, burnt > 0.5 ? 1.0 : pc.a);
+  }
   if (pc.a < 0.75) {
     oColor = vec4(albedo * 1.15, 1.0);
     oGlow = vec4(albedo, 1.0);
     return;
   }
   // snow on roofs of parked cars
-  if (vB.z > 0.0 && n.z > 0.6) {
+  if (vB.z > 0.0 && n.z > 0.6 && burnt < 0.5) {
     float h = fract(sin(dot(floor(vWorld.xy * 32.0), vec2(12.9898, 78.233))) * 43758.5453);
     float nn = texture(uNoise, vWorld.xy * 0.35).r;
     if (nn * 0.85 + h * 0.15 < vB.z * 1.35) albedo = mix(vec3(0.86, 0.9, 0.97), vec3(0.98, 0.99, 1.0), smoothstep(0.3, 0.7, nn));
@@ -6581,7 +6732,7 @@ void main() {
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
   // glossy paint / glass reflection
-  if (slot == 3) {
+  if (slot == 3 && burnt < 0.5 && dmg < 0.5) {
     vec3 r = reflect(-uViewDir, n);
     vec3 sky = mix(uSkyHor, uSkyTop, clamp(r.z * 1.4, 0.0, 1.0));
     col = mix(col, sky * 0.8, 0.45) + lm * 0.3;
@@ -6590,14 +6741,15 @@ void main() {
   }
   oColor = vec4(col, 1.0);
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
-}`, SHADOW_VS3 = HEAD3 + `
+}`, SHADOW_VS3 = HEAD3 + DEFORM + `
 layout(location=0) in vec3 aPos;
 layout(location=5) in vec4 iA;
 layout(location=6) in vec4 iB;
 uniform mat4 uShadowVP;
 void main() {
   float c = cos(iA.w), s = sin(iA.w);
-  vec3 wp = vec3(iA.x + aPos.x * c - aPos.y * s, iA.y + aPos.x * s + aPos.y * c, iA.z + aPos.z + iB.w);
+  vec3 lp = deform(aPos);
+  vec3 wp = vec3(iA.x + lp.x * c - lp.y * s, iA.y + lp.x * s + lp.y * c, iA.z + lp.z + iB.w);
   gl_Position = uShadowVP * vec4(wp, 1.0);
 }`, SHADOW_FS3 = `#version 300 es
 precision highp float;
@@ -6979,7 +7131,14 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let m = defs[k], vao = gl.createVertexArray();
         gl.bindVertexArray(vao), makeBuffer(gl, m.pos), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 3, gl.FLOAT, !1, 0, 0), makeBuffer(gl, m.uv), gl.enableVertexAttribArray(1), gl.vertexAttribPointer(1, 2, gl.FLOAT, !1, 0, 0), makeBuffer(gl, m.rect), gl.enableVertexAttribArray(2), gl.vertexAttribIPointer(2, 4, gl.UNSIGNED_SHORT, 0, 0), makeBuffer(gl, m.nrm), gl.enableVertexAttribArray(3), gl.vertexAttribPointer(3, 4, gl.BYTE, !0, 0, 0), makeBuffer(gl, m.info), gl.enableVertexAttribArray(4), gl.vertexAttribIPointer(4, 4, gl.UNSIGNED_BYTE, 0, 0), makeBuffer(gl, m.idx, gl.ELEMENT_ARRAY_BUFFER);
         let ibuf = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * 8 * 4, gl.DYNAMIC_DRAW), gl.enableVertexAttribArray(5), gl.vertexAttribPointer(5, 4, gl.FLOAT, !1, 32, 0), gl.vertexAttribDivisor(5, 1), gl.enableVertexAttribArray(6), gl.vertexAttribPointer(6, 4, gl.FLOAT, !1, 32, 16), gl.vertexAttribDivisor(6, 1), gl.bindVertexArray(null), this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * 8), n: 0 };
+        gl.bindBuffer(gl.ARRAY_BUFFER, ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * IS * 4, gl.DYNAMIC_DRAW);
+        for (let a = 0; a < 4; a++)
+          gl.enableVertexAttribArray(5 + a), gl.vertexAttribPointer(5 + a, 4, gl.FLOAT, !1, IS * 4, a * 16), gl.vertexAttribDivisor(5 + a, 1);
+        gl.bindVertexArray(null);
+        let hx = 0.5, hy = 0.3, hz = 0.5;
+        for (let i = 0; i < m.pos.length; i += 3)
+          hx = Math.max(hx, Math.abs(m.pos[i])), hy = Math.max(hy, Math.abs(m.pos[i + 1])), hz = Math.max(hz, m.pos[i + 2]);
+        this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * IS), n: 0, half: [hx, hy, hz] };
       }
     }
     assignPalette(car) {
@@ -7047,22 +7206,24 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let t = this.types[c.type];
         if (!t || t.n >= CAR_CAP) continue;
         this.updatePalette(c, time);
-        let o = t.n * 8, d = t.data;
-        d[o] = c.x, d[o + 1] = c.y, d[o + 2] = c.z || 0, d[o + 3] = c.h, d[o + 4] = c.palRow, d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0), d[o + 6] = c.state === "parked" ? snow : snow * 0.25, d[o + 7] = 0.02, t.n++;
+        let o = t.n * IS, d = t.data;
+        d[o] = c.x, d[o + 1] = c.y, d[o + 2] = c.z || 0, d[o + 3] = c.h, d[o + 4] = c.palRow, d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0), d[o + 6] = c.state === "parked" ? snow : snow * 0.25, d[o + 7] = 0.02 + (c.hopZ || 0) - (c.wreck ? 0.05 : 0);
+        let dm = c.dmg;
+        d[o + 8] = dm ? dm[0] : 0, d[o + 9] = dm ? dm[1] : 0, d[o + 10] = dm ? dm[2] : 0, d[o + 11] = dm ? dm[3] : 0, d[o + 12] = c.wreck ? 1 : c.fireT != null ? Math.min(0.55, c.fireT / (c.fuse || 6) * 0.6) : 0, d[o + 13] = c.dentL || 0, d[o + 14] = c.dentR || 0, d[o + 15] = c.seed || 0, t.n++;
       }
       let gl = this.gl;
       for (let k in this.types) {
         let t = this.types[k];
-        t.n && (gl.bindBuffer(gl.ARRAY_BUFFER, t.ibuf), gl.bufferSubData(gl.ARRAY_BUFFER, 0, t.data.subarray(0, t.n * 8)));
+        t.n && (gl.bindBuffer(gl.ARRAY_BUFFER, t.ibuf), gl.bufferSubData(gl.ARRAY_BUFFER, 0, t.data.subarray(0, t.n * IS)));
       }
     }
     lights(LL, cars, env) {
       if (env.darkness < 0.4) return;
       let k = Math.min(1, (env.darkness - 0.4) * 3);
       for (let c of cars) {
-        if (c.state === "parked") continue;
-        let dx = Math.cos(c.h), dy = Math.sin(c.h);
-        if (LL.addDir(c.x + dx * (c.len * 0.5 + 1.8), c.y + dy * (c.len * 0.5 + 1.8), 2.4, 0.95, dx, dy, [1, 0.95, 0.8], 0.55 * k), LL.add(c.x - dx * (c.len * 0.5 + 0.3), c.y - dy * (c.len * 0.5 + 0.3), c.brake ? 1 : 0.7, [1, 0.15, 0.1], (c.brake ? 0.6 : 0.25) * k), c.siren) {
+        if (c.state === "parked" || c.wreck || !c.lights && !c.siren) continue;
+        let dx = Math.cos(c.h), dy = Math.sin(c.h), dm = c.dmg;
+        if (c.lights && !(dm && dm[0] > 0.4) && LL.addDir(c.x + dx * (c.len * 0.5 + 1.8), c.y + dy * (c.len * 0.5 + 1.8), 2.4, 0.95, dx, dy, [1, 0.95, 0.8], 0.55 * k), c.lights && !(dm && dm[1] > 0.4) && LL.add(c.x - dx * (c.len * 0.5 + 0.3), c.y - dy * (c.len * 0.5 + 0.3), c.brake ? 1 : 0.7, [1, 0.15, 0.1], (c.brake ? 0.6 : 0.25) * k), c.siren) {
           let ph = Math.floor(performance.now() / 160) % 2;
           LL.add(c.x, c.y, 3.5, ph ? [1, 0.1, 0.1] : c.type === "fire" ? [1, 0.2, 0.1] : [0.1, 0.3, 1], 0.7);
         }
@@ -7073,7 +7234,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       gl.useProgram(p.program), gl.uniformMatrix4fv(p.u.uShadowVP, !1, ctx.shadowMat);
       for (let k in this.types) {
         let t = this.types[k];
-        t.n && (gl.bindVertexArray(t.vao), gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n));
+        t.n && (gl.uniform3fv(p.u.uHalf, t.half), gl.bindVertexArray(t.vao), gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n));
       }
     }
     draw(ctx) {
@@ -7081,7 +7242,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform1f(u.uEmis, e.emis), gl.uniform3fv(u.uSkyTop, e.skyTop), gl.uniform3fv(u.uSkyHor, e.skyBottom), gl.uniform3fv(u.uViewDir, ctx.camera.viewDir()), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4);
       for (let k in this.types) {
         let t = this.types[k];
-        t.n && (gl.bindVertexArray(t.vao), gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n));
+        t.n && (gl.uniform3fv(u.uHalf, t.half), gl.bindVertexArray(t.vao), gl.drawElementsInstanced(gl.TRIANGLES, t.count, gl.UNSIGNED_INT, 0, t.n));
       }
     }
   };
@@ -7448,15 +7609,15 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       car.x = x + lx, car.y = y + ly, car.h = h, (car.state === "pullout" || car.state === "pullin") && (car.h += (car.lat - car.latTarget) * 0.25 * (car.state === "pullout" ? -1 : 1));
     }
     leaderGap(car) {
-      let P = car.piece, best = 1e9, bestV = 0, obs = this.city.player?.obstacles;
+      let P = car.piece, best = 1e9, bestV = 0, obs = this.city.vehicles?.obstacles;
       if (obs && obs.length) {
         let hx = Math.cos(car.h), hy = Math.sin(car.h);
         for (let o of obs) {
           if (o.car === car) continue;
           let dx = o.x - car.x, dy = o.y - car.y, ahead = dx * hx + dy * hy;
-          if (ahead <= 0 || ahead > 14 || Math.abs(dx * hy - dy * hx) > 0.9 + o.r * 0.6 || o.v < 0.3 && car.wait > 6) continue;
+          if (ahead <= 0 || ahead > 14 || Math.abs(dx * hy - dy * hx) > 0.9 + o.r * 0.6) continue;
           let g = ahead - car.len / 2 - o.r;
-          g < best && (best = Math.max(0, g), bestV = 0);
+          g < best && (best = Math.max(0, g), bestV = 0), o.car && car.wait > 2 && (o.car.blockT = this.city.time);
         }
       }
       for (let o of P.cars) {
@@ -7522,7 +7683,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let car of [...this.cars])
         car.state === "parked" || car.free || this.stepCar(car, dt, moving > target + 3);
       for (let car of this.cars)
-        car.lights = car.state !== "parked" && car.state !== "abandoned" && dark;
+        car.lights = dark && !car.wreck && car.state !== "parked" && car.state !== "abandoned" && car.state !== "loose" && car.state !== "stopped";
     }
     updateSpecials(dt, env) {
       let sp = this.special, W = this.city.world, h = env.hour;
@@ -7616,6 +7777,29 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     // a car has waited long enough to turn across this crosswalk: hold pedestrians at the kerb
     holdingPeds(key) {
       return (this.pedHold.get(key) ?? -1) > this.clock;
+    }
+    // take a car off the lane graph (it becomes a free physics body)
+    detach(c) {
+      if (c.piece && c.piece.cars) {
+        let i = c.piece.cars.indexOf(c);
+        i >= 0 && c.piece.cars.splice(i, 1);
+      }
+      for (let [k, v] of this.exitLock) v === c && this.exitLock.delete(k);
+      c.spot && (c.spot.car = null, c.spot = null), c.piece = null, c.next = null, c.route = null, c.lat = 0, c.latTarget = 0, c.dwell = null, c.stopAt = null, c.free = !0;
+    }
+    // put a nudged car back on the nearest lane if it is close to one and facing along it
+    reattach(car) {
+      let best = null, bd = 0.32 * 0.32, ch = Math.cos(car.h), sh = Math.sin(car.h);
+      for (let L of this.links.values())
+        for (let i = 1; i < L.pts.length; i++) {
+          let a = L.pts[i - 1], b = L.pts[i], sx = b[0] - a[0], sy = b[1] - a[1], sl = Math.hypot(sx, sy);
+          if (sl < 1e-6) continue;
+          let ux = sx / sl, uy = sy / sl;
+          if (ch * ux + sh * uy < 0.95) continue;
+          let t = clamp((car.x - a[0]) * ux + (car.y - a[1]) * uy, 0, sl), d = (car.x - a[0] - ux * t) ** 2 + (car.y - a[1] - uy * t) ** 2;
+          d < bd && (bd = d, best = { L, s: L.cum[i - 1] + t });
+        }
+      return !best || best.s < car.len / 2 || best.s > best.L.len - car.len / 2 || best.L.cars.some((o) => Math.abs(o.s - best.s) < (o.len + car.len) / 2 + 0.8) ? !1 : (car.free = !1, car.piece = best.L, car.s = best.s, car.lat = 0, car.latTarget = 0, car.state = "drive", car.v = 0, car.wait = 0, car.life = this.rng.range(30, 90), car.idleT = 0, best.L.cars.push(car), this.chooseNext(car), this.place(car), !0);
     }
     carAt(x, y, r = 1.2) {
       for (let c of this.cars) if (dist2(c.x, c.y, x, y) < r * r) return c;
@@ -8234,6 +8418,101 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
       return out;
     }
+    // everyone within r of (x, y), from the spatial hash
+    near(x, y, r) {
+      let out = [], c0x = Math.floor((x - r) / 1.5), c1x = Math.floor((x + r) / 1.5), c0y = Math.floor((y - r) / 1.5), c1y = Math.floor((y + r) / 1.5);
+      for (let cx = c0x; cx <= c1x; cx++)
+        for (let cy = c0y; cy <= c1y; cy++) {
+          let c = this.grid.get(cx << 16 | cy);
+          if (c) for (let o of c) dist2(o.x, o.y, x, y) < r * r && out.push(o);
+        }
+      return out;
+    }
+    // stop whatever someone was doing (activity, seat, crosswalk) before something happens to them
+    detachPerson(p) {
+      p.actKind && this.city.activities?.leave(p), p.seat && (p.seat.b.used[p.seat.k] = !1, p.seat = null), p.stoopSeat && (p.stoopSeat.used = !1, p.stoopSeat = null), p.crossing && this.endCross(p), p.feeding = !1, p.dodge = null, p.forceFace = !1, p.animFrame = null, p.z < -0.05 && p.state !== "vanish" && (p.z = 0.125);
+    }
+    // shot, or hit hard by a car: down for good, a pool of blood spreading underneath
+    kill(p, dx = 0, dy = 0, cause = "shot") {
+      if (p.state === "dead" || p.state === "player" || p.state === "vanish" || p.state === "inside") return !1;
+      let wasCop = p.state === "cop";
+      this.detachPerson(p), personPose(this.city.atlas, p.frames, "down"), p.state = "dead", p.deadT = 0, p.anim = "down", p.animFrame = 0, p.thought = "", p.umbrella = !1, p.plan = [], p.path = null, p.step = null;
+      let k = cause === "car" ? 3.4 : cause === "blast" ? 4.2 : 0.7;
+      p.kvx = dx * k, p.kvy = dy * k;
+      let d = this.city.camera.screenDir(dx || 1, dy);
+      p.flip = d[0] < 0, p.front = !0;
+      let r = this.rng;
+      this.city.decals?.add("pool", p.x + dx * (k * 0.12 + 0.15), p.y + dy * (k * 0.12 + 0.15), p.z, r.range(0, 6.28), p.kid ? 0.5 : 0.68, 1, 5), cause !== "blast" && this.city.particles?.blood(p.x, p.y, p.z + (p.kid ? 0.6 : 0.85), dx, dy, cause === "car" ? 18 : 14), this.city.audio?.event(cause === "shot" ? "hit" : "thud", p), wasCop && this.city.player?.onCopDown(p);
+      for (let q of this.near(p.x, p.y, 9)) q !== p && this.panic(q, p.x, p.y, r.range(2.5, 4.5));
+      return !0;
+    }
+    // knocked flat (by a car or a blast): lies there a moment, then gets up grumbling
+    knock(p, vx = 0, vy = 0) {
+      if (p.state === "dead" || p.state === "player" || p.state === "knocked") return;
+      let wasCop = p.state === "cop";
+      this.detachPerson(p), personPose(this.city.atlas, p.frames, "down"), p.state = "knocked", p.timer = 2.4, p.anim = "down", p.animFrame = 0, p.kvx = vx * 2, p.kvy = vy * 2, p.wasCop = wasCop, p.thought = this.rng.pick(["OUCH!", "Watch it!", "My back...", "Hey!"]), this.city.audio?.event("thud", p);
+    }
+    // a frightened person runs away from (fx, fy), then picks up where they left off
+    panic(p, fx, fy, t = 3) {
+      let st = p.state;
+      return st === "dead" || st === "player" || st === "cop" || st === "vanish" || st === "inside" || st === "appear" || st === "knocked" || st === "vendor" || p.alpha < 0.5 || p.inCar ? !1 : st === "flee" ? (p.timer = Math.max(p.timer, t), p.fleeFrom = { x: fx, y: fy }, !0) : (p.step && p.step.t === "go" && (st === "walk" || st === "wait") && p.plan.unshift(p.step), this.detachPerson(p), p.state = "flee", p.timer = t, p.fleeFrom = { x: fx, y: fy }, p.path = null, p.thought = this.rng.pick(["AAAH!", "RUN!", "Somebody call 911!", "Oh no oh no", "GET DOWN!", "Not in my city!"]), p.dog && (p.dog.mode = "follow"), !0);
+    }
+    // a patrol officer in uniform
+    createCop() {
+      let r = this.rng, tpl = { body: "adult", hair: r.pick(["short", "short", "bun", "bald", "pony"]), top: "uniform", bottom: "pants", hat: "police" }, frames2 = personTemplate(this.city.atlas, tpl), P = {
+        [S.SKIN]: r.pick(SKIN),
+        [S.HAIR]: r.pick(HAIR.slice(0, 7)),
+        [S.TOP]: 2307678,
+        [S.TOP2]: 2900850,
+        [S.BOTTOM]: 1778752,
+        [S.SHOES]: 1315862,
+        [S.COAT]: 2307678,
+        [S.HAT]: 1779527,
+        [S.SCARF]: 2307678,
+        [S.BAG]: 1315862,
+        [S.DARK]: 1315860,
+        [S.WHITE]: 15921902,
+        [S.ITEM]: 15254090,
+        [S.ITEM2]: 6979496,
+        [S.SOCK]: 1315862
+      }, p = {
+        id: this.nextId++,
+        role: "cop",
+        kid: !1,
+        elder: !1,
+        tpl,
+        frames: frames2,
+        pal: this.city.pal.alloc(P),
+        name: "Officer " + r.pick(["Diaz", "Kowalski", "Chen", "Murphy", "Okafor", "Russo", "Patel", "Lee", "Brooks", "Santos"]),
+        age: r.int(24, 55),
+        x: 0,
+        y: 0,
+        z: 0,
+        node: null,
+        path: null,
+        pi: 0,
+        state: "cop",
+        timer: 0,
+        plan: [],
+        step: null,
+        speed: 1,
+        lane: 0.3,
+        anim: "idle",
+        animT: r.next() * 4,
+        front: !0,
+        flip: !1,
+        dx: 0,
+        dy: 1,
+        alpha: 1,
+        fade: 0,
+        dist: 0,
+        thought: "",
+        umbrella: !1,
+        crossing: null,
+        hp: 2
+      };
+      return personPose(this.city.atlas, frames2, "aim"), p;
+    }
     stepPerson(p, dt, env) {
       switch (p.animT += dt, p.umbrella && !env.raining && this.rng.chance(dt * 0.1) && (p.umbrella = !1), !p.umbrella && env.raining && !p.kid && p.state === "walk" && this.rng.chance(dt * 0.05) && (p.umbrella = !0), p.state) {
         case "appear":
@@ -8288,17 +8567,29 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         case "player":
           break;
         case "dodge": {
-          let d = p.dodge, C = this.city.player?.coll;
+          let d = p.dodge, C = this.city.coll;
           d.t -= dt;
           let nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
           (!C || C.free(nx, ny, 0.18)) && (p.x = nx, p.y = ny, p.dist += 3.4 * dt), p.dx = d.x, p.dy = d.y, p.anim = "run", p.animFrame = null, d.t <= 0 && (p.state = d.back === "flee" ? "flee" : d.back === "walk" && p.path ? "walk" : "idle", p.timer = 0.3, p.dodge = null);
           break;
         }
         case "knocked":
-          p.timer -= dt, p.anim = "lie", p.animFrame = 0, p.timer <= 0 && (p.anim = "idle", p.animFrame = null, p.node = this.nearestOf(this.nav.nodes, p.x, p.y), p.state = "idle", p.timer = 0.6, p.plan.length || (p.plan = [{ t: "go", node: p.home || this.pickHome(), thought: "What a city..." }, { t: "enter" }]));
+          if (p.timer -= dt, p.anim = "down", p.animFrame = 0, this.slide(p, dt), p.timer <= 0) {
+            if (p.anim = "idle", p.animFrame = null, p.wasCop) {
+              p.state = "cop", p.wasCop = !1;
+              break;
+            }
+            p.node = this.nearestOf(this.nav.nodes, p.x, p.y), p.state = "idle", p.timer = 0.6, p.plan.length || (p.plan = [{ t: "go", node: p.home || this.pickHome(), thought: "What a city..." }, { t: "enter" }]);
+          }
+          break;
+        case "dead": {
+          p.deadT += dt, p.anim = "down", p.animFrame = 0, this.slide(p, dt), (p.deadT > 55 || p.deadT > 14 && !this.city.view.visible(p.x, p.y, p.z, 3)) && (p.alpha -= dt * 0.7, p.alpha <= 0 && (p.dead = !0));
+          break;
+        }
+        case "cop":
           break;
         case "flee": {
-          let C = this.city.player?.coll, f = p.fleeFrom;
+          let C = this.city.coll, f = p.fleeFrom;
           p.timer -= dt;
           let ax = p.x - f.x, ay = p.y - f.y, l = Math.hypot(ax, ay) || 1;
           ax /= l, ay /= l;
@@ -8308,6 +8599,14 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
       }
       p.dog && this.city.animals?.followOwner(p.dog, p, dt);
+    }
+    // momentum from a hit carries a body along the ground for a moment
+    slide(p, dt) {
+      if (!p.kvx && !p.kvy) return;
+      let C = this.city.coll, nx = p.x + p.kvx * dt, ny = p.y + p.kvy * dt;
+      !C || C.free(nx, ny, 0.15) ? (p.x = nx, p.y = ny) : (p.kvx = 0, p.kvy = 0);
+      let k = Math.exp(-dt * 5);
+      p.kvx *= k, p.kvy *= k, Math.abs(p.kvx) + Math.abs(p.kvy) < 0.02 && (p.kvx = 0, p.kvy = 0), C && (p.z += (C.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 12));
     }
     faceSeat(p) {
       let f = p.seat ? p.seat.b.seats[p.seat.k].face : p.stoopSeat ? p.stoopSeat.n : [0, 1], d = this.city.camera.screenDir(f[0], f[1]);
@@ -8366,7 +8665,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let set = p.front ? p.frames.front : p.frames.back, arr = set[p.anim] || set.idle, fi = 0;
       p.anim === "walk" ? fi = Math.floor(p.dist / 0.16) % 4 : p.anim === "run" ? fi = Math.floor(p.dist / 0.2) % 4 : p.anim === "idle" ? fi = Math.floor(p.animT * 1.3) % 2 : p.animFrame != null ? fi = p.animFrame % arr.length : fi = Math.floor(p.animT * 3) % arr.length;
       let f = arr[fi] || arr[0], alpha = p.alpha;
-      if (p.z < 0.125 - 0.15 && (alpha *= clamp(1 + (p.z - 0.125 + 0.15) * 1.6, 0, 1)), L.push(p.x, p.y, p.z, f, p.pal, p.flip ? SF.FLIP : 0, alpha, 3e-3), p.umbrella) {
+      if (p.z < 0.125 - 0.15 && (alpha *= clamp(1 + (p.z - 0.125 + 0.15) * 1.6, 0, 1)), L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === "down" || p.anim === "lie" ? SF.FLAT : 0), alpha, p.anim === "down" ? 2e-3 : 3e-3), p.umbrella) {
         let hz = p.z + (p.kid ? 0.82 : 1.12);
         L.push(p.x, p.y, hz, this.umbrellaFrame, p.pal, 0, alpha, 4e-3);
       }
@@ -8818,6 +9117,15 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let d = dist(pg.x, pg.y, target.x, target.y), dz = target.z - pg.z;
       pg.dur = clamp(Math.hypot(d, dz) / 3.4, 0.35, 4.5), pg.arc = clamp(0.08 + d * 0.11, 0.12, 1.3) * this.rng.range(0.8, 1.2) * (dz < -0.5 ? 0.2 : 1);
     }
+    // a gunshot or a blast: every pigeon on the ground nearby takes to the air
+    scare(x, y, r) {
+      let n = 0;
+      for (let pg of this.pigeons) {
+        if (pg.state !== "ground" || dist2(pg.x, pg.y, x, y) > r * r) continue;
+        let perch = this.rng.chance(0.6) ? this.perchFor(pg) : null, a = Math.atan2(pg.y - y, pg.x - x) + this.rng.range(-0.5, 0.5);
+        this.takeOff(pg, perch || { x: pg.x + Math.cos(a) * this.rng.range(4, 8), y: pg.y + Math.sin(a) * this.rng.range(4, 8), z: 0.125 }), n++ < 2 && this.city.audio?.event("flutter", pg);
+      }
+    }
     perchFor(pg) {
       let W = this.city.world, best = null, bd = 900;
       for (let p of W.perches) {
@@ -9084,7 +9392,31 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         sp.set(0, 0, S.C2, 120), sp.set(4, 0, S.C2, 120), sp.set(1, 1, S.C2, 136), sp.set(3, 1, S.C2, 136), sp.set(2, 2, S.C2, 150), sp.set(1, 2, S.C2, 120), sp.set(3, 2, S.C2, 120);
       }, 2, 2);
       let pal = city.pal;
-      this.row = pal.alloc({ [S.C1]: 15790838, [S.C2]: 13690104, [S.C3]: 16777215, [S.C4]: 14711328, [S.C5]: 13123626, [S.C6]: 15777840, [S.C7]: 16759e3, [S.C8]: 14217471, [S.C9]: 10132122 }), this.fwRows = [16728128, 4259712, 5275903, 16764992, 16740576, 16777215, 16748592, 6353151].map((c) => pal.alloc({ [S.C1]: [c, 128] })), this.flyRow = pal.alloc({ [S.C1]: [14221152, 128] }), this.p = [], this.emitters = [], this.rain = [], this.fireworkTimer = 3, this.flashes = [], this.fireflies = [], this.steamAcc = /* @__PURE__ */ new Map();
+      this.row = pal.alloc({ [S.C1]: 15790838, [S.C2]: 13690104, [S.C3]: 16777215, [S.C4]: 14711328, [S.C5]: 13123626, [S.C6]: 15777840, [S.C7]: 16759e3, [S.C8]: 14217471, [S.C9]: 10132122 }), this.fwRows = [16728128, 4259712, 5275903, 16764992, 16740576, 16777215, 16748592, 6353151].map((c) => pal.alloc({ [S.C1]: [c, 128] })), this.flyRow = pal.alloc({ [S.C1]: [14221152, 128] });
+      let row = (c) => pal.alloc({ [S.C1]: c, [S.C2]: c, [S.C3]: c });
+      this.rows = {
+        smokeGrey: row(9341832),
+        smokeDark: row(4078134),
+        smokeBlack: row(2104860),
+        dust: row(10261640),
+        fire: pal.alloc({ [S.C1]: [16769136, 128], [S.C2]: [16752688, 128], [S.C3]: [15224860, 128] }),
+        fbYellow: row([16771216, 128]),
+        fbOrange: row([16752704, 128]),
+        fbRed: row([14174234, 128]),
+        debris: row(2893860),
+        blood: row(9178126),
+        brass: row(14461492),
+        glass: row(13495039),
+        tracer: row([16773816, 128])
+      }, this.fr.flame = [[8, 12], [6, 10], [5, 8]].map(([w, h], k) => A.add("flame" + k, w, h, (sp) => {
+        for (let y = 0; y < h; y++)
+          for (let x = 0; x < w; x++) {
+            let v = y / (h - 1), half = w / 2 * Math.pow(v, 0.7) * (1 - 0.25 * Math.max(0, v - 0.75) * 4), dx = Math.abs(x + 0.5 - w / 2 + Math.sin(y * 1.7 + k) * 0.6);
+            if (dx > half) continue;
+            let t = dx / Math.max(0.5, half) * 0.6 + (1 - v) * 0.7;
+            sp.set(x, y, t < 0.45 ? S.C1 : t < 0.8 ? S.C2 : S.C3, 128);
+          }
+      }, w >> 1, h - 1)), this.p = [], this.emitters = [], this.rain = [], this.fireworkTimer = 3, this.flashes = [], this.fireflies = [], this.steamAcc = /* @__PURE__ */ new Map();
     }
     add(o) {
       return this.p.length >= MAXP ? null : (this.p.push(o), o);
@@ -9093,6 +9425,149 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let i = 0; i < n; i++) {
         let a = this.rng.range(0, 6.28), s = this.rng.range(0.3, 1.2);
         this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: this.rng.range(0.5, 1.6), g: 4, life: 0.5, max: 0.5, f: this.fr.dot2, row: this.row, slot: 0, kind: "spark" });
+      }
+    }
+    // ---- mayhem ---------------------------------------------------------------------------------
+    sparks(x, y, z, n) {
+      let r = this.rng;
+      for (let i = 0; i < n; i++) {
+        let a = r.range(0, 6.28), s = r.range(1, 4);
+        this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(0.5, 2.5), g: 9, life: r.range(0.2, 0.45), max: 0.45, f: this.fr.dot, row: this.fwRows[3], kind: "spark" });
+      }
+    }
+    glass(x, y, z, n) {
+      let r = this.rng;
+      for (let i = 0; i < n; i++) {
+        let a = r.range(0, 6.28), s = r.range(0.6, 2.4);
+        this.add({ x, y, z, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: r.range(0.5, 2), g: 9, life: r.range(1.2, 2.2), max: 2.2, f: this.fr.dot, row: this.rows.glass, kind: "bit" });
+      }
+    }
+    dust(x, y, z, n) {
+      let r = this.rng;
+      for (let i = 0; i < n; i++) this.add({ x: x + r.range(-0.1, 0.1), y: y + r.range(-0.1, 0.1), z, vx: r.range(-0.5, 0.5), vy: r.range(-0.5, 0.5), vz: r.range(0.2, 0.7), g: 0.5, life: r.range(0.4, 0.8), max: 0.8, kind: "smoke", row: this.rows.dust, grow: 1.5 });
+    }
+    blood(x, y, z, dx, dy, n) {
+      let r = this.rng;
+      for (let i = 0; i < n; i++) {
+        let s = r.range(0.8, 3.2), a = r.range(-0.7, 0.7), ca = Math.cos(a), sa = Math.sin(a), vx = (dx * ca - dy * sa) * s + r.range(-0.4, 0.4), vy = (dx * sa + dy * ca) * s + r.range(-0.4, 0.4);
+        this.add({ x, y, z: z + r.range(-0.15, 0.15), vx, vy, vz: r.range(0.2, 1.8), g: 9, life: 2, max: 2, f: r.chance(0.4) ? this.fr.dot2 : this.fr.dot, row: this.rows.blood, kind: "blood", splat: i % 3 === 0 });
+      }
+    }
+    muzzle(x, y, z, dx, dy) {
+      let r = this.rng;
+      for (let i = 0; i < 4; i++) {
+        let s = r.range(0.5, 3);
+        this.add({ x: x + dx * 0.05 * i, y: y + dy * 0.05 * i, z, vx: dx * s + r.range(-0.4, 0.4), vy: dy * s + r.range(-0.4, 0.4), vz: r.range(-0.3, 0.3), g: 0, life: 0.06, max: 0.06, f: i ? this.fr.dot : this.fr.dot2, row: this.rows.fbYellow, kind: "spark" });
+      }
+      this.add({ x: x + dx * 0.1, y: y + dy * 0.1, z, vx: r.range(-0.2, 0.2), vy: r.range(-0.2, 0.2), vz: 0.4, g: 0, life: 0.5, max: 0.5, kind: "smoke", row: this.rows.smokeGrey, grow: 1.2, a: 0.5 }), this.flashes.push({ x, y, k: 0.9, color: [1, 0.8, 0.45], r: 3.2, decay: 12 });
+    }
+    tracer(x0, y0, z0, x1, y1, z1) {
+      let d = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.ceil(d / 0.3));
+      for (let i = 1; i < n; i++) {
+        let t = i / n;
+        this.add({ x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t, z: z0 + (z1 - z0) * t, vx: 0, vy: 0, vz: 0, g: 0, life: 0.03 + t * 0.05, max: 0.08, f: this.fr.dot, row: this.rows.tracer, kind: "spark" });
+      }
+    }
+    shell(x, y, z, dx, dy) {
+      let r = this.rng;
+      this.add({ x, y, z, vx: -dy * r.range(1, 1.8) + dx * 0.2, vy: dx * r.range(1, 1.8) + dy * 0.2, vz: r.range(1.2, 2), g: 9, life: 1.6, max: 1.6, f: this.fr.dot, row: this.rows.brass, kind: "bit" });
+    }
+    explosion(x, y, z, car) {
+      let r = this.rng, R2 = this.rows;
+      for (let i = 0; i < 34; i++) {
+        let a = r.range(0, 6.28), b = Math.acos(r.range(-0.2, 1)), s = r.range(1.2, 4.2);
+        this.add({
+          x,
+          y,
+          z: z + r.range(0, 0.4),
+          vx: Math.cos(a) * Math.sin(b) * s,
+          vy: Math.sin(a) * Math.sin(b) * s,
+          vz: Math.cos(b) * s * 0.8 + 0.8,
+          g: -0.4,
+          drag: 3.2,
+          life: r.range(0.45, 1),
+          max: 1,
+          kind: "fireball",
+          row: i % 3 === 0 ? R2.fbYellow : i % 3 === 1 ? R2.fbOrange : R2.fbRed,
+          grow: 4,
+          delay: r.range(0, 0.12)
+        });
+      }
+      for (let i = 0; i < 22; i++) {
+        let a = r.range(0, 6.28), s = r.range(0.3, 1.6);
+        this.add({
+          x: x + Math.cos(a) * 0.4,
+          y: y + Math.sin(a) * 0.4,
+          z: z + r.range(0.3, 1.2),
+          vx: Math.cos(a) * s,
+          vy: Math.sin(a) * s,
+          vz: r.range(0.8, 2.2),
+          g: -0.1,
+          drag: 0.8,
+          life: r.range(2.4, 4.5),
+          max: 4.5,
+          kind: "smoke",
+          row: i % 2 ? R2.smokeBlack : R2.smokeDark,
+          grow: 4,
+          delay: r.range(0.25, 0.7)
+        });
+      }
+      for (let i = 0; i < 26; i++) {
+        let a = r.range(0, 6.28), s = r.range(1.5, 6);
+        this.add({
+          x,
+          y,
+          z: z + 0.3,
+          vx: Math.cos(a) * s,
+          vy: Math.sin(a) * s,
+          vz: r.range(2, 6.5),
+          g: 9.8,
+          life: r.range(1.6, 3),
+          max: 3,
+          f: r.chance(0.5) ? this.fr.dot2 : this.fr.dot,
+          row: car && car.palRow >= 0 && i % 3 === 0 ? car.palRow : R2.debris,
+          kind: "bit"
+        });
+      }
+      this.sparks(x, y, z + 0.4, 34), this.glass(x, y, z + 0.6, 14);
+      for (let i = 0; i < 16; i++) {
+        let a = i / 16 * 6.28, s = r.range(3, 5);
+        this.add({ x, y, z: 0.05, vx: Math.cos(a) * s, vy: Math.sin(a) * s, vz: 0.1, g: 0, drag: 3.5, life: 0.9, max: 0.9, kind: "smoke", row: R2.dust, grow: 3 });
+      }
+      this.flashes.push({ x, y, k: 2.2, color: [1, 0.6, 0.25], r: 11, decay: 2.4 });
+    }
+    // engines that smoke, cars on fire, wrecks smouldering
+    carFx(dt, view) {
+      let V = this.city.vehicles, r = this.rng, R2 = this.rows;
+      if (!V) return;
+      let wx = Math.cos(this.city.env.windDir) * this.city.env.wind * 0.5, wy = Math.sin(this.city.env.windDir) * this.city.env.wind * 0.5;
+      for (let c of V.damaged) {
+        if (c.fadeOut != null || !view.visible(c.x, c.y, 1, 4)) continue;
+        let ch = Math.cos(c.h), sh = Math.sin(c.h), big = c.type === "bus" || c.type === "truck" || c.type === "fire" || c.type === "garbage" || c.type === "plow", ef = c.type === "bus" ? -0.4 : 0.36, ex = c.x + ch * c.len * ef, ey = c.y + sh * c.len * ef, ez = (c.z || 0) + (c.hopZ || 0) + (big ? 1 : c.type === "van" || c.type === "icecream" ? 0.8 : 0.55), frac = c.hp / c.maxHp, smoke = 0, fire = 0, row = R2.smokeGrey;
+        for (c.wreck ? c.burnT > 0 ? (fire = 10 + c.burnT * 2, smoke = 9, row = R2.smokeBlack) : c.smolderT > 0 && (smoke = 2 + c.smolderT * 0.08, row = R2.smokeDark) : c.fireT != null ? (fire = 14 + c.fireT / c.fuse * 26, smoke = 10, row = R2.smokeBlack) : frac < 0.3 ? (smoke = 7, row = R2.smokeDark) : frac < 0.5 && (smoke = 3.5), c.fxSmoke = (c.fxSmoke || 0) + smoke * dt; c.fxSmoke > 1; )
+          c.fxSmoke -= 1, this.add({
+            x: ex + r.range(-0.15, 0.15),
+            y: ey + r.range(-0.15, 0.15),
+            z: ez,
+            vx: wx + r.range(-0.15, 0.15),
+            vy: wy + r.range(-0.15, 0.15),
+            vz: r.range(0.6, 1.1),
+            g: -0.05,
+            drag: 0.3,
+            life: r.range(1.6, 2.8) * (row === R2.smokeGrey ? 0.8 : 1),
+            max: 2.8,
+            kind: "smoke",
+            row,
+            grow: 3.2,
+            a: row === R2.smokeGrey ? 0.75 : 1
+          });
+        c.fxFire = (c.fxFire || 0) + fire * dt;
+        let spread = c.wreck ? 1 : Math.min(1, 0.25 + (c.fireT || 0) / (c.fuse || 1));
+        for (; c.fxFire > 1; ) {
+          c.fxFire -= 1;
+          let u = r.range(-0.5, 0.5) * spread, v = r.range(-0.4, 0.4) * spread, fx = c.wreck ? c.x + ch * u * c.len - sh * v * c.wid : ex + ch * u * c.len * 0.6 - sh * v * c.wid, fy = c.wreck ? c.y + sh * u * c.len + ch * v * c.wid : ey + sh * u * c.len * 0.6 + ch * v * c.wid;
+          this.add({ x: fx, y: fy, z: ez - 0.15 + r.range(0, 0.2), vx: wx * 0.5 + r.range(-0.1, 0.1), vy: wy * 0.5 + r.range(-0.1, 0.1), vz: r.range(1, 2), g: 0, life: r.range(0.25, 0.55), max: 0.55, kind: "fire", f: r.pick(this.fr.flame), row: R2.fire }), r.chance(0.08) && this.add({ x: fx, y: fy, z: ez + 0.3, vx: r.range(-0.6, 0.6), vy: r.range(-0.6, 0.6), vz: r.range(1.5, 3), g: 1, life: 0.6, max: 0.6, f: this.fr.dot, row: this.fwRows[3], kind: "spark" });
+        }
       }
     }
     addEmitter(kind, data) {
@@ -9110,6 +9585,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     update(dt) {
       let env = this.city.env, view = this.city.view, r = this.rng, wind = env.wind, wx = Math.cos(env.windDir) * wind * 0.8, wy = Math.sin(env.windDir) * wind * 0.8;
       if (!view || !view.bw) return;
+      this.carFx(dt, view);
       let want = env.precip > 0.05 ? Math.floor((env.snowing ? 1400 : 1700) * env.precip * Math.min(1.6, view.bw * view.bh / 6e5)) : 0;
       for (; this.rain.length < want; ) {
         let z = r.range(0, 26), [x, y] = this.screenPoint(view, z);
@@ -9228,7 +9704,21 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         f.ph += dt * f.sp, f.x += Math.sin(f.ph * 0.7) * 0.25 * dt, f.y += Math.cos(f.ph * 0.5) * 0.25 * dt, f.z += Math.sin(f.ph) * 0.1 * dt;
       for (let i = this.p.length - 1; i >= 0; i--) {
         let q = this.p[i];
-        if (q.life -= dt, q.kind === "leaf")
+        if (q.delay > 0) {
+          q.delay -= dt;
+          continue;
+        }
+        if (q.life -= dt, q.drag) {
+          let k = Math.exp(-q.drag * dt);
+          q.vx *= k, q.vy *= k, q.vz *= k;
+        }
+        if (q.kind === "bit" || q.kind === "blood") {
+          q.vz -= q.g * dt, q.x += q.vx * dt, q.y += q.vy * dt, q.z += q.vz * dt;
+          let gz = this.groundZ(q.x, q.y);
+          q.z <= gz + 0.01 && q.vz < 0 && (q.z = gz + 0.01, q.kind === "blood" ? (q.splat && gz > -50 && this.city.decals?.add("splat", q.x, q.y, gz, r.range(0, 6.28), r.range(0.1, 0.18), 1), q.life = 0) : q.vz < -1.5 ? (q.vz = -q.vz * 0.3, q.vx *= 0.5, q.vy *= 0.5) : (q.vz = 0, q.vx = 0, q.vy = 0, q.g = 0)), q.life <= 0 && this.p.splice(i, 1);
+          continue;
+        }
+        if (q.kind === "leaf")
           q.ph += dt * 3, q.x += (q.vx + Math.sin(q.ph) * 0.4) * dt, q.y += (q.vy + Math.cos(q.ph * 0.8) * 0.3) * dt, q.z += q.vz * dt, q.z <= this.groundZ(q.x, q.y) + 0.02 && (q.vz = 0, q.vx = 0, q.vy = 0, q.life = Math.min(q.life, 1.5));
         else {
           if (q.vz -= (q.g || 0) * dt, q.x += q.vx * dt, q.y += q.vy * dt, q.z += q.vz * dt, q.kind === "water") {
@@ -9239,8 +9729,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
         q.kind === "rocket" && (r.chance(0.6) && this.add({ x: q.x, y: q.y, z: q.z, vx: 0, vy: 0, vz: -0.5, g: 0, life: 0.35, max: 0.35, kind: "spark", f: this.fr.dot, row: this.fwRows[3] }), (q.vz < 2 || q.life <= 0) && (q.life = 0, this.burst(q.x, q.y, q.z))), q.life <= 0 && this.p.splice(i, 1);
       }
-      for (let i = this.flashes.length - 1; i >= 0; i--)
-        this.flashes[i].k -= dt * 2.2, this.flashes[i].k <= 0 && this.flashes.splice(i, 1);
+      for (let i = this.flashes.length - 1; i >= 0; i--) {
+        let f = this.flashes[i];
+        f.k -= dt * (f.decay || 2.2), f.k <= 0 && this.flashes.splice(i, 1);
+      }
     }
     burst(x, y, z) {
       let r = this.rng, rowA = r.pick(this.fwRows), rowB = r.chance(0.4) ? r.pick(this.fwRows) : rowA, n = r.int(50, 90), kind = r.int(0, 2);
@@ -9254,8 +9746,21 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     emit(L, view) {
       let env = this.city.env, pf = this.fr.puff;
       for (let q of this.p) {
-        if (!view.visible(q.x, q.y, q.z, 2)) continue;
+        if (q.delay > 0 || !view.visible(q.x, q.y, q.z, 2)) continue;
         let t = q.max ? q.life / q.max : 1;
+        if (q.kind === "smoke" || q.kind === "fireball") {
+          let age = 1 - t, si = Math.min(pf.length - 1, Math.floor(age * q.grow)), a = (q.a ?? 1) * Math.min(1, t * (q.kind === "smoke" ? 2.2 : 3));
+          L.push(q.x, q.y, q.z, pf[si], q.row, q.kind === "fireball" ? SF.EMISSIVE | SF.NOSHADOW : SF.NOSHADOW, a, 1e-3);
+          continue;
+        }
+        if (q.kind === "fire") {
+          L.push(q.x, q.y, q.z, q.f, q.row, SF.EMISSIVE | SF.NOSHADOW, Math.min(1, t * 2.5), 2e-3);
+          continue;
+        }
+        if (q.kind === "bit" || q.kind === "blood") {
+          L.push(q.x, q.y, q.z, q.f, q.row, SF.NOSHADOW, Math.min(1, q.life * 2), 2e-3);
+          continue;
+        }
         if (q.kind === "steam") {
           let age = 1 - t, si = Math.min(pf.length - 1, Math.floor(age * q.grow));
           L.push(q.x, q.y, q.z, pf[si], q.row, SF.NOSHADOW | SF.BRIGHT, Math.min(1, t * 2.6), 1e-3);
@@ -9275,7 +9780,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return this._slotRows[slot];
     }
     lights(LL, env) {
-      for (let f of this.flashes) LL.add(f.x, f.y, 14, f.color, f.k * 0.8);
+      for (let f of this.flashes) LL.add(f.x, f.y, f.r || 14, f.color, f.k * 0.8);
+      let V = this.city.vehicles;
+      if (V) for (let c of V.damaged) {
+        if (!(c.fireT != null || c.wreck && c.burnT > 0) || c.fadeOut != null) continue;
+        let fl = 0.75 + 0.25 * Math.sin(this.city.time * 23 + c.id) * Math.sin(this.city.time * 7.3 + c.id * 2);
+        LL.add(c.x, c.y, 3.6, [1, 0.55, 0.2], 0.6 * fl);
+      }
       for (let q of this.p) q.kind === "rocket" && LL.add(q.x, q.y, 1.2, [1, 0.8, 0.5], 0.5);
     }
   };
@@ -9378,75 +9889,55 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
   };
 
-  // src/sim/collide.js
-  var RES = 4, Collision = class {
-    constructor(world) {
-      this.n = 171 * RES, this.solid = new Uint8Array(this.n * this.n);
-      for (let [x0, y0, x1, y1] of world.solids) {
-        let cx0 = Math.max(0, Math.floor(Math.min(x0, x1) * RES)), cx1 = Math.min(this.n - 1, Math.floor(Math.max(x0, x1) * RES - 1e-6)), cy0 = Math.max(0, Math.floor(Math.min(y0, y1) * RES)), cy1 = Math.min(this.n - 1, Math.floor(Math.max(y0, y1) * RES - 1e-6));
-        for (let y = cy0; y <= cy1; y++) this.solid.fill(1, y * this.n + cx0, y * this.n + cx1 + 1);
-      }
-      this.ground = new Uint8Array(171 * 171);
-      for (let [x0, y0, x1, y1] of plinthRects())
-        for (let y = Math.max(0, Math.floor(y0)); y < Math.min(171, Math.ceil(y1)); y++)
-          this.ground.fill(1, y * 171 + Math.max(0, Math.floor(x0)), y * 171 + Math.min(171, Math.ceil(x1)));
-    }
-    isSolid(x, y) {
-      return x < 0.3 || y < 0.3 || x > 171 - 0.3 || y > 171 - 0.3 ? !0 : this.solid[Math.floor(y * RES) * this.n + Math.floor(x * RES)] === 1;
-    }
-    // is a circle of radius r at (x, y) clear of walls?
-    free(x, y, r) {
-      if (this.isSolid(x, y)) return !1;
-      for (let k = 0; k < 8; k++) {
-        let a = k / 8 * Math.PI * 2;
-        if (this.isSolid(x + Math.cos(a) * r, y + Math.sin(a) * r)) return !1;
-      }
-      return !0;
-    }
-    groundZ(x, y) {
-      let ix = Math.floor(x), iy = Math.floor(y);
-      return ix < 0 || iy < 0 || ix >= 171 || iy >= 171 ? 0 : this.ground[iy * 171 + ix] ? 0.125 : 0;
-    }
-    // is (x, y) on a roadway (not raised)?
-    onRoad(x, y) {
-      return this.groundZ(x, y) === 0;
-    }
-  };
-
   // src/sim/player.js
-  var WALK = 1.3, RUN = 2.8, R_FOOT = 0.2, MAX_HEAT = 5, wrap = (a) => {
+  var WALK = 1.3, RUN = 2.8, R_FOOT = 0.2, STAR_PTS = [0, 0, 60, 150, 300, 520], CARS_FOR = [0, 2, 3, 4, 6, 8], CLIP = 12, wrap = (a) => {
     for (; a > Math.PI; ) a -= 2 * Math.PI;
     for (; a < -Math.PI; ) a += 2 * Math.PI;
     return a;
   }, NAMES2 = { sedan: "SEDAN", taxi: "TAXI", suv: "SUV", van: "VAN", police: "POLICE CAR", bus: "BUS", truck: "TRUCK", fire: "FIRE TRUCK", icecream: "ICE-CREAM TRUCK", garbage: "GARBAGE TRUCK", plow: "SNOW PLOW" }, Player = class {
     constructor(city) {
-      this.city = city, this.coll = new Collision(city.world), this.rng = new RNG(4321), this.active = !1, this.p = null, this.car = null, this.heat = 0, this.cool = 0, this.chasers = [], this.leaving = [], this.abandoned = [], this.recruitT = 0, this.flowT = 0, this.bustT = 0, this.busted = 0, this.msgs = [], this.input = { x: 0, y: 0, run: !1, brake: !1 }, this.camTarget = { x: 0, y: 0, z: 0 }, this.obstacles = [], this.ramT = 0, this.speedT = 0, this.buildCells();
+      this.city = city, this.coll = city.coll, this.rng = new RNG(4321), this.active = !1, this.p = null, this.car = null, this.stars = 0, this.pts = 0, this.unseenT = 0, this.report = 0, this.reportT = null, this.knownT = 0, this.lastKnown = { x: 0, y: 0 }, this.chasers = [], this.leaving = [], this.officers = [], this.recruitT = 0, this.flowT = 0, this.bustT = 0, this.busted = 0, this.knockT = 0, this.msgs = [], this.input = { x: 0, y: 0, run: !1, brake: !1, space: !1 }, this.aim = { x: 0, y: 0, t: -1e9 }, this.trigger = !1, this.gun = { clip: CLIP, reload: 0, cd: 0 }, this.aimT = 0, this.recoilT = 0, this.aimDx = 1, this.aimDy = 0, this.camTarget = { x: 0, y: 0, z: 0 }, this.ramT = 0, this.speedT = 0, this.seenT = 0, this.seen = !1, this.buildCells();
+    }
+    get heat() {
+      return this.stars;
     }
     // ---- control --------------------------------------------------------------------------------
     start(p) {
       let P = this.city.people;
-      return !p || p.state === "vanish" || p.dead ? !1 : (this.active && this.stop(), p.actKind && this.city.activities.leave(p), p.seat && (p.seat.b.used[p.seat.k] = !1, p.seat = null), p.stoopSeat && (p.stoopSeat.used = !1, p.stoopSeat = null), p.crossing && P.endCross(p), p.state = "player", p.plan = [], p.path = null, p.alpha = 1, p.anim = "idle", p.animFrame = null, p.forceFace = !1, p.z = this.coll.groundZ(p.x, p.y), p.thought = "", this.p = p, this.active = !0, this.heat = 0, this.cool = 0, this.bustT = 0, this.busted = 0, this.camTarget.x = p.x, this.camTarget.y = p.y, this.city.camera.follow = this.camTarget, this.say(`You are ${p.name}`, 3), !0);
+      return !p || p.state === "vanish" || p.dead || p.state === "dead" || p.state === "cop" ? !1 : (this.active && this.stop(), P.detachPerson(p), p.state = "player", p.plan = [], p.path = null, p.alpha = 1, p.anim = "idle", p.animFrame = null, p.forceFace = !1, p.z = this.coll.groundZ(p.x, p.y), p.thought = "", personPose(this.city.atlas, p.frames, "aim"), personPose(this.city.atlas, p.frames, "down"), this.p = p, this.active = !0, this.clearWanted(!0), this.bustT = 0, this.busted = 0, this.knockT = 0, this.gun = { clip: CLIP, reload: 0, cd: 0 }, this.camTarget.x = p.x, this.camTarget.y = p.y, this.city.camera.follow = this.camTarget, this.say(`You are ${p.name}`, 3), !0);
     }
     stop() {
       if (!this.active) return;
       this.car && this.exitCar(!0);
       let p = this.p, P = this.city.people;
       if (p) {
-        p.state = "idle", p.timer = 0.4, p.alpha = 1, p.inCar = !1, p.node = P.nearestOf(P.nav.nodes, p.x, p.y);
+        p.state = "idle", p.timer = 0.4, p.alpha = 1, p.inCar = !1, p.forceFace = !1, p.animFrame = null, p.anim = "idle", p.node = P.nearestOf(P.nav.nodes, p.x, p.y);
         let home = p.home || P.pickHome();
         p.plan = [{ t: "go", node: home, thought: "What a day" }, { t: "enter" }];
       }
-      this.endChase(!0), this.heat = 0, this.active = !1, this.p = null, this.city.camera.follow === this.camTarget && (this.city.camera.follow = null);
+      this.clearWanted(!0), this.active = !1, this.p = null, this.trigger = !1, this.city.camera.follow === this.camTarget && (this.city.camera.follow = null);
     }
     // F / Enter: get in or out
     action() {
-      if (!this.active || this.busted > 0) return;
+      if (!this.active || this.busted > 0 || this.knockT > 0) return;
       if (this.car) {
         this.exitCar();
         return;
       }
       let c = this.nearCar();
-      c ? this.enterCar(c) : this.say("No car close enough", 1.5);
+      if (!c) {
+        this.say("No car close enough", 1.5);
+        return;
+      }
+      if (c.wreck) {
+        this.say("It's a burnt-out wreck", 1.6);
+        return;
+      }
+      if (c.fireT != null) {
+        this.say("It's on fire!", 1.6);
+        return;
+      }
+      this.enterCar(c);
     }
     nearCar() {
       let p = this.p, best = null, bd = 2.4 * 2.4;
@@ -9460,23 +9951,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     say(text, t = 2.2, big = !1) {
       this.msgs = this.msgs.filter((m) => m.text !== text), this.msgs.push({ text, t, big }), this.msgs.length > 3 && this.msgs.shift();
     }
-    // ---- cars -----------------------------------------------------------------------------------
-    detach(c) {
-      let tr = this.city.traffic;
-      if (c.piece && c.piece.cars) {
-        let i = c.piece.cars.indexOf(c);
-        i >= 0 && c.piece.cars.splice(i, 1);
-      }
-      for (let [k, v] of tr.exitLock) v === c && tr.exitLock.delete(k);
-      c.spot && (c.spot.car = null, c.spot = null), c.piece = null, c.next = null, c.route = null, c.lat = 0, c.latTarget = 0, c.dwell = null, c.stopAt = null, c.free = !0;
+    // where the mouse points (world), and the trigger
+    aimAt(x, y) {
+      this.aim.x = x, this.aim.y = y, this.aim.t = this.city.time;
     }
+    reload() {
+      let g = this.gun;
+      g.reload > 0 || g.clip >= CLIP || (g.reload = 1.25, this.city.audio?.event("reload", this.target()));
+    }
+    // ---- cars -----------------------------------------------------------------------------------
     enterCar(c) {
-      let was = c.state, ci = this.chasers.indexOf(c);
-      ci >= 0 && this.chasers.splice(ci, 1);
-      let li = this.leaving.indexOf(c);
-      li >= 0 && this.leaving.splice(li, 1);
-      let ai = this.abandoned.indexOf(c);
-      ai >= 0 && this.abandoned.splice(ai, 1), this.detach(c), was === "drive" || was === "pullin" || was === "pullout" || was === "chase" || was === "leaving" ? (this.ejectDriver(c), this.addHeat(c.type === "police" ? 2 : 1, c.type === "police" ? "Stole a police car!" : "Carjacked!")) : was === "parked" && (this.rng.chance(0.35) ? (this.city.audio?.event("alarm", c), this.say("Car alarm!", 1.6), this.policeNear(c.x, c.y, 26) && this.addHeat(1, "Somebody saw that!")) : this.say(`Got into a ${NAMES2[c.type] || "car"}`, 1.6)), c.state = "player", c.special = c.type === "icecream" ? "icecream" : null, c.siren = !1, c.v = Math.max(0, c.v * 0.3), c.fadeIn = 0, c.fadeOut = null, c.life = 1e9, this.car = c;
+      let V = this.city.vehicles, was = c.state;
+      this.forget(c), c.free || (this.city.traffic.detach(c), V.launch(c)), V.init(c), was === "drive" || was === "pullin" || was === "pullout" || was === "chase" || was === "leaving" || was === "crashed" ? (this.ejectDriver(c, "jack"), c.type === "police" ? this.crime(60, "Stole a police car!") : this.crime(25, "Carjacked!", this.policeSee())) : (was === "parked" || was === "loose") && (this.rng.chance(0.35) ? (this.city.audio?.event("alarm", c), this.say("Car alarm!", 1.6), this.policeSee(26) && this.crime(15, "Somebody saw that!")) : this.say(`Got into a ${NAMES2[c.type] || "car"}`, 1.6), c.type === "police" && this.crime(40, "Took a police car!", this.policeSee())), c.state = "player", c.special = c.type === "icecream" ? "icecream" : null, c.siren = !1, c.fadeIn = 0, c.fadeOut = null, c.life = 1e9, c.idleT = 0, c.crewOut = !1, this.car = c;
       let p = this.p;
       p.alpha = 0, p.inCar = !0, p.anim = "idle", p.dog && (p.dog.gone = !0, p.dog = null);
     }
@@ -9495,185 +9981,251 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         this.say("Can't open the door here", 1.5);
         return;
       }
-      spot || (spot = [c.x, c.y]), p.x = spot[0], p.y = spot[1], p.z = this.coll.groundZ(p.x, p.y), p.alpha = 1, p.inCar = !1, p.state = "player", c.state = "abandoned", c.v = 0, c.brake = !1, c.siren = !1, c.abandonT = 0, c.free = !0, this.abandoned.push(c), this.car = null;
+      spot || (spot = [c.x, c.y]), p.x = spot[0], p.y = spot[1], p.z = this.coll.groundZ(p.x, p.y), p.alpha = 1, p.inCar = !1, p.state = "player", c.wreck || (c.state = "abandoned"), c.brake = !1, c.siren = !1, c.idleT = 0, c.free = !0, this.car = null;
     }
-    ejectDriver(c) {
+    // whoever was at the wheel gets out (and is not happy about it)
+    ejectDriver(c, why = "jack") {
+      if (c.type === "police") {
+        this.deployOfficers(c, 2);
+        return;
+      }
       let P = this.city.people, q = P.create(this.rng.chance(0.15) ? "elder" : "resident"), hx = Math.cos(c.h), hy = Math.sin(c.h), x = c.x + hy * (c.wid / 2 + 0.4), y = c.y - hx * (c.wid / 2 + 0.4);
-      this.coll.free(x, y, 0.2) || (x = c.x - hy * (c.wid / 2 + 0.4), y = c.y + hx * (c.wid / 2 + 0.4)), q.x = x, q.y = y, q.z = this.coll.groundZ(x, y), q.alpha = 1, q.home = P.pickHome(), q.state = "flee", q.timer = 2.2, q.fleeFrom = { x: c.x, y: c.y }, q.plan = [{ t: "go", node: q.home, thought: "Somebody stole my car!" }, { t: "enter" }], q.thought = this.rng.pick(["HEY! MY CAR!", "STOP! THIEF!", "Not again...", "Call the cops!"]), P.list.push(q);
-    }
-    // collision circles along a car's length
-    circles(c, x, y, h) {
-      let L = c.len, r = c.wid * 0.5, n = Math.max(2, Math.ceil(L / (c.wid * 0.9))), out = [];
-      for (let k = 0; k < n; k++) {
-        let t = -L / 2 + r + (L - 2 * r) * k / (n - 1);
-        out.push([x + Math.cos(h) * t, y + Math.sin(h) * t, r]);
-      }
-      return out;
-    }
-    carFree(c, x, y, h) {
-      for (let [cx, cy, r] of this.circles(c, x, y, h)) if (!this.coll.free(cx, cy, r * 0.9)) return !1;
-      return !0;
-    }
-    // move a free car along its heading; slide along walls, bounce off them head-on
-    physMove(c, dt) {
-      let dx = Math.cos(c.h) * c.v * dt, dy = Math.sin(c.h) * c.v * dt;
-      if (!this.carFree(c, c.x, c.y, c.h) || this.carFree(c, c.x + dx, c.y + dy, c.h))
-        return c.x += dx, c.y += dy, 0;
-      if (Math.abs(dx) > 1e-4 && this.carFree(c, c.x + dx, c.y, c.h))
-        return c.x += dx, c.v *= 1 - Math.min(1, dt * 4), 1;
-      if (Math.abs(dy) > 1e-4 && this.carFree(c, c.x, c.y + dy, c.h))
-        return c.y += dy, c.v *= 1 - Math.min(1, dt * 4), 1;
-      let hit = Math.abs(c.v);
-      return c.v = -c.v * 0.3, hit > 2.5 && this.city.audio?.event("crash", c), hit > 2.5 ? 2 : 1;
-    }
-    // push this car out of any other car it overlaps; returns what it hit
-    collideCars(c) {
-      let mine = this.circles(c, c.x, c.y, c.h), hitCar = null;
-      for (let o of this.city.traffic.cars) {
-        if (o === c || o.fadeOut != null || o.type === "subway") continue;
-        let R2 = (c.len + o.len) / 2 + 0.4;
-        if (dist2(o.x, o.y, c.x, c.y) > R2 * R2) continue;
-        let best = 0, nx = 0, ny = 0;
-        for (let [ax, ay, ar] of mine) for (let [bx, by, br] of this.circles(o, o.x, o.y, o.h)) {
-          let d = Math.hypot(ax - bx, ay - by), pen = ar + br - d;
-          pen > best && (best = pen, nx = (ax - bx) / (d || 1), ny = (ay - by) / (d || 1));
-        }
-        if (best <= 0) continue;
-        let movable = o.free || o.state === "parked", share = movable ? 0.55 : 1, px = nx * best * share, py = ny * best * share;
-        if (this.carFree(c, c.x + px, c.y + py, c.h) && (c.x += px, c.y += py), movable) {
-          let qx = o.x - nx * best * 0.45, qy = o.y - ny * best * 0.45;
-          this.carFree(o, qx, qy, o.h) && (o.x = qx, o.y = qy), o.free && o !== this.car && (o.v *= 0.6);
-        } else
-          o.v = 0;
-        Math.abs(c.v) > 2.5 && this.city.audio?.event("crash", c), c.v *= movable ? 0.82 : 0.55, hitCar = o;
-      }
-      return hitCar;
-    }
-    // people in front of a moving car dive out of the way (or get knocked over and get back up)
-    shovePeople(c) {
-      if (Math.abs(c.v) < 1) return;
-      let sg = Math.sign(c.v), hx = Math.cos(c.h) * sg, hy = Math.sin(c.h) * sg;
-      for (let q of this.city.people.list) {
-        if (q === this.p || q.alpha < 0.5 || q.inCar) continue;
-        let dx = q.x - c.x, dy = q.y - c.y;
-        if (dx * dx + dy * dy > 20 || !(q.state === "walk" || q.state === "idle" || q.state === "wait" || q.state === "return" || q.state === "busWait" || q.state === "arrived" || q.state === "flee")) continue;
-        let ahead = dx * hx + dy * hy, lat = hx * dy - hy * dx;
-        if (ahead < -c.len / 2 || ahead > c.len / 2 + 2.2 || Math.abs(lat) > c.wid / 2 + 0.55) continue;
-        let s = lat >= 0 ? 1 : -1;
-        ahead < c.len / 2 + 0.15 && Math.abs(lat) < c.wid / 2 + 0.1 && Math.abs(c.v) > 3 ? (q.state = "knocked", q.timer = 2.4, q.anim = "lie", q.animFrame = 0, q.thought = this.rng.pick(["OUCH!", "Watch it!", "My back...", "Hey!"]), c === this.car && this.addHeat(1, "Hit and run!")) : (q.dodge = { x: -hy * s, y: hx * s, t: 0.55, back: q.state }, q.state = "dodge", q.thought = this.rng.pick(["WHOA!", "HEY!", "Look out!", "Crazy driver!"]));
-      }
+      this.coll.free(x, y, 0.2) || (x = c.x - hy * (c.wid / 2 + 0.4), y = c.y + hx * (c.wid / 2 + 0.4)), q.x = x, q.y = y, q.z = this.coll.groundZ(x, y), q.alpha = 1, q.home = P.pickHome(), q.state = "flee", q.timer = why === "crash" ? 1.2 : 2.4, q.fleeFrom = { x: c.x, y: c.y }, q.plan = [{ t: "go", node: q.home, thought: why === "jack" ? "Somebody stole my car!" : "My poor car..." }, { t: "enter" }], q.thought = this.rng.pick(why === "jack" ? ["HEY! MY CAR!", "STOP! THIEF!", "Not again...", "Call the cops!"] : why === "fire" ? ["FIRE!", "It's gonna blow!", "RUN!"] : why === "shot" ? ["DON'T SHOOT!", "AAAH!", "Get down!"] : ["My car!!", "Are you crazy?!", "Learn to drive!", "Insurance is gonna love this"]), P.list.push(q);
     }
     // ---- update ---------------------------------------------------------------------------------
     update(dt) {
-      if (this.msgs = this.msgs.filter((m) => (m.t -= dt) > 0), this.updateAbandoned(dt), this.updateLeaving(dt), !this.active) {
-        this.obstacles = this.abandoned.map((c) => ({ x: c.x, y: c.y, r: c.len / 2, v: 0, car: c }));
-        return;
-      }
+      if (this.msgs = this.msgs.filter((m) => (m.t -= dt) > 0), this.updateLeaving(dt), !this.active) return;
       let p = this.p;
-      if (!p || p.dead) {
+      if (!p || p.dead || p.state === "dead") {
         this.active = !1;
         return;
       }
-      if (this.busted > 0) {
-        this.busted -= dt, p.anim = "wave";
+      let g = this.gun;
+      if (g.cd -= dt, this.aimT -= dt, this.recoilT -= dt, this.ramT -= dt, g.reload > 0 && (g.reload -= dt, g.reload <= 0 && (g.reload = 0, g.clip = CLIP)), this.busted > 0) {
+        this.busted -= dt, p.anim = "wave", p.animFrame = null, p.forceFace = !1;
+        let V = this.city.vehicles;
         for (let c of this.chasers)
-          c.v *= 1 - Math.min(1, dt * 3);
+          V.init(c), V.steer(c, dt, V.fwd(c) * (1 - Math.min(1, dt * 3)), 0, 10), V.move(c, dt);
+        for (let o of this.officers) o.state === "cop" && (o.anim = "idle", o.animFrame = null);
         this.busted <= 0 && this.release();
-      } else this.car ? this.drive(dt) : this.walk(dt);
-      this.updateHeat(dt), this.updatePolice(dt), this.busted <= 0 && this.checkBust(dt);
-      let t = this.car || p, lead = this.car ? 0.55 : 0.25, vx = this.car ? Math.cos(this.car.h) * this.car.v : 0, vy = this.car ? Math.sin(this.car.h) * this.car.v : 0;
+      } else this.knockT > 0 ? (this.knockT -= dt, p.anim = "down", p.animFrame = 0, p.forceFace = !1, this.city.people.slide(p, dt), this.knockT <= 0 && (p.anim = "idle", p.animFrame = null)) : this.car ? this.drive(dt) : this.walk(dt);
+      if ((this.trigger || this.clickShot || !this.car && this.input.space) && g.cd <= 0 && this.busted <= 0 && this.knockT <= 0) {
+        let mouse = this.city.time - this.aim.t < 4;
+        this.trigger || this.clickShot || mouse ? this.fireAt(this.aim.x, this.aim.y, !1) : this.fireAt(p.x + (p.dx || 1), p.y + (p.dy || 0), !0), this.clickShot = !1;
+      }
+      (this.busted > 0 || this.knockT > 0) && (this.clickShot = !1), this.updateWanted(dt), this.updatePolice(dt), this.updateOfficers(dt), this.busted <= 0 && this.checkBust(dt);
+      let t = this.car || p, lead = this.car ? 0.55 : 0.25, vx = this.car && this.car.vx || 0, vy = this.car && this.car.vy || 0;
       this.camTarget.x = t.x + vx * lead, this.camTarget.y = t.y + vy * lead, this.city.camera.follow !== this.camTarget && (this.city.camera.follow = this.camTarget);
-      let obs = [];
-      this.car ? obs.push({ x: this.car.x, y: this.car.y, r: this.car.len / 2, v: Math.abs(this.car.v), car: this.car }) : p.z < 0.05 && obs.push({ x: p.x, y: p.y, r: 0.3, v: 1 });
-      for (let c of this.chasers) obs.push({ x: c.x, y: c.y, r: c.len / 2, v: Math.abs(c.v), car: c });
-      for (let c of this.abandoned) obs.push({ x: c.x, y: c.y, r: c.len / 2, v: 0, car: c });
-      this.obstacles = obs;
     }
     walk(dt) {
-      let p = this.p, inp = this.input, mx = inp.x, my = inp.y;
+      let p = this.p, inp = this.input, mx = inp.x, my = inp.y, aiming = this.aimT > 0;
       if (mx || my) {
         let l = Math.hypot(mx, my);
         mx /= l, my /= l;
-        let [wx, wy] = this.city.camera.unprojectDelta(mx * 32, my * 32), wl = Math.hypot(wx, wy) || 1, dx = wx / wl, dy = wy / wl, sp = (inp.run ? RUN : WALK) * dt;
-        this.moveFoot(p, dx * sp, dy * sp), p.dx = dx, p.dy = dy, p.anim = inp.run ? "run" : "walk", p.dist += sp, p.animFrame = null;
+        let [wx, wy] = this.city.camera.unprojectDelta(mx * 32, my * 32), wl = Math.hypot(wx, wy) || 1, dx = wx / wl, dy = wy / wl, sp = (inp.run && !aiming ? RUN : WALK) * dt;
+        this.moveFoot(p, dx * sp, dy * sp), p.dx = dx, p.dy = dy, p.anim = inp.run && !aiming ? "run" : "walk", p.dist += sp, p.animFrame = null;
       } else
         p.anim = "idle", p.animFrame = null;
-      p.z += (this.coll.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 14);
+      p.forceFace = aiming, aiming && (p.dx = this.aimDx, p.dy = this.aimDy, !mx && !my && (p.anim = "aim", p.animFrame = this.recoilT > 0 ? 1 : 0)), p.z += (this.coll.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 14);
     }
     moveFoot(p, dx, dy) {
-      let C = this.coll, blocked = (x, y) => !C.free(x, y, R_FOOT) || this.city.traffic.cars.some((c) => c !== this.car && c.type !== "subway" && dist2(c.x, c.y, x, y) < (c.len / 2 + 0.3) ** 2 && this.circles(c, c.x, c.y, c.h).some(([cx, cy, r]) => dist2(cx, cy, x, y) < (r + R_FOOT) ** 2));
-      if (!blocked(p.x + dx, p.y + dy)) {
-        p.x += dx, p.y += dy;
-        return;
-      }
-      if (!blocked(p.x + dx, p.y)) {
-        p.x += dx;
-        return;
-      }
-      blocked(p.x, p.y + dy) || (p.y += dy);
+      let C = this.coll, V = this.city.vehicles, me = this.car, blocked = (x, y) => !C.free(x, y, R_FOOT) || this.city.traffic.cars.some((c) => c !== me && c.type !== "subway" && c.fadeOut == null && dist2(c.x, c.y, x, y) < (c.len / 2 + 0.6) ** 2 && V.inBox(c, x, y, R_FOOT));
+      return blocked(p.x + dx, p.y + dy) ? blocked(p.x + dx, p.y) ? blocked(p.x, p.y + dy) ? !1 : (p.y += dy, !0) : (p.x += dx, !0) : (p.x += dx, p.y += dy, !0);
     }
     drive(dt) {
-      let c = this.car, p = this.p, inp = this.input, maxF = c.type === "bus" || c.type === "garbage" || c.type === "fire" ? 5.2 : c.type === "police" ? 8.4 : c.type === "taxi" ? 8 : 7.6, accel = c.type === "bus" ? 3.2 : 5.6, throttle = -inp.y, v = c.v;
-      throttle > 0 ? v += (v >= 0 ? accel : 10) * dt : throttle < 0 ? v -= (v > 0.05 ? 10 : accel * 0.6) * dt : v -= Math.sign(v) * Math.min(Math.abs(v), (0.35 * Math.abs(v) + 1) * dt), inp.brake && (v -= Math.sign(v) * Math.min(Math.abs(v), 9 * dt)), c.v = clamp(v, -3.2, maxF);
-      let steer = inp.x * (1.9 + (inp.brake ? 1.3 : 0)) * clamp(Math.abs(c.v) / 3, inp.y ? 0.3 : 0, 1) * (c.v < -0.05 ? -1 : 1) * dt, nh = c.h + steer;
-      (this.carFree(c, c.x, c.y, nh) || !this.carFree(c, c.x, c.y, c.h)) && (c.h = nh);
-      let vBefore = Math.abs(c.v);
-      this.physMove(c, dt);
-      let hit = this.collideCars(c);
-      hit && vBefore > 2.5 && hit.type === "police" && hit.state !== "parked" && this.ramT <= 0 && (this.addHeat(0.6, "Rammed the police!"), this.ramT = 3), this.ramT -= dt, this.shovePeople(c), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = throttle < 0 && c.v > 0.2 || inp.brake, p.x = c.x, p.y = c.y, p.z = c.z, this.speedT -= dt, Math.abs(c.v) > 6.4 && this.speedT <= 0 && this.policeNear(c.x, c.y, 9, !0) && (this.addHeat(0.5, "Speeding past the cops!"), this.speedT = 6);
+      let c = this.car, p = this.p, inp = this.input, V = this.city.vehicles;
+      if (V.init(c), c.wreck) {
+        this.exitCar(!0);
+        return;
+      }
+      let frac = c.hp / c.maxHp, maxF = (c.type === "bus" || c.type === "garbage" || c.type === "fire" ? 5.2 : c.type === "police" ? 8.4 : c.type === "taxi" ? 8 : 7.6) * (frac < 0.3 ? 0.7 : frac < 0.5 ? 0.86 : 1) * (c.fireT != null ? 0.8 : 1), accel = c.type === "bus" ? 3.2 : 5.6, throttle = -inp.y, v = V.fwd(c);
+      throttle > 0 ? v += (v >= 0 ? accel : 10) * dt : throttle < 0 ? v -= (v > 0.05 ? 10 : accel * 0.6) * dt : v -= Math.sign(v) * Math.min(Math.abs(v), (0.35 * Math.abs(v) + 1) * dt), inp.brake && (v -= Math.sign(v) * Math.min(Math.abs(v), 9 * dt)), v = clamp(v, -3.2, Math.max(maxF, v - 10 * dt));
+      let yaw = inp.x * (1.9 + (inp.brake ? 1.3 : 0)) * clamp(Math.abs(v) / 3, inp.y ? 0.3 : 0, 1) * (v < -0.05 ? -1 : 1);
+      V.steer(c, dt, v, yaw, inp.brake ? 2.2 : 12), V.move(c, dt), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = throttle < 0 && v > 0.2 || inp.brake, p.x = c.x, p.y = c.y, p.z = c.z, this.speedT -= dt, Math.abs(v) > 6.4 && this.speedT <= 0 && this.policeNear(c.x, c.y, 9, !0) && (this.crime(8, "Speeding past the cops!"), this.speedT = 6);
     }
-    updateAbandoned(dt) {
-      let view = this.city.view;
-      for (let i = this.abandoned.length - 1; i >= 0; i--) {
-        let c = this.abandoned[i];
-        if (c.abandonT = (c.abandonT || 0) + dt, c.fadeOut != null) {
-          c.fadeOut -= dt, c.fadeOut <= 0 && (this.city.traffic.removeCar(c), this.abandoned.splice(i, 1));
+    knockDown(ux = 0, uy = 0, t = 1.8) {
+      let p = this.p;
+      p && (this.car && this.exitCar(!0), this.knockT = t, p.kvx = ux * 3, p.kvy = uy * 3, this.trigger = !1);
+    }
+    // ---- the pistol -----------------------------------------------------------------------------
+    fireAt(tx, ty, auto) {
+      let g = this.gun, p = this.p, c = this.car, P = this.city.particles, people = this.city.people;
+      if (g.reload > 0 || g.cd > 0) return !1;
+      if (g.clip <= 0)
+        return this.reload(), !1;
+      let ox, oy, oz, dx = tx - p.x, dy = ty - p.y;
+      if (auto) {
+        let fl = Math.hypot(p.dx || 0, p.dy || 0) || 1, tg = this.autoTarget(p.x, p.y, (p.dx || 1) / fl, (p.dy || 0) / fl);
+        tg && (dx = tg[0] - p.x, dy = tg[1] - p.y);
+      } else {
+        let best = null, bd = 0.65 * 0.65;
+        for (let q of people.near(tx, ty, 0.8)) {
+          if (q === p || q.state === "dead" || q.alpha < 0.5 || q.inCar) continue;
+          let d = dist2(q.x, q.y, tx, ty);
+          d < bd && (bd = d, best = q);
+        }
+        best && (dx = best.x - p.x, dy = best.y - p.y);
+      }
+      let l = Math.hypot(dx, dy);
+      if (l < 0.05 && (dx = p.dx || 1, dy = p.dy || 0, l = Math.hypot(dx, dy) || 1), dx /= l, dy /= l, c) {
+        let side = Math.cos(c.h) * dy - Math.sin(c.h) * dx > 0 ? 1 : -1;
+        ox = c.x - Math.sin(c.h) * side * (c.wid / 2 + 0.12), oy = c.y + Math.cos(c.h) * side * (c.wid / 2 + 0.12), oz = (c.z || 0) + 0.75;
+      } else
+        ox = p.x, oy = p.y, oz = p.z + (p.kid ? 0.62 : 0.9);
+      let sp = this.rng.range(-0.022, 0.022), cs = Math.cos(sp), sn = Math.sin(sp);
+      [dx, dy] = [dx * cs - dy * sn, dx * sn + dy * cs], g.clip--, g.cd = 0.24, this.aimDx = dx, this.aimDy = dy, this.aimT = 0.8, this.recoilT = 0.09;
+      let hit = this.trace(ox + dx * 0.3, oy + dy * 0.3, dx, dy, 24, c), mx = ox + dx * 0.34, my = oy + dy * 0.34, hz = hit.kind === "person" ? hit.q.z + (hit.q.kid ? 0.55 : 0.8) : hit.kind === "car" ? (hit.c.z || 0) + 0.55 : oz;
+      P?.muzzle(mx, my, oz, dx, dy), P?.tracer(mx, my, oz, hit.x, hit.y, hz), c || P?.shell(ox, oy, oz, dx, dy), this.city.audio?.event("gunshot", { x: ox, y: oy, z: oz });
+      let seen = this.policeSee();
+      hit.kind === "person" ? this.shootPerson(hit.q, dx, dy, seen) : hit.kind === "car" ? this.shootCar(hit.c, hit.x, hit.y, dx, dy) : hit.kind === "wall" && (P?.dust(hit.x - dx * 0.05, hit.y - dy * 0.05, hz, 4), P?.sparks(hit.x - dx * 0.05, hit.y - dy * 0.05, hz, 3), this.rng.chance(0.35) && this.city.audio?.event("ricochet", { x: hit.x, y: hit.y, z: hz }));
+      for (let q of people.near(ox, oy, 15)) q !== p && this.rng.chance(0.9) && people.panic(q, ox, oy, this.rng.range(3, 6));
+      return this.city.animals?.scare?.(ox, oy, 12), seen && this.crime(6, this.stars ? null : "Shots fired!"), g.clip <= 0 && this.reload(), !0;
+    }
+    // first thing a bullet from (x, y) heading (dx, dy) runs into
+    trace(x, y, dx, dy, range, ignore) {
+      let best = { t: range, kind: "none" };
+      for (let t = 0; t < range; t += 0.1) if (this.coll.isSolid(x + dx * t, y + dy * t)) {
+        best = { t, kind: "wall" };
+        break;
+      }
+      for (let q of this.city.people.list) {
+        if (q === this.p || q.alpha < 0.5 || q.inCar || q.state === "dead" || q.state === "vanish" || q.state === "inside") continue;
+        let rx = q.x - x, ry = q.y - y, t = rx * dx + ry * dy;
+        if (t < 0 || t > best.t) continue;
+        let r = q.state === "knocked" ? 0.45 : q.kid ? 0.22 : 0.28;
+        Math.abs(rx * dy - ry * dx) < r && (best = { t, kind: "person", q });
+      }
+      for (let c of this.city.traffic.cars) {
+        if (c === ignore || c.type === "subway" || c.fadeOut != null || (c.x - x) ** 2 + (c.y - y) ** 2 > (best.t + c.len) ** 2) continue;
+        let t = this.rayBox(x, y, dx, dy, c);
+        t != null && t < best.t && (best = { t, kind: "car", c });
+      }
+      return best.x = x + dx * best.t, best.y = y + dy * best.t, best;
+    }
+    rayBox(x, y, dx, dy, c) {
+      let ch = Math.cos(c.h), sh = Math.sin(c.h), o = [(x - c.x) * ch + (y - c.y) * sh, -(x - c.x) * sh + (y - c.y) * ch], u = [dx * ch + dy * sh, -dx * sh + dy * ch], hs = [c.len / 2, c.wid / 2], t0 = -1e9, t1 = 1e9;
+      for (let k = 0; k < 2; k++) {
+        if (Math.abs(u[k]) < 1e-9) {
+          if (Math.abs(o[k]) > hs[k]) return null;
           continue;
         }
-        (c.abandonT > 40 && !view.visible(c.x, c.y, 0, 4) || c.abandonT > 150) && (c.fadeOut = 1);
+        let a = (-hs[k] - o[k]) / u[k], b = (hs[k] - o[k]) / u[k];
+        if (a > b) {
+          let tt = a;
+          a = b, b = tt;
+        }
+        if (t0 = Math.max(t0, a), t1 = Math.min(t1, b), t0 > t1) return null;
       }
+      return t1 < 0 ? null : Math.max(0, t0);
     }
-    // ---- heat and the police -------------------------------------------------------------------
-    addHeat(v, why) {
-      let before = Math.ceil(this.heat - 1e-6);
-      this.heat = Math.min(MAX_HEAT, this.heat + v), this.cool = 0, why && this.say(why, 2.2), Math.ceil(this.heat - 1e-6) > before && before === 0 && this.say("The police are on to you!", 2.5);
+    // keyboard aiming: whoever is roughly in front, in sight and nearest
+    autoTarget(ox, oy, fx, fy) {
+      let best = null, bs = 1e9, consider = (x, y, pri) => {
+        let dx = x - ox, dy = y - oy, d = Math.hypot(dx, dy);
+        if (d < 0.3 || d > 16) return;
+        let cos = (dx * fx + dy * fy) / d;
+        if (cos < 0.8) return;
+        let sc = d * (2.2 - cos) * pri;
+        sc < bs && this.lineClear(ox, oy, x, y) && (bs = sc, best = [x, y]);
+      };
+      for (let o of this.officers) o.state === "cop" && consider(o.x, o.y, 0.6);
+      for (let c of this.chasers) consider(c.x, c.y, 0.8);
+      for (let q of this.city.people.near(ox, oy, 16)) q !== this.p && q.state !== "dead" && q.state !== "cop" && q.alpha > 0.5 && !q.inCar && consider(q.x, q.y, 1);
+      return best;
+    }
+    shootPerson(q, dx, dy, seen) {
+      let P = this.city.people;
+      if (q.state === "cop" && (q.hp ?? 2) > 1) {
+        q.hp = (q.hp ?? 2) - 1, this.city.particles?.blood(q.x, q.y, q.z + 0.85, dx, dy, 6), this.city.audio?.event("hit", q), q.staggerT = 0.5, q.kvx = dx * 0.8, q.kvy = dy * 0.8, this.crime(40, "You shot an officer!");
+        return;
+      }
+      let cop = q.state === "cop" || q.role === "cop";
+      P.kill(q, dx, dy, "shot") && (cop || this.crime(50, seen ? "Somebody got shot!" : "Witnesses are calling 911!", seen));
+    }
+    shootCar(c, x, y, dx, dy) {
+      let V = this.city.vehicles, P = this.city.particles;
+      if (V.hurt(c, this.rng.range(5, 9), x, y, -dx, -dy, "player"), P?.sparks(x, y, 0.55, 5), this.rng.chance(0.3) && P?.glass(x, y, 0.7, 4), this.city.audio?.event("ping", { x, y, z: 0.5 }), c.type === "police" && (c.state === "chase" || c.state === "drive" || c.state === "stopped") && this.crime(14, this.stars ? null : "You shot at the police!"), !(c.wreck || c.fireT != null))
+        if (!c.free && c.state !== "parked") {
+          if (c.type === "police") {
+            this.makeChaser(c);
+            return;
+          }
+          this.rng.chance(0.6) && (V.loosen(c), this.ejectDriver(c, "shot"), c.state = "abandoned");
+        } else c.state === "crashed" ? (this.ejectDriver(c, "shot"), c.state = "abandoned") : c.state === "parked" && this.rng.chance(0.3) && this.city.audio?.event("alarm", c);
+    }
+    // ---- wanted ---------------------------------------------------------------------------------
+    // a crime: points toward the wanted level, starting a chase if the police know about it
+    crime(pts, why, witnessed = !0) {
+      if (!this.active || this.busted > 0) return;
+      if (!witnessed && this.stars === 0) {
+        this.report += pts, this.reportT == null && (this.reportT = this.rng.range(2.5, 5)), why && this.say(why, 2.2);
+        return;
+      }
+      this.pts += pts;
+      let t = this.target();
+      this.knownT = Math.max(this.knownT, 14), this.unseenT = 0, t && (this.lastKnown.x = t.x, this.lastKnown.y = t.y), this.stars === 0 && (this.stars = 1, this.say("WANTED!", 2.6, !0), this.city.audio?.event("star", this.target())), why && this.say(why, 2.2), this.updateStars();
+    }
+    updateStars() {
+      let s = this.stars;
+      for (; s < 5 && this.pts >= STAR_PTS[s + 1]; ) s++;
+      s > this.stars && (this.stars = s, this.say(`WANTED LEVEL ${s}`, 2.4), this.city.audio?.event("star", this.target()));
+    }
+    clearWanted(now = !1) {
+      this.stars = 0, this.pts = 0, this.unseenT = 0, this.report = 0, this.reportT = null, this.knownT = 0, this.endChase(now);
+      for (let o of [...this.officers]) this.standDown(o);
+      this.officers = [];
+      for (let c of this.city.traffic.cars) c.state === "stopped" && (c.siren = !1, c.crewOut = !1);
+    }
+    // police who can see the player (or a spot): chasers, officers on foot, patrol cars
+    policeSee(r = 30, at = null) {
+      let t = at || this.target();
+      if (!t) return !1;
+      let sees = (x, y) => {
+        let d = dist(x, y, t.x, t.y);
+        return d < 7 || d < r && this.lineClear(x, y, t.x, t.y);
+      };
+      for (let c of this.chasers) if (sees(c.x, c.y)) return !0;
+      for (let o of this.officers) if (o.state === "cop" && sees(o.x, o.y)) return !0;
+      for (let c of this.city.traffic.cars) if (c.type === "police" && !c.free && c.state !== "parked" && dist2(c.x, c.y, t.x, t.y) < r * r && sees(c.x, c.y)) return !0;
+      return !1;
     }
     policeNear(x, y, r, patrolOnly = !1) {
-      for (let c of this.city.traffic.cars) if (c.type === "police" && c.state !== "parked" && c.state !== "player" && (!patrolOnly || !c.free) && dist2(c.x, c.y, x, y) < r * r) return c;
+      for (let c of this.city.traffic.cars) if (c.type === "police" && c.state !== "parked" && c.state !== "player" && !c.wreck && (!patrolOnly || !c.free) && dist2(c.x, c.y, x, y) < r * r) return c;
       return null;
     }
     target() {
       return this.car || this.p;
     }
-    updateHeat(dt) {
-      if (this.heat <= 0) return;
-      let t = this.target(), dmin = 1e9;
-      for (let c of this.chasers) dmin = Math.min(dmin, dist(c.x, c.y, t.x, t.y));
-      dmin > 30 ? this.cool += dt : this.cool = 0, this.cool > 8 && (this.heat = Math.max(0, this.heat - dt / 5), this.heat <= 0 && (this.endChase(), this.say("You lost them!", 3)));
+    updateWanted(dt) {
+      if (this.reportT != null && (this.reportT -= dt, this.reportT <= 0)) {
+        let pts = this.report;
+        this.report = 0, this.reportT = null, this.crime(pts, "Someone called the cops!");
+      }
+      if (this.stars <= 0) return;
+      this.seenT -= dt, this.seenT <= 0 && (this.seenT = 0.5, this.seen = this.policeSee(28));
+      let t = this.target();
+      this.seen ? (this.unseenT = 0, this.knownT = Math.max(this.knownT, 3), this.lastKnown.x = t.x, this.lastKnown.y = t.y, this.pts += dt, this.updateStars()) : this.knownT > 0 ? (this.knownT -= dt, this.lastKnown.x = t.x, this.lastKnown.y = t.y) : (this.unseenT += dt, this.unseenT > 6 + this.stars * 3 && (this.clearWanted(), this.say("You lost them!", 3)));
     }
+    // ---- police in cars -------------------------------------------------------------------------
     updatePolice(dt) {
-      let want = this.heat > 0 ? Math.min(7, Math.ceil(this.heat - 1e-6) + (this.heat > 2.5 ? 1 : 0)) : 0;
-      if (this.recruitT -= dt, this.chasers.length < want && this.recruitT <= 0 && this.busted <= 0) {
+      this.chasers = this.chasers.filter((c) => c.state === "chase" && c.fadeOut == null && !c.wreck);
+      let want = this.busted > 0 ? 0 : CARS_FOR[this.stars];
+      if (this.recruitT -= dt, this.chasers.length < want && this.recruitT <= 0) {
         this.recruitT = this.chasers.length ? 3 : 0.8;
         let t = this.target(), best = null, bd = 60 * 60;
         for (let c of this.city.traffic.cars) {
-          if (c.type !== "police" || c.free || c.state === "parked" || c.fadeOut != null) continue;
+          if (c.type !== "police" || c.free || c.state === "parked" || c.fadeOut != null || c.wreck) continue;
           let d = dist2(c.x, c.y, t.x, t.y);
           d < bd && (bd = d, best = c);
         }
         best ? this.makeChaser(best) : this.spawnChaser();
       }
-      if (this.chasers.length) {
-        if (this.flowT -= dt, this.flowT <= 0) {
-          this.flowT = 0.5;
-          let t = this.target();
-          this.buildFlow(t.x, t.y);
-        }
-        for (let c of this.chasers) this.drivePolice(c, dt);
-      }
+      this.stars > 0 && (this.flowT -= dt, this.flowT <= 0 && (this.flowT = 0.5, this.buildFlow(this.lastKnown.x, this.lastKnown.y)));
+      for (let c of [...this.chasers]) this.drivePolice(c, dt);
     }
     makeChaser(c) {
-      this.detach(c), c.state = "chase", c.siren = !0, c.special = null, c.revT = 0, c.stuckT = 0, c.life = 1e9, c.fadeIn = 0, c.v < 0 && (c.v = 0), this.chasers.push(c), this.city.audio?.event("siren", c);
+      let V = this.city.vehicles;
+      this.forget(c), c.free || (this.city.traffic.detach(c), V.launch(c)), V.init(c), c.state = "chase", c.siren = !0, c.special = null, c.revT = 0, c.stuckT = 0, c.life = 1e9, c.fadeIn = 0, c.idleT = 0, this.chasers.push(c), this.city.audio?.event("siren", c);
     }
     spawnChaser() {
       let tr = this.city.traffic, t = this.target(), links = [...tr.links.values()].filter((L2) => {
@@ -9686,18 +10238,24 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     endChase(now = !1) {
       for (let c of this.chasers)
-        c.state = "leaving", c.siren = !1, c.leaveT = now ? 0.01 : 7;
+        c.state = "leaving", c.siren = !1, c.leaveT = now ? 0.01 : 7, c.reT = 0;
       this.leaving.push(...this.chasers), this.chasers = [];
     }
+    // stood-down police drive off, rejoining traffic when they can, or fade away out of sight
     updateLeaving(dt) {
-      let view = this.city.view;
-      for (let i = this.leaving.length - 1; i >= 0; i--) {
-        let c = this.leaving[i];
-        if (c.fadeOut != null) {
-          c.fadeOut -= dt, c.fadeOut <= 0 && (this.city.traffic.removeCar(c), this.leaving.splice(i, 1));
+      let view = this.city.view, V = this.city.vehicles;
+      for (let c of [...this.leaving]) {
+        if (c.fadeOut != null || c.state !== "leaving" || !c.free) {
+          this.leaving.splice(this.leaving.indexOf(c), 1);
           continue;
         }
-        c.leaveT -= dt, c.v += (2.5 - c.v) * Math.min(1, dt), this.physMove(c, dt), c.leaveT <= 0 && (!view.visible(c.x, c.y, 0, 4) || c.leaveT < -12) && (c.fadeOut = 1);
+        c.leaveT -= dt, V.init(c);
+        let v = V.fwd(c);
+        if (v += (2.4 - v) * Math.min(1, dt), V.steer(c, dt, v, 0, 10), V.move(c, dt), c.reT = (c.reT || 0) - dt, c.reT <= 0 && (c.reT = 0.25, this.city.traffic.reattach(c))) {
+          this.leaving.splice(this.leaving.indexOf(c), 1);
+          continue;
+        }
+        c.leaveT <= 0 && (!view.visible(c.x, c.y, 0, 4) || c.leaveT < -12) && (c.fadeOut = 1);
       }
     }
     // per-cell travel cost for pursuit: 0 = blocked, 1 = road, 3 = sidewalk / plaza / park
@@ -9713,7 +10271,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           }
           this.cells[y * 171 + x] = solid ? 0 : C.onRoad(x + 0.5, y + 0.5) ? 1 : 3;
         }
-      this.flow = new Float32Array(171 * 171), this.queue = new Int32Array(171 * 171 * 4);
+      this.flow = new Float32Array(171 * 171);
     }
     // distance field (Dial's algorithm, 4-neighbour, integer costs) from the player's cell
     buildFlow(tx, ty) {
@@ -9760,75 +10318,693 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return !0;
     }
     drivePolice(c, dt) {
-      let t = this.target(), d = dist(c.x, c.y, t.x, t.y), dir;
-      d < 10 && this.lineClear(c.x, c.y, t.x, t.y) ? dir = [(t.x - c.x) / (d || 1), (t.y - c.y) / (d || 1)] : dir = this.flowDir(c.x, c.y), !dir[0] && !dir[1] && (dir = [(t.x - c.x) / (d || 1), (t.y - c.y) / (d || 1)]);
-      let dh = wrap(Math.atan2(dir[1], dir[0]) - c.h);
-      c.stuckT > 0.9 && (c.revT = 0.9, c.stuckT = 0);
-      let turn;
-      if (c.revT > 0)
-        c.revT -= dt, c.v = Math.max(c.v - 7 * dt, -2.6), turn = clamp(-dh, -1, 1) * 2.2 * dt;
-      else {
-        let vmax = (this.busted > 0 ? 0 : d < 3.2 ? Math.max(0.8, d - 1.4) : 8) * (1 - Math.min(0.62, Math.abs(dh) / Math.PI * 1.3));
-        c.v += clamp(vmax - c.v, -10 * dt, 5 * dt), turn = clamp(dh, -1, 1) * 2.8 * dt * clamp(Math.abs(c.v) / 2, 0.35, 1);
+      let V = this.city.vehicles, t = this.target();
+      V.init(c);
+      let tx = t.x, ty = t.y;
+      if (this.car && this.stars >= 3) {
+        let lead = Math.min(0.9, dist(c.x, c.y, t.x, t.y) / 10);
+        tx += (this.car.vx || 0) * lead, ty += (this.car.vy || 0) * lead;
       }
-      let nh = c.h + turn;
-      (this.carFree(c, c.x, c.y, nh) || !this.carFree(c, c.x, c.y, c.h)) && (c.h = nh);
-      let res = this.physMove(c, dt), hit = this.collideCars(c);
-      c.stuckT = (res > 0 || hit && Math.abs(c.v) < 1.5 || Math.abs(c.v) < 0.35 && d > 4) && c.revT <= 0 ? (c.stuckT || 0) + dt : 0, this.shovePeople(c), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = c.v < 0.3 || Math.abs(dh) > 1.2;
+      let d = dist(c.x, c.y, tx, ty), dTrue = dist(c.x, c.y, t.x, t.y), dir;
+      d < 12 && this.lineClear(c.x, c.y, tx, ty) ? dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)] : dir = this.flowDir(c.x, c.y), !dir[0] && !dir[1] && (dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)]);
+      let dh = wrap(Math.atan2(dir[1], dir[0]) - c.h), v = V.fwd(c), yaw;
+      if (c.stuckT > 0.9 && (c.revT = 0.9, c.stuckT = 0), c.revT > 0)
+        c.revT -= dt, v = Math.max(v - 7 * dt, -2.6), yaw = clamp(-dh, -1, 1) * 2.2;
+      else {
+        let ram = this.stars >= 4 && this.car && V.speed(this.car) > 2, top = 8 + this.stars * 0.25, vmax = (this.busted > 0 ? 0 : this.car ? dTrue < 3.2 ? ram ? 6.5 : Math.max(0.8, dTrue - 1.4) : top : clamp((dTrue - 3.5) * 1.3, 0, top)) * (1 - Math.min(0.62, Math.abs(dh) / Math.PI * 1.3));
+        v += clamp(vmax - v, -10 * dt, 5 * dt), yaw = clamp(dh, -1, 1) * 2.8 * clamp(Math.abs(v) / 2, 0.35, 1);
+      }
+      c.hp < c.maxHp * 0.3 && (v = Math.min(v, 5)), V.steer(c, dt, v, yaw, 10);
+      let imp = V.move(c, dt);
+      c.stuckT = (imp > 0 || V.speed(c) < 0.35) && dTrue > 4 && c.revT <= 0 ? (c.stuckT || 0) + dt : 0, c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), c.brake = v < 0.3 || Math.abs(dh) > 1.2;
+      let reach = this.car ? 9 : 13;
+      !c.crewOut && this.busted <= 0 && dTrue < reach && (V.speed(c) < 1.6 || c.stuckT > 0.4 || c.revT > 0) && (!this.car || V.speed(this.car) < 1.2) && this.deployOfficers(c);
     }
+    // ---- police on foot -------------------------------------------------------------------------
+    deployOfficers(c, n = 2) {
+      if (c.crewOut) return;
+      let P = this.city.people;
+      c.crewOut = !0, c.crew = 0;
+      for (let k = 0; k < n; k++) {
+        let o = P.createCop(), side = k ? 1 : -1, x = c.x - Math.sin(c.h) * side * (c.wid / 2 + 0.35), y = c.y + Math.cos(c.h) * side * (c.wid / 2 + 0.35);
+        this.coll.free(x, y, 0.2) || (x = c.x + Math.sin(c.h) * side * (c.wid / 2 + 0.35), y = c.y - Math.cos(c.h) * side * (c.wid / 2 + 0.35)), this.coll.free(x, y, 0.15) || (x = c.x - Math.cos(c.h) * (c.len / 2 + 0.4), y = c.y - Math.sin(c.h) * (c.len / 2 + 0.4)), o.x = x, o.y = y, o.z = this.coll.groundZ(x, y), o.car = c, o.thought = this.rng.pick(["FREEZE!", "POLICE! STOP!", "Hands where I can see them!", "Don't move!"]), P.list.push(o), this.officers.push(o), c.crew++;
+      }
+      if (c.state === "chase") {
+        let i = this.chasers.indexOf(c);
+        i >= 0 && this.chasers.splice(i, 1), c.state = "stopped", c.siren = !0, c.idleT = 0;
+      }
+    }
+    // off duty: walk away and vanish into the nearest subway
+    standDown(o) {
+      if (o.state !== "cop") return;
+      let P = this.city.people;
+      o.state = "idle", o.timer = 0.5, o.anim = "idle", o.animFrame = null, o.forceFace = !1, o.node = P.nearestOf(P.nav.nodes, o.x, o.y), o.plan = [{ t: "go", node: P.nearestOf(P.poi().subways, o.x, o.y), thought: "Back to the precinct" }, { t: "enter" }];
+    }
+    updateOfficers(dt) {
+      let t = this.target(), C = this.coll;
+      for (let o of [...this.officers]) {
+        if (o.state === "knocked") continue;
+        if (o.state !== "cop" || o.dead) {
+          this.officers.splice(this.officers.indexOf(o), 1);
+          continue;
+        }
+        if (this.stars === 0) {
+          this.standDown(o), this.officers.splice(this.officers.indexOf(o), 1);
+          continue;
+        }
+        if (o.animT += dt, o.staggerT > 0) {
+          o.staggerT -= dt, o.anim = "idle", this.city.people.slide(o, dt);
+          continue;
+        }
+        if (this.busted > 0) {
+          o.anim = "idle", o.animFrame = null;
+          continue;
+        }
+        let d = dist(o.x, o.y, t.x, t.y), car = o.car, back = car && !car.wreck && car.fireT == null && car.state === "stopped" && d > 20, gx = t.x, gy = t.y;
+        back && (gx = car.x, gy = car.y);
+        let dd = dist(o.x, o.y, gx, gy);
+        if (back && dd < car.len / 2 + 0.9) {
+          o.dead = !0, o.alpha = 0, this.officers.splice(this.officers.indexOf(o), 1), car.crew--, car.crew <= 0 && (car.crewOut = !1, this.makeChaser(car));
+          continue;
+        }
+        let reach = this.car ? this.car.wid / 2 + 0.75 : 0.75;
+        if (!back && d < reach) {
+          o.anim = "idle", o.animFrame = null, this.faceTo(o, t.x, t.y);
+          continue;
+        }
+        let dx, dy;
+        dd < 14 && this.lineClear(o.x, o.y, gx, gy) || back ? (dx = (gx - o.x) / (dd || 1), dy = (gy - o.y) / (dd || 1)) : ([dx, dy] = this.flowDir(o.x, o.y), !dx && !dy && (dx = (gx - o.x) / (dd || 1), dy = (gy - o.y) / (dd || 1)));
+        let covering = !back && !this.car && d < 4.5, sp = (covering ? 1.5 : 2.55) * dt;
+        this.moveFoot(o, dx * sp, dy * sp) || this.moveFoot(o, -dy * sp, dx * sp) || this.moveFoot(o, dy * sp, -dx * sp), o.dx = dx, o.dy = dy, o.dist += sp, covering ? (o.anim = "aim", o.animFrame = 0, o.forceFace = !0, o.dx = (t.x - o.x) / (d || 1), o.dy = (t.y - o.y) / (d || 1)) : (o.anim = "run", o.animFrame = null, o.forceFace = !1), o.z += (C.groundZ(o.x, o.y) - o.z) * Math.min(1, dt * 12), this.rng.chance(dt * 0.25) && (o.thought = this.rng.pick(["FREEZE!", "STOP RIGHT THERE!", "POLICE!", "Get on the ground!"]));
+      }
+    }
+    faceTo(o, x, y) {
+      o.dx = x - o.x, o.dy = y - o.y, o.forceFace = !0;
+    }
+    // ---- busted ---------------------------------------------------------------------------------
     checkBust(dt) {
-      if (!this.chasers.length) {
+      let t = this.target();
+      if (!this.chasers.length && !this.officers.length) {
         this.bustT = 0;
         return;
       }
-      let t = this.target(), slow = this.car ? Math.abs(this.car.v) < 0.9 : !0, half = this.car ? this.car.len / 2 : 0.25;
-      this.chasers.some((c) => {
-        let r = half + c.len / 2 + (this.car ? 1.3 : 1);
-        return dist2(c.x, c.y, t.x, t.y) < r * r && Math.abs(c.v) < 3;
-      }) && slow ? this.bustT += dt : this.bustT = Math.max(0, this.bustT - dt * 0.6), this.bustT > (this.car ? 2 : 1.1) && this.bust();
+      let near = !1;
+      if (this.car) {
+        let V = this.city.vehicles, slow = V.speed(this.car) < 0.9, half = this.car.len / 2;
+        near = slow && (this.chasers.some((c) => {
+          let r = half + c.len / 2 + 1.3;
+          return dist2(c.x, c.y, t.x, t.y) < r * r && V.speed(c) < 3;
+        }) || this.officers.some((o) => o.state === "cop" && !(o.staggerT > 0) && V.inBox(this.car, o.x, o.y, 0.8)));
+      } else near = this.knockT <= 0 && this.officers.some((o) => o.state === "cop" && !(o.staggerT > 0) && dist2(o.x, o.y, t.x, t.y) < 0.85 * 0.85);
+      near ? this.bustT += dt : this.bustT = Math.max(0, this.bustT - dt * 0.6), this.bustT > (this.car ? 2 : 1) && this.bust();
     }
     bust() {
-      this.busted = 3.4, this.bustT = 0, this.say("BUSTED!", 3.4, !0), this.car && this.exitCar(!0), this.city.audio?.event("busted", this.p);
+      this.busted = 3.4, this.bustT = 0, this.say("BUSTED!", 3.4, !0), this.car && this.exitCar(!0), this.trigger = !1, this.city.audio?.event("busted", this.p);
     }
     // after a night downtown: released a few blocks away, the slate wiped clean
     release() {
       let P = this.city.people, p = this.p, nodes = P.nav.nodes.filter((n2) => (n2.kind === "walk" || n2.kind === "corner") && dist(n2.x, n2.y, p.x, p.y) > 30), n = nodes.length ? this.rng.pick(nodes) : null;
-      n && (p.x = n.x, p.y = n.y, p.z = n.z), this.heat = 0, this.cool = 0, this.endChase(!0), this.camTarget.x = p.x, this.camTarget.y = p.y;
+      n && (p.x = n.x, p.y = n.y, p.z = n.z), this.clearWanted(!0), this.gun = { clip: CLIP, reload: 0, cd: 0 }, this.camTarget.x = p.x, this.camTarget.y = p.y;
       let cam = this.city.camera;
       cam.x = p.x, cam.y = p.y, this.say("Released. Keep your nose clean!", 3);
+    }
+    // ---- what the vehicles and people report back ---------------------------------------------
+    forget(c) {
+      for (let L of [this.chasers, this.leaving]) {
+        let i = L.indexOf(c);
+        i >= 0 && L.splice(i, 1);
+      }
+    }
+    onCrash(a, b, closing) {
+      if (!this.active || !this.car || a !== this.car && b !== this.car) return;
+      let o = a === this.car ? b : a;
+      o.type === "police" && closing > 2.5 && o.state !== "parked" && this.ramT <= 0 ? (this.crime(12, "Rammed the police!"), this.ramT = 3) : closing > 3 && o.state === "crashed" && this.ramT <= 0 && this.policeSee(24) && (this.crime(10, "Hit and run!"), this.ramT = 3);
+    }
+    onCarHurt(c, amount, blame) {
+      !this.active || !blame || amount <= 0 || this.stars > 0 && (this.pts += amount * (c.type === "police" ? 0.5 : 0.2), this.updateStars());
+    }
+    onIgnite(c) {
+      let V = this.city.vehicles;
+      if (c === this.car) {
+        this.say("Your car is on fire! GET OUT!", 3.5);
+        return;
+      }
+      if (!c.free) {
+        V.loosen(c), this.ejectDriver(c, "fire"), c.state = "abandoned";
+        return;
+      }
+      if (c.state === "crashed") {
+        this.ejectDriver(c, "fire"), c.state = "abandoned";
+        return;
+      }
+      (c.state === "chase" || c.state === "leaving") && (this.forget(c), c.crewOut || this.deployOfficers(c), c.state = "stopped");
+    }
+    beforeExplode(c) {
+      if (this.forget(c), this.active && c === this.car) {
+        let p = this.p;
+        this.exitCar(!0);
+        let a = this.rng.range(0, 6.28);
+        this.knockDown(Math.cos(a), Math.sin(a), 2.2), p.x += Math.cos(a) * 0.5, p.y += Math.sin(a) * 0.5, this.say("You barely made it out!", 3);
+      }
+      c.blameT != null && this.city.time - c.blameT < 20 && this.crime(c.type === "police" ? 90 : 40, c.type === "police" ? "Blew up a police car!" : "Car explosion!", this.policeSee(34, c));
+    }
+    blast(c, R2, blamed) {
+      let P = this.city.people;
+      for (let q of P.near(c.x, c.y, R2)) {
+        if (q === this.p || q.state === "dead" || q.alpha < 0.5 || q.inCar) continue;
+        let d = dist(q.x, q.y, c.x, c.y), ux = (q.x - c.x) / (d || 1), uy = (q.y - c.y) / (d || 1);
+        if (d < 2.3) {
+          let cop = q.state === "cop";
+          P.kill(q, ux, uy, "blast") && blamed && !cop && this.crime(45, null, !0);
+        } else P.knock(q, ux * 1.6, uy * 1.6);
+      }
+      if (this.active && !this.car && this.p && this.knockT <= 0) {
+        let d = dist(this.p.x, this.p.y, c.x, c.y);
+        if (d < 3.4) {
+          let ux = (this.p.x - c.x) / (d || 1), uy = (this.p.y - c.y) / (d || 1);
+          this.knockDown(ux, uy, 1.6);
+        }
+      }
+      this.city.animals?.scare?.(c.x, c.y, 18);
+      for (let q of P.near(c.x, c.y, 16)) q !== this.p && P.panic(q, c.x, c.y, this.rng.range(3, 6));
+    }
+    onRunOver(c, q, lethal) {
+      if (!this.active || c !== this.car) return;
+      if (q.role === "cop") {
+        lethal || this.crime(30, "Ran down an officer!");
+        return;
+      }
+      let seen = this.policeSee();
+      this.crime(lethal ? 45 : 15, lethal ? seen ? null : "Witnesses are calling 911!" : "Hit and run!", seen);
+    }
+    onCopDown(o) {
+      let i = this.officers.indexOf(o);
+      i >= 0 && this.officers.splice(i, 1), o.car && o.car.crew && o.car.crew--, this.active && this.crime(110, "Officer down!");
     }
     // ---- HUD ------------------------------------------------------------------------------------
     hud() {
       if (!this.active) return null;
       let c = this.car, prompt = "";
-      if (this.busted > 0) prompt = "";
+      if (this.busted > 0 || this.knockT > 0) prompt = "";
       else if (c) prompt = "F \xB7 GET OUT";
       else {
         let n = this.nearCar();
-        n && (prompt = n.state === "parked" || n.state === "abandoned" ? "F \xB7 GET IN" : "F \xB7 STEAL IT");
+        n && (prompt = n.wreck ? "WRECKED" : n.fireT != null ? "ON FIRE!" : n.state === "parked" || n.state === "abandoned" || n.state === "loose" || n.state === "stopped" ? "F \xB7 GET IN" : "F \xB7 STEAL IT");
       }
+      let V = this.city.vehicles;
       return {
-        heat: this.heat,
-        status: c ? `${NAMES2[c.type] || "CAR"} \xB7 ${Math.round(Math.abs(c.v) * 2 * 2.237)} MPH` : this.input.run ? "ON FOOT \xB7 RUNNING" : "ON FOOT",
+        stars: this.stars,
+        searching: this.stars > 0 && this.knownT <= 0 && this.unseenT > 0.5,
+        status: c ? `${NAMES2[c.type] || "CAR"} \xB7 ${Math.round(Math.abs(V.fwd(c)) * 2 * 2.237)} MPH` : this.knockT > 0 ? "KNOCKED DOWN" : this.input.run ? "ON FOOT \xB7 RUNNING" : "ON FOOT",
         prompt,
         msgs: this.msgs,
         busted: this.busted > 0,
-        name: this.p ? this.p.name : ""
+        name: this.p ? this.p.name : "",
+        gun: { clip: this.gun.clip, cap: CLIP, reloading: this.gun.reload > 0 },
+        car: c ? { hp: c.mass ? c.hp / c.maxHp : 1, fire: c.fireT != null } : null
       };
+    }
+  };
+
+  // src/sim/vehicles.js
+  var MASS = { sedan: 1, taxi: 1, police: 1.15, suv: 1.35, van: 1.6, icecream: 1.8, truck: 3, garbage: 3.6, plow: 3.6, fire: 4.2, bus: 5 }, KNOCK_V = 1.6, REST = 0.2, DRIVEN = /* @__PURE__ */ new Set(["player", "chase", "leaving"]), Vehicles = class {
+    constructor(city) {
+      this.city = city, this.coll = city.coll, this.rng = new RNG(9157), this.samples = /* @__PURE__ */ new Map(), this.damaged = /* @__PURE__ */ new Set(), this.grid = /* @__PURE__ */ new Map();
+    }
+    // ---- bodies -----------------------------------------------------------------------------------
+    init(c) {
+      return c.mass || (c.mass = MASS[c.type] || 1, c.inertia = c.mass * (c.len * c.len + c.wid * c.wid) / 12, c.maxHp = c.hp = Math.round(100 * Math.sqrt(c.mass)), c.dmg = [0, 0, 0, 0], c.dentL = 0, c.dentR = 0, c.vx = Math.cos(c.h) * (c.v || 0), c.vy = Math.sin(c.h) * (c.v || 0), c.w = 0, c.seed = c.id * 0.6180339 % 1), c;
+    }
+    // set a car's world velocity from its lane speed (when it leaves the lanes)
+    launch(c) {
+      this.init(c), c.vx = Math.cos(c.h) * (c.v || 0), c.vy = Math.sin(c.h) * (c.v || 0), c.w = 0;
+    }
+    fwd(c) {
+      return c.vx * Math.cos(c.h) + c.vy * Math.sin(c.h);
+    }
+    speed(c) {
+      return c.free && c.mass ? Math.hypot(c.vx, c.vy) : Math.abs(c.v || 0);
+    }
+    pointVel(c, px, py) {
+      if (c.free && c.mass) return [c.vx - c.w * (py - c.y), c.vy + c.w * (px - c.x)];
+      let v = c.state === "parked" ? 0 : c.v || 0;
+      return [Math.cos(c.h) * v, Math.sin(c.h) * v];
+    }
+    applyImpulse(c, jx, jy, rx, ry) {
+      c.vx += jx / c.mass, c.vy += jy / c.mass, c.w += (rx * jy - ry * jx) / c.inertia;
+    }
+    // a driver's input for this step: new forward speed, wanted yaw rate, sideways grip
+    steer(c, dt, fwd, yaw, grip) {
+      let ch = Math.cos(c.h), sh = Math.sin(c.h), lat = (-c.vx * sh + c.vy * ch) * Math.exp(-grip * dt);
+      c.vx = fwd * ch - lat * sh, c.vy = fwd * sh + lat * ch, c.w += (yaw - c.w) * Math.min(1, dt * (grip > 6 ? 9 : 3)), c.v = fwd, c.drivenAt = this.city.time;
+    }
+    // no one at the wheel: roll to a stop
+    coast(c, dt) {
+      let ch = Math.cos(c.h), sh = Math.sin(c.h), f = c.vx * ch + c.vy * sh, l = -c.vx * sh + c.vy * ch, brake = c.state === "wreck" ? 7 : c.state === "crashed" || c.state === "loose" || c.state === "stopped" ? 4 : 2.5;
+      f -= Math.sign(f) * Math.min(Math.abs(f), (brake + 0.3 * Math.abs(f)) * dt), l *= Math.exp(-(c.state === "wreck" ? 4 : 6) * dt), c.vx = f * ch - l * sh, c.vy = f * sh + l * ch, c.w *= Math.exp(-2.4 * dt), c.v = f, Math.abs(c.vx) + Math.abs(c.vy) + Math.abs(c.w) > 0.015 ? this.move(c, dt) : (c.vx = 0, c.vy = 0, c.w = 0, c.v = 0);
+    }
+    // ---- walls ------------------------------------------------------------------------------------
+    // perimeter sample points of a car's box in its own frame
+    samplesFor(c) {
+      let key = c.type, s = this.samples.get(key);
+      if (!s) {
+        let pts = [], L = c.len, W = c.wid, nL = Math.max(2, Math.ceil(L / 0.22)), nW = Math.max(2, Math.ceil(W / 0.22));
+        for (let i = 0; i <= nL; i++) {
+          let x = -L / 2 + L * i / nL;
+          pts.push(x, -W / 2, x, W / 2);
+        }
+        for (let j = 1; j < nW; j++) {
+          let y = -W / 2 + W * j / nW;
+          pts.push(-L / 2, y, L / 2, y);
+        }
+        s = new Float32Array(pts), this.samples.set(key, s);
+      }
+      return s;
+    }
+    boxFree(c, x, y, h) {
+      let S2 = this.samplesFor(c), C = this.coll, ch = Math.cos(h), sh = Math.sin(h);
+      for (let i = 0; i < S2.length; i += 2) if (C.isSolid(x + S2[i] * ch - S2[i + 1] * sh, y + S2[i] * sh + S2[i + 1] * ch)) return !1;
+      return !0;
+    }
+    // where a box at (x, y, h) touches walls, and which way is out
+    wallHit(c, x, y, h) {
+      let S2 = this.samplesFor(c), C = this.coll, ch = Math.cos(h), sh = Math.sin(h), n = 0, sx = 0, sy = 0, gx = 0, gy = 0;
+      for (let i = 0; i < S2.length; i += 2) {
+        let px = x + S2[i] * ch - S2[i + 1] * sh, py = y + S2[i] * sh + S2[i + 1] * ch;
+        C.isSolid(px, py) && (n++, sx += px, sy += py, gx += (C.isSolid(px - 0.2, py) ? 1 : 0) - (C.isSolid(px + 0.2, py) ? 1 : 0), gy += (C.isSolid(px, py - 0.2) ? 1 : 0) - (C.isSolid(px, py + 0.2) ? 1 : 0));
+      }
+      if (!n) return null;
+      sx /= n, sy /= n;
+      let l = Math.hypot(gx, gy);
+      return l < 1e-6 && (gx = x - sx, gy = y - sy, l = Math.hypot(gx, gy)), l < 1e-6 && (gx = -Math.cos(h), gy = -Math.sin(h), l = 1), { nx: gx / l, ny: gy / l, px: sx, py: sy };
+    }
+    // integrate a free car, sub-stepping fast ones; returns the hardest wall impact (as a speed change)
+    move(c, dt) {
+      let reach = Math.hypot(c.vx, c.vy) * dt + Math.abs(c.w) * dt * c.len * 0.5, n = Math.min(5, Math.max(1, Math.ceil(reach / 0.16))), worst = 0;
+      for (let k = 0; k < n; k++) worst = Math.max(worst, this.moveStep(c, dt / n));
+      return worst;
+    }
+    moveStep(c, dt) {
+      let nx = c.x + c.vx * dt, ny = c.y + c.vy * dt, nh = c.h + c.w * dt;
+      if (this.boxFree(c, nx, ny, nh))
+        return c.x = nx, c.y = ny, c.h = nh, 0;
+      if (!this.boxFree(c, c.x, c.y, c.h)) {
+        let hit2 = this.wallHit(c, c.x, c.y, c.h);
+        if (hit2) {
+          c.x += hit2.nx * 0.05, c.y += hit2.ny * 0.05;
+          let vn = c.vx * hit2.nx + c.vy * hit2.ny;
+          vn < 0 && (c.vx -= vn * hit2.nx, c.vy -= vn * hit2.ny);
+        }
+        return c.w *= 0.6, 0;
+      }
+      let hit = this.wallHit(c, nx, ny, nh), impact = 0;
+      if (hit) {
+        let wx = hit.nx, wy = hit.ny, rx = hit.px - c.x, ry = hit.py - c.y, vpx = c.vx - c.w * ry, vpy = c.vy + c.w * rx, vn = vpx * wx + vpy * wy;
+        if (vn < 0) {
+          let rn = rx * wy - ry * wx, j = -(1 + REST) * vn / (1 / c.mass + rn * rn / c.inertia);
+          this.applyImpulse(c, j * wx, j * wy, rx, ry);
+          let tx = -wy, ty = wx, vt = (c.vx - c.w * ry) * tx + (c.vy + c.w * rx) * ty, rt = rx * ty - ry * tx, jt = clamp(-vt / (1 / c.mass + rt * rt / c.inertia), -0.35 * j, 0.35 * j);
+          this.applyImpulse(c, jt * tx, jt * ty, rx, ry), impact = j / c.mass, this.damage(c, hit.px, hit.py, -wx, -wy, impact, null), impact > 2.2 && this.city.audio?.event("crash", { x: hit.px, y: hit.py, z: 0.4, k: impact }), impact > 1.5 && this.city.particles?.sparks(hit.px, hit.py, 0.35, Math.min(14, impact * 2));
+        }
+      }
+      let sx = c.x + c.vx * dt, sy = c.y + c.vy * dt, sh = c.h + c.w * dt;
+      return this.boxFree(c, sx, sy, sh) ? (c.x = sx, c.y = sy, c.h = sh) : this.boxFree(c, sx, sy, c.h) ? (c.x = sx, c.y = sy, c.w *= 0.5) : this.boxFree(c, c.x, c.y, sh) ? c.h = sh : c.w *= 0.5, impact;
+    }
+    // ---- car against car --------------------------------------------------------------------------
+    inBox(c, x, y, pad = 0) {
+      let dx = x - c.x, dy = y - c.y, ch = Math.cos(c.h), sh = Math.sin(c.h);
+      return Math.abs(dx * ch + dy * sh) <= c.len / 2 + pad && Math.abs(-dx * sh + dy * ch) <= c.wid / 2 + pad;
+    }
+    // separating-axis test of two boxes: normal (from b to a), depth and a contact point
+    sat(a, b) {
+      let ac = Math.cos(a.h), as = Math.sin(a.h), bc = Math.cos(b.h), bs = Math.sin(b.h), dx = a.x - b.x, dy = a.y - b.y, best = 1e9, nx = 0, ny = 0;
+      for (let k = 0; k < 4; k++) {
+        let ux = k === 0 ? ac : k === 1 ? -as : k === 2 ? bc : -bs, uy = k === 0 ? as : k === 1 ? ac : k === 2 ? bs : bc, ra = a.len / 2 * Math.abs(ac * ux + as * uy) + a.wid / 2 * Math.abs(-as * ux + ac * uy), rb = b.len / 2 * Math.abs(bc * ux + bs * uy) + b.wid / 2 * Math.abs(-bs * ux + bc * uy), d = dx * ux + dy * uy, o = ra + rb - Math.abs(d);
+        if (o <= 0) return null;
+        if (o < best) {
+          best = o;
+          let s = d < 0 ? -1 : 1;
+          nx = ux * s, ny = uy * s;
+        }
+      }
+      let cx = 0, cy = 0, n = 0;
+      for (let pass = 0; pass < 2; pass++) {
+        let P = pass ? b : a, Q2 = pass ? a : b, pc = Math.cos(P.h), ps = Math.sin(P.h);
+        for (let k = 0; k < 4; k++) {
+          let sx = k & 1 ? 1 : -1, sy = k & 2 ? 1 : -1, px = P.x + pc * sx * P.len * 0.5 - ps * sy * P.wid * 0.5, py = P.y + ps * sx * P.len * 0.5 + pc * sy * P.wid * 0.5;
+          this.inBox(Q2, px, py, 0.03) && (cx += px, cy += py, n++);
+        }
+      }
+      return n ? (cx /= n, cy /= n) : (cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2), { nx, ny, depth: best, cx, cy };
+    }
+    buildGrid() {
+      let g = this.grid;
+      g.clear();
+      for (let c of this.city.traffic.cars) {
+        if (c.type === "subway" || c.fadeOut != null) continue;
+        let k = Math.floor(c.x / 4) << 16 | Math.floor(c.y / 4), l = g.get(k);
+        l || g.set(k, l = []), l.push(c);
+      }
+    }
+    contacts() {
+      this.buildGrid();
+      let done = /* @__PURE__ */ new Set();
+      for (let a of this.city.traffic.cars) {
+        if (!a.free || a.fadeOut != null) continue;
+        this.init(a);
+        let cx = Math.floor(a.x / 4), cy = Math.floor(a.y / 4);
+        for (let gx = cx - 2; gx <= cx + 2; gx++)
+          for (let gy = cy - 2; gy <= cy + 2; gy++) {
+            let l = this.grid.get(gx << 16 | gy);
+            if (l)
+              for (let b of l) {
+                if (b === a) continue;
+                if (b.free) {
+                  let key = a.id < b.id ? a.id * 100003 + b.id : b.id * 100003 + a.id;
+                  if (done.has(key)) continue;
+                  done.add(key);
+                }
+                let R2 = (a.len + b.len) / 2 + 0.1;
+                if ((a.x - b.x) ** 2 + (a.y - b.y) ** 2 > R2 * R2) continue;
+                let m = this.sat(a, b);
+                m && this.resolve(a, b, m);
+              }
+          }
+      }
+    }
+    resolve(a, b, m) {
+      let { nx, ny, depth, cx, cy } = m, pa = this.pointVel(a, cx, cy), pb = this.pointVel(b, cx, cy), closing = -((pa[0] - pb[0]) * nx + (pa[1] - pb[1]) * ny);
+      if (!b.free) {
+        let thr = b.state === "parked" ? 0.7 : KNOCK_V;
+        (closing > thr || !this.boxFree(a, a.x + nx * depth, a.y + ny * depth, a.h)) && this.loosen(b, a);
+      }
+      this.init(b);
+      let ia = 1 / a.mass, ib = b.free ? 1 / b.mass : 0, wa = ia / (ia + ib), wb = 1 - wa, ax = a.x + nx * depth * wa, ay = a.y + ny * depth * wa, bx = b.x - nx * depth * wb, by = b.y - ny * depth * wb, okA = this.boxFree(a, ax, ay, a.h), okB = !b.free || this.boxFree(b, bx, by, b.h);
+      if (okA && okB ? (a.x = ax, a.y = ay, b.free && (b.x = bx, b.y = by)) : okA || !b.free ? this.boxFree(a, a.x + nx * depth, a.y + ny * depth, a.h) && (a.x += nx * depth, a.y += ny * depth) : b.free && this.boxFree(b, b.x - nx * depth, b.y - ny * depth, b.h) && (b.x -= nx * depth, b.y -= ny * depth), closing <= 0) return;
+      let rax = cx - a.x, ray = cy - a.y, rbx = cx - b.x, rby = cy - b.y, rna = rax * ny - ray * nx, rnb = rbx * ny - rby * nx, Ia = 1 / a.inertia, Ib = b.free ? 1 / b.inertia : 0, j = (1 + REST) * closing / (ia + ib + rna * rna * Ia + rnb * rnb * Ib);
+      this.applyImpulse(a, j * nx, j * ny, rax, ray), b.free && this.applyImpulse(b, -j * nx, -j * ny, rbx, rby);
+      let tx = -ny, ty = nx, qa = this.pointVel(a, cx, cy), qb = this.pointVel(b, cx, cy), vt = (qa[0] - qb[0]) * tx + (qa[1] - qb[1]) * ty, rta = rax * ty - ray * tx, rtb = rbx * ty - rby * tx, jt = clamp(-vt / (ia + ib + rta * rta * Ia + rtb * rtb * Ib), -0.3 * j, 0.3 * j);
+      this.applyImpulse(a, jt * tx, jt * ty, rax, ray), b.free && this.applyImpulse(b, -jt * tx, -jt * ty, rbx, rby);
+      let dva = j / a.mass, dvb = j / b.mass;
+      this.damage(a, cx, cy, -nx, -ny, dva, b), this.damage(b, cx, cy, nx, ny, dvb, a), closing > 2 && this.city.audio?.event("crash", { x: cx, y: cy, z: 0.4, k: closing }), closing > 2.5 && this.city.particles?.sparks(cx, cy, 0.45, Math.min(18, closing * 2)), closing > 3.5 && this.rng.chance(0.5) && this.city.particles?.glass(cx, cy, 0.7, 6), this.city.player?.onCrash(a, b, closing);
+    }
+    // take a car off the lane graph and hand it to physics
+    loosen(c, by) {
+      if (c.free) return;
+      let was = c.state;
+      this.city.traffic.detach(c), this.launch(c), c.state = was === "parked" ? "loose" : "crashed", c.crashT = 0, c.idleT = 0, c.life = 1e9, c.fadeIn = 0, c.siren = c.state === "crashed" && c.siren, was === "parked" && this.rng.chance(0.45) && this.city.audio?.event("alarm", c);
+    }
+    // ---- damage, fire, explosions -----------------------------------------------------------------
+    // a hit that changed the car's speed by dv; (dx, dy) points from the car toward the face hit
+    damage(c, px, py, dx, dy, dv, by) {
+      let amount = Math.max(0, dv - 2) * 6.5;
+      amount > 0 && this.hurt(c, amount, px, py, dx, dy, by);
+    }
+    hurt(c, amount, px, py, dx, dy, by) {
+      if (c.type === "subway" || amount <= 0) return;
+      this.init(c);
+      let ch = Math.cos(c.h), sh = Math.sin(c.h), lx = dx * ch + dy * sh, ly = -dx * sh + dy * ch, z = Math.abs(lx) * c.wid > Math.abs(ly) * c.len * 0.42 ? lx > 0 ? 0 : 1 : ly > 0 ? 2 : 3, share = amount / (c.maxHp * 0.75), old = c.dmg[z];
+      if (c.dmg[z] = Math.min(1, old + share), z >= 2) {
+        let u = clamp(((px - c.x) * ch + (py - c.y) * sh) / (c.len / 2), -0.85, 0.85), key = z === 2 ? "dentL" : "dentR";
+        c[key] = old > 0.02 ? (c[key] * old + u * share) / (old + share) : u;
+      }
+      let pl = this.city.player, blame = by === "player" || pl && pl.car && by === pl.car || by && by.blameT != null && this.city.time - by.blameT < 4 && by.state === "wreck";
+      blame && c !== pl?.car && (c.blameT = this.city.time);
+      let before = c.hp;
+      c.hp = Math.max(0, c.hp - amount), c.hp < c.maxHp * 0.5 && this.damaged.add(c), c.hp <= 0 && c.fireT == null && !c.wreck && this.ignite(c), pl?.onCarHurt(c, before - c.hp, blame);
+    }
+    ignite(c) {
+      c.fireT = 0, c.fuse = this.rng.range(4.5, 7.5), this.damaged.add(c), this.city.player?.onIgnite(c);
+    }
+    explode(c) {
+      let city = this.city, pl = city.player;
+      c.fireT = null, c.wreck = !0, c.burnT = this.rng.range(8, 13), c.smolderT = 45, c.free || this.loosen(c), this.init(c), pl?.beforeExplode(c), c.state = "wreck", c.siren = !1, c.brake = !1, c.lights = !1, c.hp = 0, c.idleT = 0, c.wreckT = 0;
+      for (let k = 0; k < 4; k++) c.dmg[k] = Math.max(c.dmg[k], 0.55);
+      c.hopV = 3.4 / Math.sqrt(c.mass), c.w += this.rng.range(-2.4, 2.4) / c.mass, this.damaged.add(c);
+      let R2 = 5.5, blamed = c.blameT != null && city.time - c.blameT < 20;
+      for (let o of city.traffic.cars) {
+        if (o === c || o.type === "subway" || o.fadeOut != null) continue;
+        let d = Math.hypot(o.x - c.x, o.y - c.y);
+        if (d > R2 + o.len / 2) continue;
+        let k = clamp(1 - (d - o.len / 4) / R2, 0, 1);
+        if (k <= 0) continue;
+        o.free || this.loosen(o), this.init(o);
+        let ux = (o.x - c.x) / (d || 1), uy = (o.y - c.y) / (d || 1), kick = 7.5 * k / Math.sqrt(o.mass);
+        o.vx += ux * kick, o.vy += uy * kick, o.w += this.rng.range(-1.6, 1.6) * k / o.mass, o.hopV = Math.max(o.hopV || 0, 2.4 * k / o.mass), blamed && (o.blameT = city.time), this.hurt(o, 75 * k, o.x - ux * o.len * 0.3, o.y - uy * o.len * 0.3, -ux, -uy, blamed ? "player" : null), o.state === "crashed" && k > 0.3 && (o.crashT = 9);
+      }
+      pl?.blast(c, R2, blamed), city.particles?.explosion(c.x, c.y, (c.z || 0) + 0.5, c), city.decals?.add("scorch", c.x, c.y, c.z || 0, this.rng.range(0, 6.28), 1.7 + c.len * 0.18, 1), city.audio?.event("explosion", c);
+      let cam = city.camera, dd = Math.hypot(cam.x - c.x, cam.y - c.y);
+      cam.shake?.(clamp(0.5 - dd / 50, 0, 0.5));
+    }
+    // ---- per frame --------------------------------------------------------------------------------
+    update(dt) {
+      let city = this.city, tr = city.traffic, now = city.time, pl = city.player, view = city.view, P = city.people;
+      for (let c of tr.cars)
+        !c.free || c.fadeOut != null || (this.init(c), c.drivenAt !== now && this.coast(c, dt), (c.hopV || c.hopZ) && (c.hopV = (c.hopV || 0) - 9.8 * dt, c.hopZ = (c.hopZ || 0) + c.hopV * dt, c.hopZ <= 0 && (c.hopZ = 0, c.hopV = c.hopV < -1.6 ? -c.hopV * 0.25 : 0)), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), (Math.abs(c.v) > 1 || Math.hypot(c.vx, c.vy) > 1) && this.runOver(c, P));
+      this.contacts();
+      for (let c of [...this.damaged]) {
+        if (c.fadeOut != null && c.fadeOut <= 0) {
+          this.damaged.delete(c);
+          continue;
+        }
+        c.fireT != null && (c.fireT += dt, c.fireT >= c.fuse && this.explode(c)), c.wreck && (c.burnT > 0 ? c.burnT -= dt : c.smolderT > 0 && (c.smolderT -= dt));
+      }
+      for (let c of [...tr.cars]) {
+        if (!c.free) continue;
+        if (c.fadeOut != null) {
+          if (c === pl?.car) {
+            c.fadeOut = null;
+            continue;
+          }
+          c.fadeOut -= dt, c.fadeOut <= 0 && this.remove(c);
+          continue;
+        }
+        if (DRIVEN.has(c.state)) continue;
+        if (c.idleT = (c.idleT || 0) + dt, c.state === "crashed") {
+          if (c.crashT = (c.crashT || 0) + dt, this.speed(c) < 0.3 && c.crashT > 1.6) {
+            if (c.hp > c.maxHp * 0.55 && c.crashT < 6 && c.fireT == null && tr.reattach(c)) continue;
+            c.crashT > 2.6 && (pl?.ejectDriver(c, c.fireT != null ? "fire" : "crash"), c.state = "abandoned", c.idleT = 0);
+          }
+          continue;
+        }
+        let seen = view.visible(c.x, c.y, 0, 4), blocking = c.blockT != null && now - c.blockT < 1.5, limit = c.state === "wreck" ? c.smolderT > 0 ? 1e9 : 30 : 40;
+        (!seen && (c.idleT > limit || blocking && c.idleT > 8) || c.idleT > 160) && (c.fadeOut = 1);
+      }
+      let obs = [];
+      pl && pl.active && !pl.car && pl.p && pl.p.z < 0.05 && obs.push({ x: pl.p.x, y: pl.p.y, r: 0.3, v: 1 });
+      for (let c of tr.cars) c.free && c.fadeOut == null && obs.push({ x: c.x, y: c.y, r: c.len / 2, v: this.speed(c), car: c });
+      if (pl) for (let o of pl.officers) o.z < 0.05 && o.state === "cop" && obs.push({ x: o.x, y: o.y, r: 0.3, v: 1 });
+      this.obstacles = obs;
+    }
+    remove(c) {
+      this.damaged.delete(c), this.city.player?.forget(c), this.city.traffic.removeCar(c);
+    }
+    // people in the path of a moving car dive aside, get knocked flat, or worse
+    runOver(c, P) {
+      let v = this.fwd(c), sp = Math.hypot(c.vx, c.vy);
+      if (sp < 1) return;
+      let sg = v >= 0 ? 1 : -1, hx = Math.cos(c.h) * sg, hy = Math.sin(c.h) * sg, pl = this.city.player, mine = pl && c === pl.car;
+      for (let q of P.near(c.x, c.y, c.len / 2 + 2.6)) {
+        if (q === pl?.p || q.alpha < 0.5 || q.inCar) continue;
+        let st = q.state;
+        if (!(st === "walk" || st === "idle" || st === "wait" || st === "return" || st === "busWait" || st === "arrived" || st === "flee" || st === "cop" || st === "approach" || st === "activity" && !q.seat)) continue;
+        let dx = q.x - c.x, dy = q.y - c.y, ahead = dx * hx + dy * hy, lat = hx * dy - hy * dx;
+        if (ahead < -c.len / 2 || ahead > c.len / 2 + 2.2 || Math.abs(lat) > c.wid / 2 + 0.55) continue;
+        let s = lat >= 0 ? 1 : -1;
+        if (ahead < c.len / 2 + 0.15 && Math.abs(lat) < c.wid / 2 + 0.12 && sp > 2.6) {
+          let lethal = mine && sp > 6.2;
+          st === "activity" && this.city.activities?.leave(q), lethal ? P.kill(q, hx, hy, "car") : P.knock(q, hx * 1.2 + -hy * s * 0.6, hy * 1.2 + hx * s * 0.6), pl?.onRunOver(c, q, lethal);
+        } else st !== "activity" && st !== "cop" && (q.dodge = { x: -hy * s, y: hx * s, t: 0.55, back: st }, q.state = "dodge", q.thought = this.rng.pick(["WHOA!", "HEY!", "Look out!", "Crazy driver!"]));
+      }
+    }
+  };
+
+  // src/sim/collide.js
+  var RES = 4, Collision = class {
+    constructor(world) {
+      this.n = 171 * RES, this.solid = new Uint8Array(this.n * this.n);
+      for (let [x0, y0, x1, y1] of world.solids) {
+        let cx0 = Math.max(0, Math.floor(Math.min(x0, x1) * RES)), cx1 = Math.min(this.n - 1, Math.floor(Math.max(x0, x1) * RES - 1e-6)), cy0 = Math.max(0, Math.floor(Math.min(y0, y1) * RES)), cy1 = Math.min(this.n - 1, Math.floor(Math.max(y0, y1) * RES - 1e-6));
+        for (let y = cy0; y <= cy1; y++) this.solid.fill(1, y * this.n + cx0, y * this.n + cx1 + 1);
+      }
+      this.ground = new Uint8Array(171 * 171);
+      for (let [x0, y0, x1, y1] of plinthRects())
+        for (let y = Math.max(0, Math.floor(y0)); y < Math.min(171, Math.ceil(y1)); y++)
+          this.ground.fill(1, y * 171 + Math.max(0, Math.floor(x0)), y * 171 + Math.min(171, Math.ceil(x1)));
+    }
+    isSolid(x, y) {
+      return x < 0.3 || y < 0.3 || x > 171 - 0.3 || y > 171 - 0.3 ? !0 : this.solid[Math.floor(y * RES) * this.n + Math.floor(x * RES)] === 1;
+    }
+    // is a circle of radius r at (x, y) clear of walls?
+    free(x, y, r) {
+      if (this.isSolid(x, y)) return !1;
+      for (let k = 0; k < 8; k++) {
+        let a = k / 8 * Math.PI * 2;
+        if (this.isSolid(x + Math.cos(a) * r, y + Math.sin(a) * r)) return !1;
+      }
+      return !0;
+    }
+    groundZ(x, y) {
+      let ix = Math.floor(x), iy = Math.floor(y);
+      return ix < 0 || iy < 0 || ix >= 171 || iy >= 171 ? 0 : this.ground[iy * 171 + ix] ? 0.125 : 0;
+    }
+    // is (x, y) on a roadway (not raised)?
+    onRoad(x, y) {
+      return this.groundZ(x, y) === 0;
+    }
+  };
+
+  // src/render/decalLayer.js
+  var CAP = 400, STRIDE3 = 12, HEAD4 = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DShadow;
+`, VS4 = HEAD4 + `
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 iA; // x, y, z, angle
+layout(location=2) in vec4 iB; // half size, palRow, alpha, grow
+layout(location=3) in vec4 iR; // atlas rect
+uniform mat4 uViewProj;
+out vec2 vUV;
+flat out vec4 vR;
+flat out vec3 vB;
+out vec3 vWorld;
+void main() {
+  float c = cos(iA.w), s = sin(iA.w);
+  vec2 q = (aCorner * 2.0 - 1.0) * iB.x;
+  vec3 wp = vec3(iA.x + q.x * c - q.y * s, iA.y + q.x * s + q.y * c, iA.z + 0.01);
+  vUV = aCorner * iR.zw; vR = iR; vB = iB.yzw; vWorld = wp;
+  gl_Position = uViewProj * vec4(wp, 1.0);
+}`, FS4 = HEAD4 + `
+in vec2 vUV;
+flat in vec4 vR;
+flat in vec3 vB;
+in vec3 vWorld;
+uniform sampler2D uSprites;
+uniform sampler2D uPal;
+uniform sampler2DShadow uShadow;
+uniform sampler2D uLightMap;
+uniform sampler2D uNoise;
+uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
+uniform float uShadowOn;
+uniform vec3 uSunDir, uSunCol, uAmb, uFace;
+uniform vec4 uCloud;
+uniform float uFlash;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oGlow;
+float bayer4(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.x + q.y * 4;
+  float m[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
+  return (m[i] + 0.5) / 16.0;
+}
+void main() {
+  ivec2 tc = ivec2(vR.xy) + ivec2(clamp(floor(vUV), vec2(0.0), vR.zw - 1.0));
+  vec4 t = texelFetch(uSprites, tc, 0);
+  if (t.a < 0.5) discard;
+  int slot = int(t.r * 255.0 + 0.5);
+  if (float(slot) > vB.z * 8.0 + 0.5) discard;
+  if (vB.y < 0.999 && bayer4(gl_FragCoord.xy) >= vB.y) discard;
+  vec4 pc = texelFetch(uPal, ivec2(slot, int(vB.x + 0.5)), 0);
+  if (pc.a < 0.1) discard;
+  vec3 albedo = pc.rgb * (t.g * 255.0 / 128.0);
+  float sh = 1.0;
+  float ndl = uSunDir.z;
+  if (uShadowOn > 0.5 && ndl > 0.0) {
+    vec4 sp = uShadowMat * vec4(vWorld + vec3(0.0, 0.0, uShadowK.x * 1.5) + uSunDir * uShadowK.x * 0.5, 1.0);
+    vec3 s = sp.xyz * 0.5 + 0.5;
+    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - uShadowK.x * 0.8 * uShadowK.y)));
+  } else if (ndl <= 0.0) sh = 0.0;
+  float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
+  float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
+  vec3 lm = texture(uLightMap, vWorld.xy / ${176 .toFixed(1)}).rgb;
+  vec3 light = uAmb * uFace.x + uSunCol * max(ndl, 0.0) * sh * cl + lm + vec3(uFlash);
+  oColor = vec4(albedo * light, 1.0);
+  oGlow = vec4(0.0, 0.0, 0.0, 1.0);
+}`, DecalLayer = class {
+    constructor(gl, city) {
+      this.gl = gl, this.city = city, this.atlas = city.atlas, this.pal = city.pal, this.rng = new RNG(5150), this.list = [], this.data = new Float32Array(CAP * STRIDE3), this.n = 0, this.prog = createProgram(gl, VS4, FS4, "decals"), this.paint();
+      let vao = gl.createVertexArray();
+      gl.bindVertexArray(vao), makeBuffer(gl, new Float32Array([0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1])), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAP * STRIDE3 * 4, gl.DYNAMIC_DRAW);
+      for (let k = 0; k < 3; k++)
+        gl.enableVertexAttribArray(1 + k), gl.vertexAttribPointer(1 + k, 4, gl.FLOAT, !1, STRIDE3 * 4, k * 16), gl.vertexAttribDivisor(1 + k, 1);
+      gl.bindVertexArray(null), this.vao = vao;
+    }
+    // textures: slots 1..8 rise from the middle out, so a pool can spread by revealing them in turn
+    paint() {
+      let A = this.atlas, blob = (name, D, lobes, rough, seed) => {
+        let rr = new RNG(seed), L = [];
+        for (let k = 0; k < lobes; k++) {
+          let a = rr.range(0, 6.28), d = rr.range(0.05, 0.25);
+          L.push([0.5 + Math.cos(a) * d, 0.5 + Math.sin(a) * d, rr.range(0.12, 0.22)]);
+        }
+        return L.push([0.5, 0.5, 0.3]), A.add(name, D, D, (sp) => {
+          for (let y = 0; y < D; y++)
+            for (let x = 0; x < D; x++) {
+              let u = (x + 0.5) / D, v = (y + 0.5) / D, best = -1;
+              for (let [cx, cy, R2] of L) best = Math.max(best, 1 - Math.hypot(u - cx, v - cy) / R2);
+              let n = ((x * 73856093 ^ y * 19349663 ^ seed * 83492791) >>> 0) % 97 / 97;
+              if (best + (n - 0.5) * rough <= 0) continue;
+              let dc = Math.hypot(u - 0.5, v - 0.5) / 0.5, slot = clamp(1 + Math.floor(dc * 7.2 + n * 0.8), 1, 8);
+              sp.set(x, y, slot, best < 0.12 ? 92 : n < 0.12 ? 150 : 118 + Math.round(best * 18));
+            }
+        }, D >> 1, D >> 1);
+      };
+      this.tex = {
+        pool: [blob("decalPool1", 44, 5, 0.06, 11), blob("decalPool2", 44, 6, 0.07, 23)],
+        splat: [blob("decalSplat1", 10, 4, 0.5, 31), blob("decalSplat2", 12, 5, 0.6, 37), blob("decalSplat3", 8, 3, 0.5, 41)],
+        scorch: [blob("decalScorch1", 128, 9, 0.45, 53), blob("decalScorch2", 128, 8, 0.5, 59)]
+      };
+      let blood = {}, scorch = {};
+      for (let k = 1; k <= 8; k++)
+        blood[k] = k < 3 ? 8129550 : k < 6 ? 6949388 : 5638153, scorch[k] = [1315344, 1446930, 1841430, 2235930, 2762016, 3288102, 3814188, 4405810][k - 1];
+      this.rows = { pool: this.pal.alloc(blood), splat: this.pal.alloc(blood), scorch: this.pal.alloc(scorch) };
+    }
+    // size: half width in world units; grow: seconds for a pool to spread (0 = at once)
+    add(kind, x, y, z, angle, size, alpha = 1, grow2 = 0) {
+      this.list.length >= CAP && this.list.shift();
+      let tex = this.rng.pick(this.tex[kind]), life = kind === "scorch" ? 300 : kind === "pool" ? 180 : 100, d = { kind, x, y, z, ang: Math.round(angle / (Math.PI / 2)) * (Math.PI / 2), size, alpha, grow: grow2, age: 0, life, tex };
+      return this.list.push(d), d;
+    }
+    update(dt) {
+      for (let i = this.list.length - 1; i >= 0; i--) {
+        let d = this.list[i];
+        d.age += dt, d.age > d.life && this.list.splice(i, 1);
+      }
+    }
+    prepare(view) {
+      let D = this.data, n = 0;
+      for (let d of this.list) {
+        if (n >= CAP) break;
+        if (!view.visible(d.x, d.y, d.z, 3 + d.size)) continue;
+        let o = n * STRIDE3, f = d.tex, g = d.grow > 0 ? Math.min(1, Math.sqrt(d.age / d.grow) * 1.05 + 0.08) : 1, fade = d.age > d.life - 8 ? (d.life - d.age) / 8 : 1;
+        D[o] = d.x, D[o + 1] = d.y, D[o + 2] = d.z, D[o + 3] = d.ang, D[o + 4] = d.size, D[o + 5] = this.rows[d.kind], D[o + 6] = clamp(d.alpha * fade, 0, 1), D[o + 7] = g, D[o + 8] = f.x, D[o + 9] = f.y, D[o + 10] = f.w, D[o + 11] = f.h, n++;
+      }
+      if (this.n = n, n) {
+        let gl = this.gl;
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferSubData(gl.ARRAY_BUFFER, 0, D.subarray(0, n * STRIDE3));
+      }
+    }
+    draw(ctx) {
+      if (!this.n) return;
+      let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D, this.atlas.tex), gl.uniform1i(u.uSprites, 0), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.depthMask(!1), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(-1, -2), gl.bindVertexArray(this.vao), gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, this.n), gl.disable(gl.POLYGON_OFFSET_FILL), gl.depthMask(!0);
     }
   };
 
   // src/sim/city.js
   var City = class {
     constructor(gl, renderer, world, env, camera) {
-      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(2048), this.statics = new Statics(this), this.carLayer = new CarLayer(gl, this), this.traffic = new Traffic(this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
+      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(2048), this.statics = new Statics(this), this.coll = new Collision(world), this.carLayer = new CarLayer(gl, this), this.decals = new DecalLayer(gl, this), this.traffic = new Traffic(this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
         shadow: (ctx) => {
           this.carLayer.shadow(ctx), this.sprites.shadow(ctx);
         },
         draw: (ctx) => {
-          this.carLayer.draw(ctx), this.sprites.draw(ctx);
+          this.decals.draw(ctx), this.carLayer.draw(ctx), this.sprites.draw(ctx);
         }
-      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.traffic.init(), this.people.init();
+      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.vehicles = new Vehicles(this), this.addSystem(this.vehicles), this.addSystem({ update: (dt) => this.decals.update(dt) }), this.traffic.init(), this.people.init();
     }
     addSystem(s) {
       return this.systems.push(s), s;
@@ -9850,7 +11026,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let view = this.computeView(canvasW, canvasH), env = this.env, L = this.sprites;
       L.begin(), this.statics.emit(L, env, this.camera, this.time, view);
       for (let s of this.systems) s.emit && s.emit(L, view);
-      L.end(), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
+      L.end(), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view), this.decals.prepare(view);
       let LL = this.lightLayer;
       LL.begin(), this.statics.lights(LL, env, this.time), this.carLayer.lights(LL, this.traffic.cars, env);
       for (let s of this.systems) s.lights && s.lights(LL, env);
@@ -9925,14 +11101,17 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       );
       let g5 = this.h("div", "group");
       this.playAsBtn = this.btn("PLAY", "Take control of a person: walk, borrow cars, outrun the police (P)", () => this.togglePlay(), "small"), g5.append(this.playAsBtn, this.btn("\u{1F441}", "Follow a random person (F)", () => this.followRandom()), this.btn("\u2738", "Fireworks! (X)", () => this.fireworks())), bar.append(g1, g2, g3, g4, g5), R2.append(bar), this.card = this.h("div", "panel card hidden"), R2.append(this.card), this.toastEl = this.h("div", "toast hidden"), R2.append(this.toastEl), this.hudEl = this.h("div", "panel playhud hidden", `
-      <div class="ph-row"><span class="ph-name"></span><span class="ph-heat"><span class="ph-label">HEAT</span>${"<i></i>".repeat(5)}</span></div>
-      <div class="ph-status"></div><div class="ph-prompt"></div>`), R2.append(this.hudEl), this.hudMsg = this.h("div", "playmsg hidden"), R2.append(this.hudMsg), this.hudBig = this.h("div", "playbig hidden"), R2.append(this.hudBig), this.help = this.h("div", "panel help hidden", `
+      <div class="ph-row"><span class="ph-name"></span><span class="ph-stars" title="Wanted level">${"<i></i>".repeat(5)}</span></div>
+      <div class="ph-status"></div>
+      <div class="ph-row ph-sub"><span class="ph-gun"></span><span class="ph-car"><span class="ph-label">CAR</span><b><u></u></b></span></div>
+      <div class="ph-prompt"></div>`), R2.append(this.hudEl), this.hudMsg = this.h("div", "playmsg hidden"), R2.append(this.hudMsg), this.hudBig = this.h("div", "playbig hidden"), R2.append(this.hudBig), this.help = this.h("div", "panel help hidden", `
       <div class="htitle">PIXEL NYC \u2014 CONTROLS</div>
       <div class="hrow"><b>Drag</b> pan the city</div>
       <div class="hrow"><b>Wheel / pinch / + \u2212</b> zoom</div>
       <div class="hrow"><b>Q / E</b> rotate the view</div>
       <div class="hrow"><b>V</b> bird's-eye / isometric view</div>
       <div class="hrow"><b>P</b> play as someone: <b>WASD</b> move, <b>Shift</b> run, <b>F</b> get in/out of cars, <b>Space</b> handbrake, <b>Esc</b> quit</div>
+      <div class="hrow"><b>Click</b> (or <b>Space</b> on foot) shoot \xB7 <b>R</b> reload \xB7 crimes bring police and wanted stars</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
       <div class="hrow"><b>GO TO menu</b> glide to a place</div>
@@ -9987,7 +11166,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       if (!p || (this.unfollow(), !pl.start(p))) return;
       this.playAsBtn.classList.add("on"), this.hudEl.classList.remove("hidden"), app.camera.mode !== "bird" && this.toggleView("bird");
       let z = this.zoomLevels.find((v) => v >= 3 * (window.devicePixelRatio || 1) - 0.01) || this.zoomLevels[this.zoomLevels.length - 1];
-      app.camera.zoomTo(z), this.toast("WASD/arrows move \xB7 SHIFT run \xB7 F get in/out \xB7 SPACE handbrake \xB7 ESC quit");
+      app.camera.zoomTo(z), this.toast("WASD move \xB7 SHIFT run \xB7 F get in/out \xB7 CLICK shoot \xB7 R reload \xB7 SPACE handbrake \xB7 ESC quit");
     }
     toggleView(mode) {
       let cam = this.app.camera;
@@ -10018,14 +11197,22 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     updateHud() {
       let h = this.app.city.player.hud();
       if (!h) {
-        this.hudEl.classList.contains("hidden") || this.hudEl.classList.add("hidden"), this.hudMsg.classList.add("hidden"), this.hudBig.classList.add("hidden"), this.playAsBtn?.classList.remove("on"), this.titleEl.classList.remove("hidden"), this.root.classList.remove("playing");
+        this.hudEl.classList.contains("hidden") || this.hudEl.classList.add("hidden"), this.hudMsg.classList.add("hidden"), this.hudBig.classList.add("hidden"), this.playAsBtn?.classList.remove("on"), this.titleEl.classList.remove("hidden"), this.root.classList.remove("playing"), this.app.canvas.classList.remove("aiming");
         return;
       }
       this.hudEl.classList.remove("hidden"), this.titleEl.classList.add("hidden"), this.root.classList.add("playing"), this.hudEl.querySelector(".ph-name").textContent = h.name.toUpperCase(), this.hudEl.querySelector(".ph-status").textContent = h.status, this.hudEl.querySelector(".ph-prompt").textContent = h.prompt;
-      let lit = Math.ceil(h.heat - 1e-6), flash = Math.floor(performance.now() / 250) % 2;
-      this.hudEl.querySelectorAll(".ph-heat i").forEach((el, i) => {
-        el.className = i < lit ? flash ^ i & 1 ? "red" : "blue" : "";
+      let blink = h.searching && Math.floor(performance.now() / 300) % 2;
+      this.hudEl.querySelectorAll(".ph-stars i").forEach((el, i) => {
+        el.className = i < h.stars ? blink ? "on dim" : "on" : "";
       });
+      let g = h.gun;
+      this.hudEl.querySelector(".ph-gun").textContent = g.reloading ? "PISTOL \xB7 RELOADING" : `PISTOL \xB7 ${g.clip}/${g.cap}`;
+      let carEl = this.hudEl.querySelector(".ph-car");
+      if (carEl.classList.toggle("hidden", !h.car), h.car) {
+        let bar = carEl.querySelector("u");
+        bar.style.width = `${Math.round(Math.max(0, h.car.hp) * 100)}%`, bar.className = h.car.fire ? "fire" : h.car.hp < 0.3 ? "low" : h.car.hp < 0.6 ? "mid" : "";
+      }
+      this.app.canvas.classList.add("aiming");
       let small = h.msgs.filter((m) => !m.big).map((m) => m.text);
       this.hudMsg.textContent = small.join("  \xB7  "), this.hudMsg.classList.toggle("hidden", !small.length);
       let big = h.msgs.find((m) => m.big);
@@ -10050,14 +11237,33 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     // ---- input ------------------------------------------------------------------
     bindInput() {
-      let app = this.app, cv = app.canvas, ptrs = /* @__PURE__ */ new Map(), drag = null, pinch = null, moved = 0;
-      cv.addEventListener("pointerdown", (e) => {
-        if (cv.setPointerCapture(e.pointerId), ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }), app.audio?.unlock(), ptrs.size === 1 && (drag = { x: e.clientX, y: e.clientY }, moved = 0), ptrs.size === 2) {
+      let app = this.app, cv = app.canvas, ptrs = /* @__PURE__ */ new Map(), drag = null, pinch = null, moved = 0, aim = (e) => {
+        let pl = app.city.player;
+        if (!pl || !pl.active) return !1;
+        let pz = pl.p ? pl.p.z + 0.8 : 0.8, [wx, wy] = app.camera.screenToWorld(e.clientX, e.clientY, cv.clientWidth, cv.clientHeight, pz);
+        return pl.aimAt(wx, wy), !0;
+      };
+      cv.addEventListener("pointermove", (e) => {
+        ptrs.size || aim(e);
+      }), cv.addEventListener("pointerdown", (e) => {
+        app.audio?.unlock();
+        let pl = app.city.player;
+        if (pl && pl.active && e.button === 0) {
+          aim(e), pl.trigger = !0, pl.clickShot = !0, e.pointerType !== "mouse" && setTimeout(() => {
+            pl.trigger = !1;
+          }, 120), cv.setPointerCapture(e.pointerId), ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY, shoot: !0 });
+          return;
+        }
+        if (cv.setPointerCapture(e.pointerId), ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }), ptrs.size === 1 && (drag = { x: e.clientX, y: e.clientY }, moved = 0), ptrs.size === 2) {
           let [a, b] = [...ptrs.values()];
           pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), acc: 0 }, drag = null;
         }
       }), cv.addEventListener("pointermove", (e) => {
         if (ptrs.has(e.pointerId)) {
+          if (ptrs.get(e.pointerId).shoot) {
+            aim(e);
+            return;
+          }
           if (ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }), pinch && ptrs.size === 2) {
             let [a, b] = [...ptrs.values()], d = Math.hypot(a.x - b.x, a.y - b.y), r = d / pinch.d;
             r > 1.25 ? (this.zoom(1), pinch.d = d) : r < 0.8 && (this.zoom(-1), pinch.d = d);
@@ -10074,7 +11280,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
       });
       let up = (e) => {
-        ptrs.delete(e.pointerId), cv.classList.remove("dragging"), drag && moved <= 4 && this.click(e.clientX, e.clientY), ptrs.size < 2 && (pinch = null), drag = null;
+        let was = ptrs.get(e.pointerId);
+        if (ptrs.delete(e.pointerId), was && was.shoot) {
+          let pl = app.city.player;
+          pl && e.pointerType === "mouse" && (pl.trigger = !1);
+          return;
+        }
+        cv.classList.remove("dragging"), drag && moved <= 4 && this.click(e.clientX, e.clientY), ptrs.size < 2 && (pinch = null), drag = null;
       };
       cv.addEventListener("pointerup", up), cv.addEventListener("pointercancel", up);
       let wheelAcc = 0;
@@ -10091,6 +11303,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         if (pl && pl.active) {
           if (k === "f" || k === "enter") {
             e.repeat || pl.action(), e.preventDefault();
+            return;
+          }
+          if (k === "r") {
+            e.repeat || pl.reload();
             return;
           }
           if (k === " " || k.startsWith("arrow")) {
@@ -10119,7 +11335,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       (k.has("a") || k.has("arrowleft")) && (sx -= 1), (k.has("d") || k.has("arrowright")) && (sx += 1), (k.has("w") || k.has("arrowup")) && (sy -= 1), (k.has("s") || k.has("arrowdown")) && (sy += 1);
       let pl = this.app.city.player;
       if (pl && pl.active) {
-        pl.input.x = sx, pl.input.y = sy, pl.input.run = k.has("shift"), pl.input.brake = k.has(" ");
+        pl.input.x = sx, pl.input.y = sy, pl.input.run = k.has("shift"), pl.input.brake = k.has(" "), pl.input.space = k.has(" ");
         return;
       }
       if (!sx && !sy) return;
@@ -10186,7 +11402,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         water: loop(this.white, [["bandpass", 1800, 0.6]], 0),
         steam: loop(this.white, [["highpass", 2400], ["lowpass", 6e3]], 0),
         siren: null,
-        engine: null
+        engine: null,
+        fire: null
       }, !0;
     }
     unlock() {
@@ -10372,8 +11589,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         case "siren":
           break;
         case "crash": {
-          if (!this.throttle("crash", 0.35)) return;
-          let o = O(0.9);
+          if (!this.throttle("crash", 0.25)) return;
+          let o = O(clamp(0.45 + (src.k || 4) * 0.09, 0.45, 1.2));
           this.noise(t, 0.35, o, [["lowpass", 1400, 0.7, 300]], 0.8, 4e-3, this.brown), this.osc("sine", 90, t, 0.25, o, 0.6, 4e-3, 40);
           for (let k = 0; k < 5; k++) this.noise(t + 0.05 + r.range(0, 0.25), 0.04, o, [["bandpass", r.range(2e3, 4500), 3]], r.range(0.1, 0.25));
           break;
@@ -10381,6 +11598,52 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         case "alarm": {
           let o = O(0.35);
           for (let k = 0; k < 10; k++) this.osc("square", k % 2 ? 1250 : 880, t + k * 0.22, 0.18, o, 0.18, 0.01, k % 2 ? 900 : 1300);
+          break;
+        }
+        case "gunshot": {
+          let o = O(1.1);
+          this.noise(t, 0.05, o, [["highpass", 1400]], 0.9, 1e-3), this.noise(t, 0.14, o, [["bandpass", 520, 0.9, 260]], 0.8, 1e-3, this.brown), this.osc("sine", 150, t, 0.1, o, 0.55, 1e-3, 55);
+          let e = this.out(w.g * 0.35, -w.pan * 0.5);
+          this.noise(t + 0.13, 0.12, e, [["lowpass", 1600]], 0.35, 4e-3), this.noise(t + 0.29, 0.16, e, [["lowpass", 1e3]], 0.2, 6e-3);
+          break;
+        }
+        case "explosion": {
+          let o = O(1.3);
+          this.noise(t, 2.4, o, [["lowpass", 1100, 0.7, 70]], 1, 4e-3, this.brown), this.osc("sine", 70, t, 1.4, o, 0.9, 4e-3, 24), this.noise(t, 0.3, o, [["highpass", 900]], 0.6, 2e-3), this.noise(t + 0.15, 1.6, O(0.5), [["bandpass", 700, 0.6]], 0.35, 0.2);
+          for (let k = 0; k < 14; k++) this.noise(t + 0.5 + r.range(0, 1.4), 0.03, O(0.6), [["bandpass", r.range(1800, 5e3), 3]], r.range(0.08, 0.25));
+          this.noise(t + 0.5, 2.5, this.out(w.g * 0.4, -w.pan * 0.4), [["lowpass", 300]], 0.5, 0.3, this.brown);
+          break;
+        }
+        case "hit": {
+          if (!this.throttle("hit", 0.08)) return;
+          let o = O(0.8);
+          this.noise(t, 0.07, o, [["lowpass", 900]], 0.6, 2e-3, this.brown), this.osc("sine", 110, t, 0.08, o, 0.4, 2e-3, 60);
+          break;
+        }
+        case "thud": {
+          if (!this.throttle("thud", 0.1)) return;
+          this.noise(t, 0.12, O(0.6), [["lowpass", 500]], 0.6, 3e-3, this.brown);
+          break;
+        }
+        case "ping": {
+          if (!this.throttle("ping", 0.05)) return;
+          let o = O(0.5);
+          this.osc("triangle", r.range(1900, 2600), t, 0.09, o, 0.25, 1e-3, 1200), this.noise(t, 0.04, o, [["bandpass", 3200, 2]], 0.3, 1e-3);
+          break;
+        }
+        case "ricochet": {
+          let o = O(0.45);
+          this.osc("sine", r.range(2600, 3400), t, 0.22, o, 0.18, 2e-3, r.range(700, 1e3));
+          break;
+        }
+        case "reload": {
+          let o = O(0.5);
+          this.noise(t, 0.03, o, [["bandpass", 2400, 3]], 0.4, 1e-3), this.noise(t + 0.55, 0.03, o, [["bandpass", 1800, 3]], 0.45, 1e-3), this.noise(t + 0.9, 0.04, o, [["bandpass", 2800, 3]], 0.5, 1e-3);
+          break;
+        }
+        case "star": {
+          let o = this.out(0.22, 0);
+          this.osc("square", 220, t, 0.12, o, 0.2, 5e-3), this.osc("square", 311, t + 0.13, 0.22, o, 0.2, 5e-3);
           break;
         }
         case "busted": {
@@ -10487,7 +11750,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           let g = this.ctx.createGain();
           g.gain.value = 0, o.connect(lp), o2.connect(lp), lp.connect(g).connect(this.sfx), o.start(), o2.start(), L.engine = { o, o2, lp, g };
         }
-        let v = Math.abs(pc.v);
+        let v = Math.min(10, Math.abs(pc.v || 0));
         L.engine.o.frequency.setTargetAtTime(34 + v * 9, t, 0.08), L.engine.o2.frequency.setTargetAtTime(17 + v * 4.5, t, 0.08), L.engine.lp.frequency.setTargetAtTime(300 + v * 90, t, 0.1), L.engine.g.gain.setTargetAtTime(0.05 + v * 8e-3, t, 0.1);
       } else if (L.engine) {
         L.engine.g.gain.setTargetAtTime(0, t, 0.15);
@@ -10498,6 +11761,35 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           } catch {
           }
         }, 800), L.engine = null;
+      }
+      let burn = 0, bpan = 0, V = city.vehicles;
+      if (V) {
+        for (let c of V.damaged) if (c.fireT != null || c.wreck && c.burnT > 0) {
+          let w = this.where(c);
+          w.g > burn && (burn = w.g, bpan = w.pan);
+        }
+      }
+      if (burn > 0.02) {
+        if (!L.fire) {
+          let src = this.ctx.createBufferSource();
+          src.buffer = this.brown, src.loop = !0;
+          let bp = this.ctx.createBiquadFilter();
+          bp.type = "bandpass", bp.frequency.value = 520, bp.Q.value = 0.5;
+          let g = this.ctx.createGain();
+          g.gain.value = 0;
+          let p = this.ctx.createStereoPanner();
+          src.connect(bp).connect(g).connect(p).connect(this.sfx), src.start(), L.fire = { src, g, p };
+        }
+        L.fire.g.gain.setTargetAtTime(burn * 0.35, t, 0.3), L.fire.p.pan.setTargetAtTime(bpan, t, 0.3), this.rng.chance(dt * 9) && this.noise(t + this.rng.range(0, 0.05), 0.015, this.out(burn * 0.5, bpan), [["bandpass", this.rng.range(1500, 4e3), 2]], this.rng.range(0.1, 0.35), 1e-3);
+      } else if (L.fire) {
+        L.fire.g.gain.setTargetAtTime(0, t, 0.4);
+        let f = L.fire;
+        setTimeout(() => {
+          try {
+            f.src.stop();
+          } catch {
+          }
+        }, 1500), L.fire = null;
       }
       let ice = cars.find((c) => c.special === "icecream");
       if (this.jingleT -= dt, ice && this.jingleT <= 0) {
