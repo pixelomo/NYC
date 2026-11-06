@@ -84,6 +84,30 @@ export class UI {
     this.wxSel.addEventListener('change', () => this.app.env.setWeather(this.wxSel.value === 'auto' ? null : this.wxSel.value));
     this.wxSel.addEventListener('pointerdown', (e) => e.stopPropagation());
     g3.append(this.wxSel);
+    // places to jump to in the bigger city
+    const W = this.app.world;
+    const places = [['GO TO…', null]];
+    if (W.park) places.push(['CENTRAL PARK', [W.park.cx, W.park.cy]]);
+    if (W.pond) places.push(['THE LAKE', [W.pond.x, W.pond.y + 4]]);
+    if (W.timesSquare) places.push(['TIMES SQUARE', [W.timesSquare.x, W.timesSquare.y + 4]]);
+    if (W.court) places.push(['BASKETBALL COURT', [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
+    const dept = W.shops.find((sh) => sh.kind === 'dept');
+    if (dept) places.push(['DEPARTMENT STORE', [dept.x, dept.y]]);
+    const firehouse = W.firehouse;
+    if (firehouse) places.push(['FIREHOUSE', [firehouse.x, firehouse.y]]);
+    this.placeSel = this.h('select', 'sel');
+    places.forEach(([name], i) => { const o = this.h('option', null, name); o.value = String(i); this.placeSel.append(o); });
+    this.placeSel.addEventListener('change', () => {
+      const pl = places[+this.placeSel.value];
+      if (pl && pl[1]) {
+        if (this.app.camera.follow) this.unfollow();
+        this.app.camera.vx = this.app.camera.vy = 0;
+        this.app.camera.glide = { x: pl[1][0], y: pl[1][1] };
+      }
+      this.placeSel.value = '0';
+    });
+    this.placeSel.addEventListener('pointerdown', (e) => e.stopPropagation());
+    g3.append(this.placeSel);
     const g4 = this.h('div', 'group');
     g4.append(this.btn('⟲', 'Rotate left (Q)', () => this.rotate(-1)), this.btn('⟳', 'Rotate right (E)', () => this.rotate(1)),
       this.btn('−', 'Zoom out (-)', () => this.zoom(-1)), this.btn('+', 'Zoom in (+)', () => this.zoom(1)));
@@ -105,6 +129,7 @@ export class UI {
       <div class="hrow"><b>Q / E</b> rotate the view</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
+      <div class="hrow"><b>GO TO menu</b> glide to a place</div>
       <div class="hrow"><b>Space</b> pause · <b>T</b> time speed</div>
       <div class="hrow"><b>1-4</b> season · <b>0</b> auto seasons</div>
       <div class="hrow"><b>F</b> follow someone · <b>Esc</b> stop</div>
@@ -236,6 +261,7 @@ export class UI {
         if (moved > 4) {
           cv.classList.add('dragging');
           if (app.camera.follow) this.unfollow();
+          app.camera.glide = null;
           const scaleCss = app.camera.scale / (window.devicePixelRatio || 1);
           const [wx, wy] = app.camera.unprojectDelta(-dx / scaleCss, -dy / scaleCss);
           app.camera.x += wx; app.camera.y += wy;
@@ -299,6 +325,7 @@ export class UI {
     if (k.has('s') || k.has('arrowdown')) sy += 1;
     if (!sx && !sy) return;
     if (this.app.camera.follow) this.unfollow();
+    this.app.camera.glide = null;
     const cam = this.app.camera;
     const speed = 420 / (cam.scale / (window.devicePixelRatio || 1));
     const [wx, wy] = cam.unprojectDelta(sx * speed * dt, sy * speed * dt);

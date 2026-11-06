@@ -15,14 +15,15 @@ const NAMES = ['Maria', 'Jamal', 'Wei', 'Priya', 'Luis', 'Sofia', 'Ahmed', 'Rach
   'Lucia', 'Tyrone', 'Hana', 'Frankie', 'Esther', 'Marco', 'Imani', 'Vic', 'Ana', 'Benny', 'Zoe', 'Hector', 'Ming', 'Destiny', 'Sal', 'Ivy'];
 const DOG_NAMES = ['Biscuit', 'Lola', 'Rocco', 'Pretzel', 'Bella', 'Mookie', 'Daisy', 'Frank', 'Peanut', 'Luna', 'Bodega', 'Pickles'];
 
-const POP = [[0, 50], [2, 26], [5, 34], [7, 170], [9, 240], [12, 250], [15, 270], [17, 310], [19, 270], [21, 190], [23, 95], [24, 50]];
+// people out and about by hour (the 6x6 city: roughly twice the 4x4 one's crowds)
+const POP = [[0, 90], [2, 46], [5, 60], [7, 300], [9, 420], [12, 440], [15, 470], [17, 540], [19, 470], [21, 330], [23, 165], [24, 90]];
 
 function popTarget(h) {
   for (let i = 1; i < POP.length; i++) if (h <= POP[i][0]) {
     const a = POP[i - 1], b = POP[i];
     return a[1] + ((b[1] - a[1]) * (h - a[0])) / (b[0] - a[0]);
   }
-  return 26;
+  return 46;
 }
 
 export class People {
@@ -192,7 +193,8 @@ export class People {
       }
       case 'tourist': {
         const steps = [];
-        const spots = [...(P.offices.slice(0, 4)), ...(P.park.ring || [])];
+        const tsq = (P.squares && P.squares.tsq) || [];
+        const spots = [...(P.offices.slice(0, 4)), ...(P.park.ring || []), ...tsq, ...tsq];
         for (let k = 0; k < 3; k++) steps.push(go(r.pick(spots).sw || r.pick(spots), 'Is that the famous one?'), { t: 'idle', dur: r.range(3, 6), anim: 'phone', thought: 'Taking a photo' });
         steps.push(go(subway(), 'Next stop: Times Square?'), { t: 'enter' });
         return steps;
@@ -302,7 +304,7 @@ export class People {
     p.alpha = 0;
     if (anywhere) {
       // start partway along the route
-      const n = r.pick(this.nav.nodes.filter((nn) => nn.kind === 'walk' || nn.kind === 'corner' || nn.kind === 'park'));
+      const n = r.pick(this.nav.nodes.filter((nn) => nn.kind === 'walk' || nn.kind === 'corner' || nn.kind === 'park' || nn.kind === 'plaza'));
       p.node = n; p.x = n.x; p.y = n.y; p.z = n.z; p.alpha = 1; p.state = 'idle'; p.timer = r.range(0, 0.5);
     }
     if (p.dog) { p.dog.x = p.x; p.dog.y = p.y; }

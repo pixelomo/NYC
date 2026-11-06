@@ -43,7 +43,8 @@ export class Statics {
     this.lampDelay = world.lamps.map(() => rng.range(0, 0.6));
     this.lampFlicker = world.lamps.map(() => (rng.chance(0.04) ? rng.range(0.5, 2) : 0));
     this.frames = {};
-    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella', 'pedWalk', 'pedHand']) this.frames[n] = atlas.get(n);
+    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella', 'pedWalk', 'pedHand', 'tsqBall']) this.frames[n] = atlas.get(n);
+    this.ballRows = [0xf2f6ff, 0x6ab8ff, 0xff6ad8, 0xffd84f].map((c) => pal.alloc({ [S.C1]: c, [S.C2]: 0xffffff }));
     this.umbRows = {
       hotdog: pal.alloc({ [S.C1]: 0xf2c230, [S.C2]: 0x1f4fa0, [S.C3]: 0x9a9da3 }),
       halal: pal.alloc({ [S.C1]: 0xf2f2ee, [S.C2]: 0xc8302c, [S.C3]: 0x9a9da3 }),
@@ -123,6 +124,13 @@ export class Statics {
         L.push(h.x, h.y, h.z - 0.02, this.frames.glow, this.glowRows[h.kind] ?? this.glowRows.street, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
       }
     }
+    // the ball on the Times Square tower: cycles colour, and drops on winter midnights
+    if (world.ball && vis(world.ball.x, world.ball.y, world.ball.z1, 3)) {
+      const b = world.ball, h = env.hour;
+      let z = b.z1;
+      if (env.season === 3 && (h >= 23.75 || h < 0.1)) z = b.z1 + (b.z0 - b.z1) * (h >= 23.75 ? (h - 23.75) / 0.25 : 1);
+      L.push(b.x, b.y, z - 0.2, this.frames.tsqBall, this.ballRows[Math.floor(time * 0.6) % this.ballRows.length], SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
+    }
     // beacons blink
     const blink = (time % 1.6) < 0.5;
     if (blink) for (const b of world.beacons) L.push(b.x, b.y, b.z, this.frames.beacon, this.glowRows.beacon, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
@@ -173,6 +181,12 @@ export class Statics {
           if (f > 1.2) k *= 0.15;
         }
         if (l.kind === 'flood') k *= env.hour > 23 || env.hour < 6 ? 0 : 1;
+      } else if (l.kind === 'screen') {
+        // giant video screens wash the square in shifting colour, strongest at night
+        k *= 0.15 + Math.max(0, dark - 0.15) * 1.25;
+        const a = time * 0.35 + i * 1.7;
+        LL.add(l.x, l.y, l.r, [0.62 + 0.38 * Math.sin(a), 0.62 + 0.38 * Math.sin(a + 2.1), 0.62 + 0.38 * Math.sin(a + 4.2)], k * 0.85);
+        continue;
       } else if (l.kind === 'shop') {
         if (!shopsOpen) continue;
         k *= Math.max(0, dark - 0.2) * 1.3;

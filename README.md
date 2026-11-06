@@ -22,8 +22,10 @@ npm run build
 
 ## What's in the city
 
-- **4×4 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab, with a big
-  **central park** filling the middle four blocks and twelve city blocks around it. The slab's
+- **6×6 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab: a big
+  **central park** fills the middle four blocks, twelve mixed blocks surround it, and an outer
+  ring of twenty more — mostly red-brick apartment houses, plus shopping streets and a mini
+  **Times Square**. Pick a place from the **GO TO** menu to glide there. The slab's
   cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver
   trains loop around the city and stop at a tiled station with passengers waiting on the platform.
   - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
@@ -35,8 +37,20 @@ npm run build
   - cast-iron **lofts** with a sidewalk shed, a firehouse, a movie theater marquee
   - rooftops packed with water towers (some painted like flags), billboards, bulkheads, HVAC,
     chimneys, satellite dishes, roof decks and gardens
-- A **basketball court** with chain-link fence, hoops and floodlights, a playground with swings,
-  slide and sprinkler, and a handball wall with a mural.
+  - pre-war **red-brick apartment houses**, six and seven storeys, with fire escapes, water
+    towers and canvas entrance canopies reaching to the kerb
+  - **shopping streets**: a storefront in every building (shoes, fashion, electronics, toys,
+    jewellery, bakery, records, sports…) with window displays, awnings, sandwich boards and
+    district banners on the lamp posts, and a limestone **department store** with lit display
+    windows, revolving doors and flags
+- A mini **Times Square**: a paved pedestrian square with red bleacher steps (people sit on
+  them), café tables under umbrellas, carts and floodlights, a tower covered in video screens
+  with a crystal ball on its mast (it drops at midnight on winter nights, then fireworks), and
+  sign towers either side whose facades are stacked with animated screens, lit billboards and a
+  scrolling news ticker. All the ads are made up; at night the screens wash the square in colour.
+- A **basketball court** with chain-link fence, hoops and floodlights, a playground with a swing
+  set (kids pump the swings on their chains), a slide with a ladder, deck and roof, a sprinkler,
+  and a handball wall with a mural.
 - The **park** (across the road from the court) takes over the streets between its four blocks:
   a stone wall with gate pillars, a loop drive for joggers, an elm-lined promenade leading to a
   tiered fountain on a paved terrace, a mown oval Great Lawn, a lake with an island, rocky
@@ -45,7 +59,7 @@ npm run build
   trees, lanterns and benches. Benches line its outer wall, and the bus loops round it.
 - Streets with crosswalks, working **traffic and pedestrian signals**, street lamps, hydrants,
   mailboxes, newspaper boxes, bus shelters, subway entrances with green globes, food carts, and
-  orange-and-white **steam stacks** and manholes that billow steam.
+  steel **vent grates in the sidewalks** and manholes that puff steam (most in winter).
 
 ## Life
 
@@ -88,6 +102,7 @@ geese, subway rumble, crosswalk chirps and fireworks. Click **♪** to turn soun
 | `Q` / `E` | Rotate the view 90° |
 | Click a person | Follow them (see their name and what they're thinking) |
 | `WASD` / arrows | Pan |
+| GO TO menu | Glide to the park, the lake, Times Square, the court… |
 | `Space` | Pause / resume time |
 | `T` | Time speed (1×, 3×, 10×, 30×) |
 | `1`–`4` / `0` | Pick a season / back to daily seasons |

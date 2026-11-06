@@ -1,6 +1,7 @@
 // World-space XY light map accumulation (street lamps, shop windows, headlights, fireworks...).
 
 import { createProgram } from '../core/gl.js';
+import { LIGHT_EXT } from '../world/layout.js';
 
 const VS = `#version 300 es
 precision highp float;
@@ -17,7 +18,7 @@ void main() {
   vec2 w = iA.xy + d * (c.x * iA.z) + pp * (c.y * iA.w);
   vL = c;
   vCol = iC * iB.z;
-  gl_Position = vec4(w / 128.0 * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4(w / ${LIGHT_EXT.toFixed(1)} * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const FS = `#version 300 es

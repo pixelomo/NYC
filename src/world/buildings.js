@@ -554,15 +554,10 @@ export function walkup(C, fr, a0, W, D, o = {}) {
   const sideW = Math.round(D * T);
   const sideFacade = o.cornerSide ? region(C, sideW, th, (p) => paintFacade(p, sideW, false, true)) : null;
   const plainSide = { brickRed: S.brickRed, brickBrown: S.brickBrown, brickOrange: S.brickOrange, brickTan: S.brickTan, brickPurple: S.brickPurple }[brickName];
-  const back = region(C, tw, th, (p) => {
-    brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
-    for (let f = 0; f < nF + 1; f++) {
-      const fy = Math.round((band + f * fH) * T);
-      for (let b = 0; b < nb; b++) {
-        const cx = Math.round(bayW * b + bayW / 2);
-        drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 0xf2efe6, sill: 0x9a9a98, t: rng.next() }, rng);
-      }
-    }
+  // rear walls (courtyard side) share one tiled texture per brick colour: two bays, one floor
+  const back = C.atlas.shared(`wback_${brickName}`, 72, 48, (p) => {
+    brickFill(p, 0, 0, 72, 48, wallPal, 7);
+    for (let b = 0; b < 2; b++) drawWindow(p, b * 36 + 10, 12, 16, 24, { frame: 0xf2efe6, sill: 0x9a9a98, t: 0.3 + b * 0.4 }, rng);
   });
   const top = rng.pick([S.roofTar, S.roofSilver, S.roofGravel]);
   const sides = {
@@ -606,7 +601,7 @@ export function walkup(C, fr, a0, W, D, o = {}) {
       p.hline(0, 0, valW, shade(awnC, 1.2));
       if (shopInfo.name && textWidth(shopInfo.name, 1, true) < valW - 8) p.text7(Math.floor((valW - textWidth(shopInfo.name, 1, true)) / 2), 0, shopInfo.name, striped ? 0x1b1b1b : 0xffffff);
     });
-    if (rng.chance(0.8)) {
+    if (rng.chance(o.awning ?? 0.8)) {
       const p0 = fr.pt(aA0, 0), p1 = fr.pt(aA1, 0), q0 = fr.pt(aA0, -1.0), q1 = fr.pt(aA1, -1.0);
       mb.slope([q0[0], q0[1], zA - 0.35], [q1[0], q1[1], zA - 0.35], [p0[0], p0[1], zA + 0.1], [p1[0], p1[1], zA + 0.1], awTex, { mat: MAT.SNOW | MAT.WET });
       fr.facadeQuad(mb, aA0, aA1, -1.0, zA - 0.6, zA - 0.35, valance);
@@ -645,7 +640,106 @@ export function walkup(C, fr, a0, W, D, o = {}) {
   const rdA = o.resDoorLeft ? toA(12) : toA(resDoorX + 10);
   const st = fr.pt(shop ? rdA : a0 + W / 2, -0.7), dp = fr.pt(shop ? rdA : a0 + W / 2, 0.2);
   C.world.doors.push({ x: st[0], y: st[1], sx: st[0], sy: st[1], dx: dp[0], dy: dp[1], dz: z0, kind: 'home', n: fr.n });
+  // apartment-house entrance canopy reaching out over the sidewalk
+  if (o.canopy) entranceCanopy(C, fr, shop ? rdA : a0 + W / 2, z0, o.number, o.canopyColor ?? rng.pick([0x1f4a2f, 0x5a1f2a, 0x1f2f4a, 0x2b2b30, 0x6a1f1f]));
   return { H: zTop };
+}
+
+// Canvas canopy on brass poles from a front door to near the kerb, the house number on its valance
+export function entranceCanopy(C, fr, a, z0, number, col) {
+  const { mb } = C;
+  const cw = 1.05, cd = 1.2, cz = z0 + 2.05;
+  const top = C.atlas.shared(`canopy_${col}`, 32, 32, (p) => { smoothFill(p, 0, 0, 32, 32, col, 7, 0.05); for (let x = 0; x < 32; x += 8) p.vline(x, 0, 32, shade(col, 0.82)); });
+  const label = number != null ? String(number) : '';
+  const val = C.atlas.shared(`canopy_v_${col}_${label}`, 34, 8, (p) => {
+    p.rect(0, 0, 34, 8, col); p.hline(0, 0, 34, shade(col, 1.3)); p.hline(0, 7, 34, shade(col, 0.55));
+    if (label) p.text7(Math.floor((34 - textWidth(label, 1, true)) / 2), 0, label, 0xf2e2b0, winCode(0.0, true));
+  });
+  const side = C.atlas.shared(`canopy_s_${col}`, 32, 8, (p) => { p.rect(0, 0, 32, 8, col); p.hline(0, 0, 32, shade(col, 1.3)); p.hline(0, 7, 32, shade(col, 0.55)); });
+  fr.box(mb, a - cw / 2, a + cw / 2, -cd, 0, cz, cz + 0.25, { front: val, left: side, right: side, top: { t: top } });
+  const brass = C.atlas.shared('brass', 8, 8, (p) => smoothFill(p, 0, 0, 8, 8, 0xc8a050, 3, 0.06));
+  for (const pa of [a - cw / 2 + 0.05, a + cw / 2 - 0.05]) fr.box(mb, pa - 0.03, pa + 0.03, -cd + 0.03, -cd + 0.09, z0, cz, { front: brass, left: brass, right: brass, back: brass, top: brass });
+  const p = fr.pt(a, -cd + 0.06);
+  C.world.canopies.push({ x: p[0], y: p[1] });
+  C.world.lamps.push({ x: p[0] - fr.nx * 0.3, y: p[1] - fr.ny * 0.3, z: cz - 0.2, r: 1.6, color: [1.0, 0.86, 0.6], k: 0.45, kind: 'shop' });
+}
+
+// Department store: limestone palazzo filling a block side, big lit display windows, a name band,
+// revolving doors and flags
+export function deptStore(C, fr, a0, W, D, o = {}) {
+  const { mb, rng } = C;
+  const S = sharedTex(C);
+  const nF = o.floors ?? 6;
+  const gH = 2.5, fH = 1.6, band = 1.0;
+  const H = gH + nF * fH + band;
+  const z0 = fr.z0;
+  const tw = Math.round(W * T), th = Math.round(H * T);
+  const name = o.name ?? rng.pick(['BEAUMONT & CO', 'HALLORAN BROS', 'GRAND EMPORIUM', 'MERRIWEATHER']);
+  const nb = Math.round(tw / 40);
+  const bw = tw / nb;
+  const paint = (p, wide, front) => {
+    stoneFill(p, 0, 0, wide, th, PAL.limestone, 31, 16, { blocks: 32 });
+    // cornice + attic band
+    p.rect(0, 0, wide, 10, 0xd8ccb0); p.hline(0, 10, wide, 0x9a8e74); for (let x = 2; x < wide; x += 6) p.rect(x, 3, 3, 4, 0xece2c8);
+    const n = Math.max(2, Math.round(wide / 40)), bww = wide / n;
+    for (let f = 0; f < nF; f++) {
+      const fy = Math.round((band + f * fH) * T);
+      for (let b = 0; b < n; b++) {
+        const cx = Math.round(bww * b + bww / 2);
+        drawWindow(p, cx - 10, fy + 10, 20, 34, { frame: 0x2b2b30, lintel: 0xece2c8, sill: 0xece2c8, t: rng.next() * 0.6, panes: '2/2', keystone: f === nF - 1 }, rng);
+      }
+      if (f === nF - 1) { p.rect(0, fy + 50, wide, 3, 0xece2c8); p.hline(0, fy + 52, wide, 0x9a8e74); }
+    }
+    const gy = Math.round((band + nF * fH) * T), gh = th - gy;
+    // name band
+    p.rect(0, gy, wide, 16, 0x1f3a2f); p.hline(0, gy, wide, 0xc8a050); p.hline(0, gy + 15, wide, 0xc8a050);
+    if (front || wide > 160) signBoard(p, Math.floor(wide * 0.15), gy + 2, Math.floor(wide * 0.7), 12, name, { bg: 0x1f3a2f, fg: 0xe8c860, t: 0.0, shadow: false });
+    // display windows between pilasters, lit
+    const dn = Math.max(2, Math.round(wide / 48)), dww = wide / dn;
+    const lit = winCode(0.0, true);
+    for (let b = 0; b < dn; b++) {
+      const x0 = Math.round(b * dww) + 4, x1 = Math.round((b + 1) * dww) - 4;
+      p.rect(x0 - 4, gy + 16, 4, gh - 16, 0xd8ccb0);
+      const door = front && (b === 1 || b === dn - 2) && dn >= 4;
+      if (door) {
+        // revolving door under a brass surround
+        p.rect(x0, gy + 20, x1 - x0, gh - 20, 0xc8a050);
+        p.rect(x0 + 3, gy + 24, x1 - x0 - 6, gh - 24, 0x40576d, winCode(0.02));
+        for (let k = 0; k < 3; k++) p.vline(x0 + 6 + k * Math.floor((x1 - x0 - 12) / 2), gy + 24, gh - 24, 0xc8a050);
+        continue;
+      }
+      for (let yy = gy + 20; yy < th - 6; yy++) for (let xx = x0; xx < x1; xx++) p.set(xx, yy, shade(0xf2e6c8, 1.02 - (yy - gy - 20) * 0.006), lit);
+      // a mannequin or two and a display plinth
+      for (let m = x0 + 6; m + 6 < x1; m += 14) {
+        const c = [0xd8302c, 0x2a5fb8, 0x1e1e22, 0xe8c24a, 0x2f8a46][(m + b * 3) % 5];
+        p.rect(m + 2, th - 30, 2, 2, 0xe8e0d4, lit);
+        p.rect(m, th - 28, 6, 12, c, lit);
+        p.rect(m + 1, th - 16, 1, 8, 0x2a2a30, lit); p.rect(m + 4, th - 16, 1, 8, 0x2a2a30, lit);
+      }
+      p.rect(x0, th - 6, x1 - x0, 6, 0x8a7a5a);
+    }
+  };
+  const front = region(C, tw, th, (p) => paint(p, tw, true));
+  const sideW = Math.round(D * T);
+  const sideT = region(C, sideW, th, (p) => paint(p, sideW, false));
+  const aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: S.limestone, left: sideT, right: sideT, top: { t: S.roofGravel, world: true } }));
+  markHeight(C.world, ...aabb, z0 + H);
+  // cornice slab
+  fr.box(mb, a0 - 0.15, a0 + W + 0.15, -0.3, D + 0.15, z0 + H - 0.3, z0 + H, { front: S.limestone, left: S.limestone, right: S.limestone, back: S.limestone, top: { t: S.limeTop, world: true } });
+  // flags over the doors
+  for (const f of [0.28, 0.72]) C.addFlag(fr, a0 + W * f, -0.05, z0 + gH + fH * 1.2, 'hotel');
+  // display windows light the sidewalk
+  for (let k = 0; k < 4; k++) {
+    const lp = fr.pt(a0 + W * (k + 0.5) / 4, -0.9);
+    C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 2.6, color: [1.0, 0.9, 0.7], k: 0.55, kind: 'shop' });
+  }
+  // two entrances
+  for (const f of [1.5 / 4, 2.5 / 4]) {
+    const st = fr.pt(a0 + W * f, -0.8), dp = fr.pt(a0 + W * f, 0.4);
+    C.world.shops.push({ kind: 'dept', name, x: st[0], y: st[1], dx: dp[0], dy: dp[1], n: fr.n });
+  }
+  roofClutter(C, fr, { a0, a1: a0 + W, d0: 0, d1: D, z: z0 + H }, { waterTower: false });
+  return { H };
 }
 
 function ptObj(p) {

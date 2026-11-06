@@ -1,3 +1,4 @@
+import { LIGHT_EXT } from '../world/layout.js';
 // GLSL sources.
 
 const HEAD = `#version 300 es
@@ -64,7 +65,7 @@ float cloudAt(vec3 wp) {
 }
 vec3 lampAt(vec3 wp) {
   if (wp.z < -0.5) return vec3(0.0);
-  vec3 l = texture(uLightMap, wp.xy / 128.0).rgb;
+  vec3 l = texture(uLightMap, wp.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
   float hf = clamp(1.0 - (wp.z - 0.3) / 8.0, 0.0, 1.0);
   return l * (hf * hf);
 }
@@ -137,7 +138,18 @@ void main() {
   vec4 tex;
   if (ground) tex = texelFetch(uGround, ivec2(floor(vUV * uGroundScale)), 0);
   else {
-    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+    vec2 rs = vec2(vRect.zw), uvi = floor(vUV), off = vec2(0.0);
+    if ((mat & 32u) != 0u) {
+      // animated screen: K frames stacked down the region, cycled; or (bit 3) a scrolling ticker
+      uint sd = vInfo.w;
+      if ((sd & 8u) != 0u) uvi.x += floor(uTime * 18.0);
+      else {
+        float K = float((sd & 7u) + 1u);
+        rs.y = floor(rs.y / K);
+        off.y = rs.y * mod(floor(uTime * 0.22 + float(sd >> 4u) * 0.618), K);
+      }
+    }
+    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(uvi, rs) + off);
     tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
   }
   if (tex.a < 0.5 / 255.0) discard;
@@ -294,11 +306,14 @@ void main() {
   }
 
   col += emis;
+  // video screens shine day and night
+  bool screen = !ground && (mat & 32u) != 0u;
+  if (screen) { selfLit = 1.0; col = albedo * light * 0.2; }
   // self-coloured lights (neon, signs, curtains, billboards): show their own colour at full brightness
   vec3 sglow = vec3(0.0);
   if (selfLit > 0.0) {
     col = mix(col, albedo * 1.08, clamp(selfLit, 0.0, 1.0) * 0.92);
-    sglow = albedo * selfLit * 0.1;
+    sglow = albedo * selfLit * (screen ? 0.08 + 0.3 * uEmis : 0.1);
   }
   oColor = vec4(col, 1.0);
   oGlow = vec4(emis * 0.38 + sglow + lamp * puddle * 0.25, 1.0);

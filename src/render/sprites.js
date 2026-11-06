@@ -1145,6 +1145,23 @@ export function buildPropSprites(atlas) {
     for (let x = 0; x < 7; x++) sp.set(x, 1, S.C1, x === 0 || x === 6 ? 110 : x >= 2 && x <= 4 ? 160 : 140);
   }, 3, 0);
   A.add('dot', 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0);
+  // faceted crystal ball for the Times Square tower mast
+  A.add('tsqBall', 14, 14, (sp) => {
+    for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
+      const dx = x - 6.5, dy = y - 6.5, d = Math.hypot(dx, dy);
+      if (d > 6.6) continue;
+      const facet = ((x + y) % 4 === 0) || ((x - y + 28) % 4 === 0);
+      const lit = 150 - Math.round((dx + dy) * 3) - (facet ? 22 : 0);
+      sp.set(x, y, S.C1, Math.max(90, Math.min(170, lit)));
+    }
+    sp.set(4, 3, S.C2, 170); sp.set(5, 3, S.C2, 160); sp.set(4, 4, S.C2, 160);
+  }, 7, 13);
+  // rubber strap swing seat, seen from the playground's usual angle
+  A.add('swingSeat', 12, 4, (sp) => {
+    for (let x = 1; x < 11; x++) { sp.set(x, 0, S.C2, 150); sp.set(x, 1, S.C2, 128); sp.set(x, 2, S.C2, 112); }
+    for (let x = 2; x < 10; x++) sp.set(x, 3, S.C2, 96);
+    sp.set(0, 0, S.C1, 140); sp.set(11, 0, S.C1, 140); sp.set(0, 1, S.C1, 120); sp.set(11, 1, S.C1, 120);
+  }, 6, 1);
   A.add('dot2', 2, 2, (sp) => { sp.set(0, 0, S.C1, 140); sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 110); }, 1, 1);
   A.add('flake', 3, 3, (sp) => { sp.set(1, 0, S.C1, 128); sp.set(0, 1, S.C1, 128); sp.set(1, 1, S.C1, 150); sp.set(2, 1, S.C1, 128); sp.set(1, 2, S.C1, 128); }, 1, 1);
   A.add('cartUmbrella', 40, 24, (sp) => {

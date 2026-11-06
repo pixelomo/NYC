@@ -23,7 +23,7 @@ export class Renderer {
     this._makeStaticShadow();
     this.floatOK = !!gl.getExtension('EXT_color_buffer_float');
     gl.getExtension('OES_texture_float_linear');
-    this.lightSize = 512;
+    this.lightSize = 1024;
     this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK
       ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR }
       : { filter: gl.LINEAR });
@@ -157,25 +157,38 @@ export class Renderer {
     this.fD = makeFBO(gl, [this.bD], null);
   }
 
-  shadowMatrix(sunDir) {
+  // Light-space ortho matrix. Depth spans the whole map (an occluder anywhere along the light can
+  // shade what is on screen) but x/y only cover what the camera can see, so the shadow map's
+  // texels go where they are looked at. The extent is quantised and the centre snapped to whole
+  // texels, so panning never makes shadow edges crawl.
+  shadowMatrix(sunDir, view = null) {
     const f = normalize3([-sunDir[0], -sunDir[1], -sunDir[2]]);
     let up = [0, 0, 1];
     if (Math.abs(f[2]) > 0.98) up = [0, 1, 0];
     const r = normalize3(cross3(f, up));
     const u = cross3(r, f);
-    let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+    const grow = (p, a, b, n) => { for (let i = 0; i < n; i++) { const v = i === 0 ? dot3(p, r) : i === 1 ? dot3(p, u) : dot3(p, f); a[i] = Math.min(a[i], v); b[i] = Math.max(b[i], v); } };
     for (const x of [-3, MAP + 3])
       for (const y of [-3, MAP + 3])
-        for (const z of [-BASE_DEPTH, 75]) {
-          const p = [x, y, z];
-          const a = [dot3(p, r), dot3(p, u), dot3(p, f)];
-          for (let i = 0; i < 3; i++) {
-            mn[i] = Math.min(mn[i], a[i]);
-            mx[i] = Math.max(mx[i], a[i]);
-          }
-        }
+        for (const z of [-BASE_DEPTH, 75]) grow([x, y, z], mn, mx, 3);
+    if (view) {
+      const cam = view.camera, t = cam.project(cam.x, cam.y, 0);
+      const vmn = [1e9, 1e9], vmx = [-1e9, -1e9];
+      const mx2 = view.w / 2 + 24, my2 = view.h / 2 + 24;
+      for (const sx of [t[0] - mx2, t[0] + mx2])
+        for (const sy of [t[1] - my2, t[1] + my2])
+          for (const z of [-BASE_DEPTH, 75]) { const [x, y] = cam.artToWorld(sx, sy, z); grow([x, y, z], vmn, vmx, 2); }
+      for (let i = 0; i < 2; i++) {
+        const a = Math.max(mn[i], vmn[i] - 2), b = Math.min(mx[i], vmx[i] + 2);
+        if (b > a + 1) { mn[i] = a; mx[i] = b; }
+      }
+    }
+    const ss = Math.min(this.shadowSize, this.shadowSizeS || this.shadowSize);
+    const q = (v) => Math.pow(2, Math.ceil(Math.log2(Math.max(v, 8)) * 4) / 4);
+    const h = [q((mx[0] - mn[0]) / 2), q((mx[1] - mn[1]) / 2), (mx[2] - mn[2]) / 2 + 1];
     const c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
-    const h = [(mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2 + 1];
+    for (let i = 0; i < 2; i++) { const ts = (2 * h[i]) / ss; c[i] = Math.round(c[i] / ts) * ts; }
     const m = new Float32Array(16);
     m[0] = r[0] / h[0]; m[4] = r[1] / h[0]; m[8] = r[2] / h[0]; m[12] = -c[0] / h[0];
     m[1] = u[0] / h[1]; m[5] = u[1] / h[1]; m[9] = u[2] / h[1]; m[13] = -c[1] / h[1];
@@ -232,7 +245,7 @@ export class Renderer {
     this._ensureTargets(bw, bh);
     const { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k);
     const shadowOn = env.sunDir[2] > 0.02;
-    const shadowMat = this.shadowMatrix(env.sunDir);
+    const shadowMat = this.shadowMatrix(env.sunDir, { camera, w: bw / k, h: bh / k });
     // offset that turns buffer pixels into absolute art pixels (mod 4), so shadow dithering stays put while panning
     const ditherOff = [(((tsx - bw / 2) % 4) + 4) % 4, (((tsy + bh / 2) % 4) + 4) % 4];
     // world xy per art pixel along the screen's horizontal axis (sprite billboards lie in this plane)

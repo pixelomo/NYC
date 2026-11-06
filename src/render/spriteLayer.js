@@ -1,7 +1,7 @@
 // Instanced billboard sprites (palette-indexed), with shadow-casting and lamp lighting.
 
 import { createProgram } from '../core/gl.js';
-import { T } from '../world/layout.js';
+import { T, LIGHT_EXT } from '../world/layout.js';
 
 const TX = T.toFixed(1);
 
@@ -114,7 +114,7 @@ void main() {
   }
   float cn = texture(uNoise, vWorldR.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorldR.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
   float hf = clamp(1.0 - (vWorld.z - 0.3) / 8.0, 0.0, 1.0);
   vec3 light = uAmb * 0.92 + uSunCol * 0.8 * s * cl * smoothstep(0.0, 0.15, uSunDir.z + 0.05) + lm * hf * hf * 1.1 + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.2, 0.19, 0.16);
@@ -162,7 +162,7 @@ export class SpriteLayer {
     this.pal = pal;
     this.prog = createProgram(gl, VS, FS, 'sprites');
     this.shadowProg = createProgram(gl, SHADOW_VS, SHADOW_FS, 'spriteShadow');
-    this.cap = 8192;
+    this.cap = 16384;
     this.data = new Float32Array(this.cap * STRIDE);
     this.count = 0;
     this.vao = gl.createVertexArray();

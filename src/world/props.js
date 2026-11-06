@@ -133,15 +133,6 @@ export function propTex(C) {
     }
   });
   P.rim = solid('rim', 0xe8601a, 0.02);
-  P.stack = A.shared('steam_stack', 32, 32, (p) => {
-    for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(Math.floor(y / 8) % 2 ? 0xf2f2ee : 0xf07a1a, 0.94 + hash2i(x, y, 3) * 0.08));
-  });
-  P.stackTop = A.shared('steam_stack_t', 16, 16, (p) => { p.rect(0, 0, 16, 16, 0x3a3a3a); p.ellipse(8, 8, 5, 5, 0x1a1a1a); });
-  P.barrel = A.shared('barrel', 16, 20, (p) => {
-    for (let y = 0; y < 20; y++) p.rect(0, y, 16, 1, y % 8 < 4 ? 0xf07a1a : 0xf2f2ee);
-    p.hline(0, 0, 16, 0x2a2a2a);
-    for (let x = 0; x < 16; x += 4) p.set(x, 2, 0xffd0a0);
-  });
   P.cone = A.shared('cone', 16, 14, (p) => {
     for (let y = 0; y < 14; y++) p.rect(0, y, 16, 1, y >= 5 && y <= 7 ? 0xf2f2ee : 0xf07a1a);
     p.rect(0, 12, 16, 2, 0x2a2a2a);
@@ -340,14 +331,13 @@ export function bench(C, x, y, axis, o = {}) {
   C.world.benches.push({ x, y, axis, seats, used: [false, false, false] });
 }
 
-export function steamStack(C, x, y) {
-  const P = propTex(C);
-  C.mb.cylinder(x, y, 0, 2.6, 0.32, 8, P.stack, P.stackTop);
-  for (const [dx, dy] of [[-0.7, -0.6], [0.7, 0.6], [0.65, -0.7], [-0.6, 0.7]]) {
-    C.mb.cylinder(x + dx, y + dy, 0, 0.62, 0.18, 6, P.barrel, P.orange);
-  }
-  C.world.steam.push({ x, y, z: 2.65, kind: 'stack', rate: 1.0 });
-  markHeight(C.world, x - 0.4, y - 0.4, x + 0.4, y + 0.4, 2.6);
+// Sidewalk ventilation grate (subway / steam vent) set into the pavement, puffing steam.
+// axis: the grate's long direction ('x' or 'y').
+export function steamGrate(C, x, y, axis, len = 1.8, wid = 0.72) {
+  const hx = axis === 'x' ? len / 2 : wid / 2, hy = axis === 'x' ? wid / 2 : len / 2;
+  C.paintGround(x - hx, y - hy, x + hx, y + hy, axis === 'x' ? 'grateX' : 'grateY');
+  C.world.steam.push({ x, y, z: CURB + 0.02, kind: 'grate', rate: 0.75, ax: hx - 0.15, ay: hy - 0.15 });
+  C.world.grates.push({ x, y, axis, len, wid });
 }
 
 export function cone(C, x, y) {
@@ -496,26 +486,67 @@ export function handballWall(C, x0, y0, x1, y1, h) {
 }
 
 // Playground: swings + slide + climber
+// Square-section beam between two points (slanted legs, struts)
+export function beam(C, a, b, w, tex) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const L = Math.hypot(dx, dy, dz) || 1;
+  const d = [dx / L, dy / L, dz / L];
+  // two unit vectors across the beam
+  let u = Math.abs(d[2]) < 0.9 ? [d[1], -d[0], 0] : [1, 0, 0];
+  const ul = Math.hypot(u[0], u[1], u[2]); u = u.map((v) => v / ul);
+  const v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+  const h = w / 2;
+  const P = (o, su, sv) => [o[0] + (u[0] * su + v[0] * sv) * h, o[1] + (u[1] * su + v[1] * sv) * h, o[2] + (u[2] * su + v[2] * sv) * h];
+  const corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
+  const len = L * T, wt = w * T;
+  for (let k = 0; k < 4; k++) {
+    const [su0, sv0] = corners[k], [su1, sv1] = corners[(k + 1) % 4];
+    const n = [(u[0] * (su0 + su1) + v[0] * (sv0 + sv1)) / 2, (u[1] * (su0 + su1) + v[1] * (sv0 + sv1)) / 2, (u[2] * (su0 + su1) + v[2] * (sv0 + sv1)) / 2];
+    C.mb.quad(P(b, su0, sv0), P(b, su1, sv1), P(a, su1, sv1), P(a, su0, sv0), [[0, 0], [wt, 0], [wt, len], [0, len]], tex, n, 0);
+  }
+}
+
 export function playground(C, x0, y0, x1, y1) {
   const P = propTex(C);
   const z = CURB;
   C.paintGround(x0, y0, x1, y1, 'rubber');
-  // swing set
-  const sx = x0 + 1.2, sy = y0 + 0.8;
+  // swing set: A-frame legs at both ends, top bar along x; seats and chains are drawn live
+  // (they swing), see Activities.emit
+  const sx = x0 + 1.2, sy = y0 + 0.8, top = z + 1.95;
   for (const dx of [0, 2.4]) {
-    solidBox(C, sx + dx - 0.05, sy - 0.05, z, sx + dx + 0.05, sy + 0.05, z + 1.9, P.red);
-    solidBox(C, sx + dx - 0.05, sy + 1.15, z, sx + dx + 0.05, sy + 1.25, z + 1.9, P.red);
+    // splayed legs meeting under the bar
+    for (const ly of [sy - 0.05, sy + 1.25]) beam(C, [sx + dx, ly, z], [sx + dx, sy + 0.6, top - 0.05], 0.09, P.red);
   }
-  solidBox(C, sx - 0.05, sy + 0.55, z + 1.85, sx + 2.45, sy + 0.65, z + 1.95, P.red);
+  solidBox(C, sx - 0.12, sy + 0.55, top - 0.1, sx + 2.52, sy + 0.65, top, P.red);
   for (const dx of [0.7, 1.7]) {
-    C.world.swings.push({ x: sx + dx, y: sy + 0.6, z: z + 0.45, top: z + 1.85 });
+    C.world.swings.push({ x: sx + dx, y: sy + 0.6, z: z + 0.42, top: top - 0.06, amp: 0, ph: dx * 2.1 });
   }
-  // slide: ladder tower + sloped chute
-  const tx = x1 - 1.6, ty = y0 + 0.8;
-  solidBox(C, tx, ty, z, tx + 0.8, ty + 0.8, z + 1.2, P.yellow, P.blue);
-  const chute = C.atlas.shared('chute', 24, 32, (p) => { p.rect(0, 0, 24, 32, 0xe8c030); p.rect(0, 0, 3, 32, 0xc89a20); p.rect(21, 0, 3, 32, 0xc89a20); p.vline(3, 0, 32, 0xf8e070); });
-  C.mb.slope([tx + 0.05, ty + 2.6, z + 0.1], [tx + 0.75, ty + 2.6, z + 0.1], [tx + 0.05, ty + 0.8, z + 1.2], [tx + 0.75, ty + 0.8, z + 1.2], chute, { mat: MAT.SNOW });
-  C.world.slides.push({ x: tx + 0.4, y: ty + 0.4, z: z + 1.2, ex: tx + 0.4, ey: ty + 2.5 });
+  // slide: corner posts, a decked platform with side rails and a roof, a ladder at the back,
+  // and a chute with raised sides that levels out into a run-out at the bottom
+  const tx = x1 - 1.6, ty = y0 + 0.8, pz = z + 1.15;
+  const rz = pz + 1.15; // roof eaves: room for a kid standing on the deck
+  for (const [px, py] of [[tx, ty], [tx + 0.8, ty], [tx, ty + 0.8], [tx + 0.8, ty + 0.8]]) solidBox(C, px - 0.05, py - 0.05, z, px + 0.05, py + 0.05, rz, P.blue);
+  solidBox(C, tx - 0.02, ty - 0.02, pz - 0.08, tx + 0.82, ty + 0.82, pz, P.yellow, P.wood);
+  for (const px of [tx, tx + 0.8]) solidBox(C, px - 0.03, ty, pz, px + 0.03, ty + 0.8, pz + 0.42, P.yellow, P.yellow);
+  C.mb.pyramid(tx - 0.12, ty - 0.12, tx + 0.92, ty + 0.92, rz, rz + 0.42, P.red);
+  solidBox(C, tx - 0.12, ty - 0.12, rz - 0.06, tx + 0.92, ty + 0.92, rz + 0.01, P.red);
+  // ladder up the back
+  for (const lx of [tx + 0.18, tx + 0.62]) solidBox(C, lx - 0.03, ty - 0.08, z, lx + 0.03, ty - 0.02, pz + 0.35, P.silver);
+  for (let k = 1; k <= 4; k++) solidBox(C, tx + 0.18, ty - 0.08, z + k * 0.24 - 0.02, tx + 0.62, ty - 0.03, z + k * 0.24 + 0.02, P.silver);
+  // chute
+  const chute = C.atlas.shared('chute', 24, 32, (p) => { p.rect(0, 0, 24, 32, 0xe8c030); p.rect(0, 0, 2, 32, 0xc89a20); p.rect(22, 0, 2, 32, 0xc89a20); p.vline(2, 0, 32, 0xf8e070); for (let y = 0; y < 32; y += 8) p.hline(3, y, 18, 0xf0cc48); });
+  const cx0 = tx + 0.08, cx1 = tx + 0.72, c0 = ty + 0.8, c1 = ty + 2.5, zt = pz, zb = z + 0.24;
+  C.mb.slope([cx0, c1, zb], [cx1, c1, zb], [cx0, c0, zt], [cx1, c0, zt], chute, { mat: MAT.SNOW });
+  const wallH = 0.16;
+  for (const wx of [cx0, cx1]) {
+    // raised side walls following the slope
+    const len = Math.hypot(c1 - c0, zt - zb) * T;
+    C.mb.quad([wx, c0, zt + wallH], [wx, c1, zb + wallH], [wx, c1, zb], [wx, c0, zt], [[0, 0], [len, 0], [len, 6], [0, 6]], P.yellow, [wx === cx0 ? -1 : 1, 0, 0], 0);
+    solidBox(C, wx - 0.02, c1, zb - 0.06, wx + 0.02, c1 + 0.45, zb + wallH, P.yellow);
+  }
+  solidBox(C, cx0, c1, zb - 0.06, cx1, c1 + 0.45, zb, P.yellow, chute);
+  for (const lx of [cx0 + 0.04, cx1 - 0.04]) solidBox(C, lx - 0.03, c1 - 0.03, z, lx + 0.03, c1 + 0.03, zb - 0.06, P.blue);
+  C.world.slides.push({ x: tx + 0.4, y: ty + 0.45, z: pz, ex: tx + 0.4, ey: c1 + 0.35, ez: zb, cy: c0, cz: zt, by: c1, lx: tx + 0.4, ly: ty - 0.32 });
   // climber dome (frame of bars)
   const cx = (x0 + x1) / 2, cy = y1 - 1.3;
   for (let k = -2; k <= 2; k++) {

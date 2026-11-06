@@ -1,6 +1,6 @@
 // Traffic: lanes, signals, cars (IDM following), parking, buses, taxis and special vehicles.
 
-import { NB, MAP, roadCenter, LANE_OFF, PARK_OFF, roadLegOpen } from '../world/layout.js';
+import { NB, MAP, roadCenter, LANE_OFF, PARK_OFF, roadLegOpen, parkLoop } from '../world/layout.js';
 import { RNG, clamp, dist2 } from '../core/math.js';
 
 export const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]]; // E S W N
@@ -123,7 +123,6 @@ export class Traffic {
     const blockers = [];
     for (const h of W.hydrants) blockers.push([h.x, h.y, 1.3]);
     for (const b of W.busStops) blockers.push([b.x, b.y, 3.2]);
-    for (const s of W.stacksBlock || []) blockers.push([s.x, s.y, 2.2]);
     for (const c of W.carts) blockers.push([c.x, c.y, 1.5]);
     if (W.firehouse) blockers.push([W.firehouse.x, W.firehouse.y, 3]);
     for (const L of this.links.values()) {
@@ -240,7 +239,7 @@ export class Traffic {
   }
   targetCount(env) {
     const h = env.hour;
-    let base = h < 5 ? 14 : h < 7 ? 30 : h < 10 ? 60 : h < 16 ? 46 : h < 19.5 ? 62 : h < 23 ? 40 : 22;
+    let base = h < 5 ? 25 : h < 7 ? 52 : h < 10 ? 105 : h < 16 ? 80 : h < 19.5 ? 108 : h < 23 ? 70 : 38;
     if (env.snowing) base *= 0.7;
     return Math.round(base);
   }
@@ -276,11 +275,13 @@ export class Traffic {
     return null;
   }
   spawnBus(k) {
-    // clockwise loop around the park: east on j=1 (i 1->3), south on i=3 (j 1->3), west on j=3 (i 3->1), north on i=1 (j 3->1)
+    // clockwise loop round the park: east along its north side, south along its east side,
+    // west along its south side and north along its west side
+    const { i0, i1, j0, j1 } = parkLoop();
     const route = [
-      (L) => (L.d === 0 ? (L.ti === 3 && L.tj === 1 ? 1 : 0) : L.d === 1 ? (L.ti === 3 && L.tj === 3 ? 2 : 1) : L.d === 2 ? (L.ti === 1 && L.tj === 3 ? 3 : 2) : (L.ti === 1 && L.tj === 1 ? 0 : 3)),
+      (L) => (L.d === 0 ? (L.ti === i1 && L.tj === j0 ? 1 : 0) : L.d === 1 ? (L.ti === i1 && L.tj === j1 ? 2 : 1) : L.d === 2 ? (L.ti === i0 && L.tj === j1 ? 3 : 2) : (L.ti === i0 && L.tj === j0 ? 0 : 3)),
     ];
-    const L = k === 0 ? this.links.get('1,1,0') : this.links.get('3,3,2');
+    const L = k === 0 ? this.links.get(`${i0},${j0},0`) : this.links.get(`${i1},${j1},2`);
     if (!L) return;
     const car = this.makeCar('bus', L, 2, { route, color: 0 });
     car.v = 2;
@@ -426,8 +427,9 @@ export class Traffic {
     if (env.season === 1 && h > 12 && h < 20 && sp.iceTimer <= 0 && !this.cars.some((c) => c.special === 'icecream')) {
       sp.iceTimer = this.rng.range(80, 160);
       // parks by the south side of the park
-      const L = this.links.get('3,3,2') || this.rng.pick([...this.links.values()]);
-      this.spawnSpecial('icecream', { special: 'icecream', link: L, life: 150, stopAt: { link: '3,3,2', s: 8 } });
+      const { i1, j1 } = parkLoop(), id = `${i1},${j1},2`;
+      const L = this.links.get(id) || this.rng.pick([...this.links.values()]);
+      this.spawnSpecial('icecream', { special: 'icecream', link: L, life: 150, stopAt: { link: id, s: 8 } });
     }
     sp.garbageTimer -= dt;
     if (h > 5 && h < 8.5 && sp.garbageTimer <= 0 && !this.cars.some((c) => c.special === 'garbage')) {

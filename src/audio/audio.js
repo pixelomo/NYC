@@ -2,7 +2,7 @@
 // attenuated by their on-screen position and the zoom level.
 
 import { clamp, RNG } from '../core/math.js';
-import { isParkIntersection } from '../world/layout.js';
+import { isParkIntersection, NB } from '../world/layout.js';
 
 export class AudioEngine {
   constructor(app) {
@@ -377,7 +377,7 @@ export class AudioEngine {
     const W = city.world;
     if (env.season !== 3 && env.hour >= 7 && env.hour < 23) for (const f of W.fountains) { const w = this.where(f); if (w.g > water) { water = w.g; wpan = w.pan; } }
     if (city.activities?.hydrantOpen) { const w = this.where(city.activities.hydrantOpen.h); if (w.g * 1.4 > water) { water = w.g * 1.4; wpan = w.pan; } }
-    for (const s of W.steam) if (s.kind === 'stack' || s.kind === 'manhole') { const w = this.where(s); if (w.g > steam) { steam = w.g; span = w.pan; } }
+    for (const s of W.steam) if (s.kind === 'grate' || s.kind === 'manhole') { const w = this.where(s); if (w.g > steam) { steam = w.g; span = w.pan; } }
     set(L.water, water * 0.18, 0.3); L.water.pan.pan.setTargetAtTime(wpan, t, 0.3);
     set(L.steam, steam * 0.045 * (env.season === 3 ? 1.5 : 1), 0.3); L.steam.pan.pan.setTargetAtTime(span, t, 0.3);
     void view;
@@ -444,7 +444,7 @@ export class AudioEngine {
     if (this.chirpT <= 0) {
       this.chirpT = 0.5;
       const cx = app.camera.x, cy = app.camera.y;
-      const i = clamp(Math.round((cx - 4.5) / 27), 0, 4), j = clamp(Math.round((cy - 4.5) / 27), 0, 4);
+      const i = clamp(Math.round((cx - 4.5) / 27), 0, NB), j = clamp(Math.round((cy - 4.5) / 27), 0, NB);
       if (isParkIntersection(i, j)) { this.lastWalk = null; return; }
       const st = city.traffic.signalState(i, j);
       const key = `${i},${j},${st.walkEW},${st.walkNS}`;

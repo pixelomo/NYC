@@ -55,22 +55,47 @@ export class NavGraph {
   // A* path from node a to node b, returns array of {node, cross}
   path(a, b) {
     if (a === b) return [{ node: a, cross: null }];
-    const open = new Map(), came = new Map(), g = new Map();
+    const g = new Map(), came = new Map(), closed = new Set();
     const h = (n) => dist(n.x, n.y, b.x, b.y);
+    // binary min-heap of [f, node]
+    const heap = [];
+    const push = (f, n) => {
+      heap.push([f, n]);
+      let i = heap.length - 1;
+      while (i > 0) { const p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; }
+    };
+    const pop = () => {
+      const top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last;
+        let i = 0;
+        for (;;) {
+          const l = i * 2 + 1, r = l + 1;
+          let m = i;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+          if (m === i) break;
+          [heap[m], heap[i]] = [heap[i], heap[m]]; i = m;
+        }
+      }
+      return top;
+    };
     g.set(a, 0);
-    open.set(a, h(a));
+    push(h(a), a);
     let iter = 0;
-    while (open.size && iter++ < 4000) {
-      let cur = null, cf = Infinity;
-      for (const [n, f] of open) if (f < cf) { cf = f; cur = n; }
+    while (heap.length && iter++ < 20000) {
+      const [, cur] = pop();
+      if (closed.has(cur)) continue;
       if (cur === b) break;
-      open.delete(cur);
+      closed.add(cur);
+      const gc = g.get(cur);
       for (const e of cur.edges) {
-        const ng = g.get(cur) + e.len + (e.cross ? 2.5 : 0);
+        if (closed.has(e.to)) continue;
+        const ng = gc + e.len + (e.cross ? 2.5 : 0);
         if (ng < (g.get(e.to) ?? Infinity)) {
           g.set(e.to, ng);
           came.set(e.to, { from: cur, cross: e.cross });
-          open.set(e.to, ng + h(e.to));
+          push(ng + h(e.to), e.to);
         }
       }
     }
@@ -220,6 +245,21 @@ export function buildNav(world) {
     // benches inside the park sit on its paths
     for (const b of world.benches) {
       if (b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1) poi.benches.push({ bench: b, node: nearestPark(b.x, b.y), park: true });
+    }
+  }
+  // other walkable squares (Times Square): their own nets, joined to the sidewalks
+  poi.squares = {};
+  for (const N of world.extraNets || []) {
+    const pn = N.nodes.map((n) => G.add(n.x, n.y, CURB, 'plaza'));
+    for (const [a, b] of N.edges) G.link(pn[a], pn[b]);
+    for (const g of N.gates) { const sw = G.attach(g.sx, g.sy, 2.5); if (sw) G.link(pn[g.node], sw); }
+    poi.squares[N.name] = pn;
+    const R = N.rect;
+    for (const b of world.benches) {
+      if (b.x > R.x0 && b.x < R.x1 && b.y > R.y0 && b.y < R.y1 && pn.length) {
+        const n = pn.reduce((best, q) => (dist(q.x, q.y, b.x, b.y) < dist(best.x, best.y, b.x, b.y) ? q : best));
+        poi.benches.push({ bench: b, node: n, park: false });
+      }
     }
   }
   // other benches (plazas, bus shelters): attach to sidewalk

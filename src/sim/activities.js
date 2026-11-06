@@ -7,6 +7,13 @@ import { S } from '../render/sprites.js';
 
 const G = 5.0; // gravity in units/s^2 (1 unit = 2 m)
 
+// where a swing's seat hangs: a pendulum from the top bar, swinging along y
+function swingSeat(s) {
+  const th = (s.amp || 0) * Math.sin(s.ph || 0);
+  const L = s.top - s.z;
+  return { x: s.x, y: s.y + Math.sin(th) * L, z: s.top - Math.cos(th) * L, th };
+}
+
 export class Activities {
   constructor(city) {
     this.city = city;
@@ -23,7 +30,8 @@ export class Activities {
     this.hydrantTimer = 5;
     this.frisbee = null;
     const A = city.atlas;
-    this.frames = { ball: A.get('ball'), snowball: A.get('snowball'), snowman: A.get('snowman'), frisbee: A.get('frisbee') };
+    this.frames = { ball: A.get('ball'), snowball: A.get('snowball'), snowman: A.get('snowman'), frisbee: A.get('frisbee'), seat: A.get('swingSeat'), dot: A.get('dot') };
+    this.swingRow = city.pal.alloc({ [S.C1]: 0x8a8d92, [S.C2]: 0x2a2a30 });
     this.row = city.pal.alloc({ [S.C1]: 0xe8701a, [S.C2]: 0xf4f8ff, [S.C3]: 0x1e1e22, [S.C4]: 0x6a4a2a, [S.C5]: 0xd8302c, [S.C6]: 0xf2c230, [S.C7]: 0xf08a1a });
     this.possession = 0;
     this.score = [0, 0];
@@ -202,6 +210,7 @@ export class Activities {
     }
     if (this.ball && this.ball.holder === p) { this.ball.holder = null; this.ball.state = 'loose'; }
     if (p.pg && p.pg.kind === 'swing') p.pg.s.used = false;
+    p.slideStage = null; p.slideRoute = null; p.onSwing = false; p.z = CURB;
     p.pg = null;
     if (p.dog) { p.dog.mode = 'follow'; }
     p.animFrame = null;
@@ -501,26 +510,62 @@ export class Activities {
       else { p.anim = p.lawnPose; p.animFrame = 0; p.forceFace = false; }
     }
     // playground
+    for (const sw of this.city.world.swings) {
+      // swings are pendulums: a kid pumps one up, an empty one dies down
+      sw.ph = (sw.ph || 0) + dt * 1.9;
+      if (!sw.used) sw.amp = (sw.amp || 0) * Math.exp(-dt * 0.7);
+    }
     for (const p of this.groups.playground) {
       const o = p.pg;
       if (!o) continue;
       if (o.kind === 'swing') {
         const s = o.s;
-        if (dist(p.x, p.y, s.x, s.y) > 0.6 && !p.onSwing) { this.moveTo(p, s.x, s.y, p.speed, dt); p.anim = 'walk'; p.forceFace = true; continue; }
+        const seat = swingSeat(s);
+        if (!p.onSwing && dist(p.x, p.y, seat.x, seat.y) > 0.25) { this.moveTo(p, s.x, s.y + 0.05, p.speed, dt); p.anim = 'walk'; p.forceFace = true; continue; }
         p.onSwing = true;
-        p.pgPhase += dt * 2.6;
-        const sw = Math.sin(p.pgPhase) * 0.55;
-        p.x = s.x; p.y = s.y + sw; p.z = s.z + (1 - Math.cos(p.pgPhase * 1)) * 0.05 + Math.abs(sw) * 0.25;
+        s.amp = Math.min(0.62, (s.amp || 0) + dt * 0.12);
+        p.x = seat.x; p.y = seat.y + 0.02; p.z = seat.z;
         p.anim = 'sit'; p.animFrame = 0; p.forceFace = false;
         this.face(p, s.x, s.y + 1);
       } else {
+        // walk to the ladder, climb it, wave from the top, slide down, run round again
         const s = o.s;
         p.pgT = (p.pgT ?? 0) + dt;
-        const cyc = p.pgT % 6;
-        if (cyc < 2.5) { this.moveTo(p, s.x, s.y + 0.6, p.speed, dt); p.z = CURB + Math.min(1, cyc / 2.5) * 0.2; p.anim = 'walk'; p.forceFace = true; }
-        else if (cyc < 3.5) { p.x = s.x; p.y = s.y; p.z = s.z; p.anim = 'wave'; p.animFrame = 0; }
-        else { const t = Math.min(1, (cyc - 3.5) / 0.9); p.x = s.x + (s.ex - s.x) * t; p.y = s.y + (s.ey - s.y) * t; p.z = s.z + (CURB + 0.05 - s.z) * t; p.anim = 'sit'; p.animFrame = 0; p.forceFace = false; this.face(p, s.ex, s.ey + 1); }
         p.onSwing = false;
+        if (p.slideStage == null) p.slideStage = 0;
+        if (p.slideStage === 0) {
+          // walk round the side of the tower to the ladder at the back
+          if (!p.slideRoute) p.slideRoute = p.y > s.ly ? [[s.x + 1.05, Math.max(p.y, s.ly)], [s.x + 1.05, s.ly], [s.lx, s.ly]] : [[s.lx, s.ly]];
+          const [gx, gy] = p.slideRoute[0];
+          const last = p.slideRoute.length === 1;
+          // one at a time on the ladder: wait a step back while someone is up there
+          const busy = last && this.groups.playground.some((q) => q !== p && q.pg && q.pg.s === s && q.slideStage >= 1 && q.slideStage <= 3);
+          if (busy && dist(p.x, p.y, gx, gy) < 1.1) { p.anim = 'idle'; p.forceFace = false; p.z = CURB; continue; }
+          if (this.moveTo(p, gx, gy, p.speed, dt)) {
+            p.slideRoute.shift();
+            if (!p.slideRoute.length) { p.slideRoute = null; p.slideStage = 1; p.pgT = 0; }
+          }
+          p.anim = 'walk'; p.forceFace = true; p.z = CURB;
+        } else if (p.slideStage === 1) {
+          const t = Math.min(1, p.pgT / 1.4);
+          p.x = s.lx; p.y = s.ly + (s.y - s.ly) * Math.max(0, t - 0.75) * 4; p.z = CURB + (s.z - CURB) * Math.min(1, t / 0.8);
+          p.anim = 'walk'; p.animFrame = Math.floor(p.pgT * 6) % 2; p.forceFace = true; p.dx = 0; p.dy = 1;
+          if (t >= 1) { p.slideStage = 2; p.pgT = 0; }
+        } else if (p.slideStage === 2) {
+          p.x = s.x; p.y = s.y; p.z = s.z; p.anim = 'wave'; p.animFrame = 0; p.forceFace = false;
+          if (p.pgT > 0.9) { p.slideStage = 3; p.pgT = 0; if (this.rng.chance(0.4)) this.city.audio?.event('giggle', p); }
+        } else if (p.slideStage === 3) {
+          // down the chute, then along the level run-out
+          const t = Math.min(1, p.pgT / 1.1), tt = t * t;
+          const yEnd = s.by;
+          if (tt < 1) { p.x = s.x; p.y = s.cy + (yEnd - s.cy) * tt; p.z = s.cz + (s.ez - s.cz) * tt; }
+          p.anim = 'sit'; p.animFrame = 0; p.forceFace = false; this.face(p, s.ex, s.ey + 1);
+          if (t >= 1) { p.slideStage = 4; p.pgT = 0; }
+        } else {
+          const t = Math.min(1, p.pgT / 0.35);
+          p.y = s.by + (s.ey - s.by) * t; p.z = s.ez;
+          if (t >= 1) { p.z = CURB; p.slideStage = 0; }
+        }
       }
     }
     // dog run: owner waits at the gate
@@ -530,6 +575,19 @@ export class Activities {
     }
   }
   emit(L, view) {
+    // swing seats hang from their chains at the pendulum's current angle
+    for (const sw of this.city.world.swings) {
+      if (!view.visible(sw.x, sw.y, sw.top, 1)) continue;
+      const seat = swingSeat(sw);
+      L.push(seat.x, seat.y, seat.z - 0.02, this.frames.seat, this.swingRow, 0, 1, -0.004);
+      for (const ox of [-0.19, 0.19]) {
+        const n = 48;
+        for (let k = 0; k < n; k++) {
+          const t = k / n;
+          L.push(sw.x + ox, sw.y + (seat.y - sw.y) * t, sw.top + (seat.z + 0.03 - sw.top) * t, this.frames.dot, this.swingRow, SF.NOSHADOW, 1, 0.003);
+        }
+      }
+    }
     const b = this.ball;
     if (b && this.groups.basketball.length && view.visible(b.x, b.y, b.z, 1)) L.push(b.x, b.y, b.z, this.frames.ball, this.row, 0, 1, 0.006);
     for (const s of this.snowballs) L.push(s.x, s.y, s.z, this.frames.snowball, this.row, 0, 1, 0.006);

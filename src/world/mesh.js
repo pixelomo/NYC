@@ -10,7 +10,7 @@ export const MAT = {
   GROUND: 4, // alpha = ground material code
   OFFICE: 8, // windows follow office lighting schedule
   WET: 16, // darkens in rain
-  WATER: 32, // animated water
+  SCREEN: 32, // animated video screen / ticker (frames or scroll set by the seed byte), always lit
   NOSHADOW: 64, // does not receive sun shadow (e.g. emissive signage)
   FLAT: 128, // no directional face shading (sprites-like)
 };

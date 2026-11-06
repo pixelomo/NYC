@@ -4,7 +4,9 @@
 import { createProgram, makeBuffer } from '../core/gl.js';
 import { MeshBuilder, MAT } from '../world/mesh.js';
 import { RNG } from '../core/math.js';
-import { T } from '../world/layout.js';
+import { T, LIGHT_EXT } from '../world/layout.js';
+
+const CAR_CAP = 768; // instances per vehicle type per frame
 
 const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
@@ -170,7 +172,7 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
   vec3 light = uAmb * faceShade(n) + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.6 + 0.4 * max(n.z, 0.0)) + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
@@ -727,11 +729,11 @@ export class CarLayer {
       makeBuffer(gl, m.idx, gl.ELEMENT_ARRAY_BUFFER);
       const ibuf = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, ibuf);
-      gl.bufferData(gl.ARRAY_BUFFER, 256 * 8 * 4, gl.DYNAMIC_DRAW);
+      gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * 8 * 4, gl.DYNAMIC_DRAW);
       gl.enableVertexAttribArray(5); gl.vertexAttribPointer(5, 4, gl.FLOAT, false, 32, 0); gl.vertexAttribDivisor(5, 1);
       gl.enableVertexAttribArray(6); gl.vertexAttribPointer(6, 4, gl.FLOAT, false, 32, 16); gl.vertexAttribDivisor(6, 1);
       gl.bindVertexArray(null);
-      this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(256 * 8), n: 0 };
+      this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * 8), n: 0 };
     }
   }
 
@@ -788,7 +790,7 @@ export class CarLayer {
     for (const c of cars) {
       if (!view.visible(c.x, c.y, (c.z || 0) + 1, 6)) continue;
       const t = this.types[c.type];
-      if (!t || t.n >= 256) continue;
+      if (!t || t.n >= CAR_CAP) continue;
       this.updatePalette(c, time);
       const o = t.n * 8, d = t.data;
       d[o] = c.x; d[o + 1] = c.y; d[o + 2] = c.z || 0; d[o + 3] = c.h;

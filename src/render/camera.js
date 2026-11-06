@@ -51,6 +51,13 @@ export class Camera {
       this.scale = Math.exp(Math.log(this.scaleFrom) + (Math.log(this.scaleTo) - Math.log(this.scaleFrom)) * e);
       if (this.scaleT >= 1) this.scale = this.scaleTo;
     }
+    if (this.glide && !this.follow) {
+      // smooth trip to a chosen place; any pan cancels it
+      const g = this.glide, k = 1 - Math.exp(-dt * 3.2);
+      this.x += (g.x - this.x) * k;
+      this.y += (g.y - this.y) * k;
+      if (Math.hypot(g.x - this.x, g.y - this.y) < 0.05) this.glide = null;
+    }
     if (this.follow) {
       const f = this.follow;
       const k = 1 - Math.exp(-dt * 4);
@@ -98,6 +105,13 @@ export class Camera {
     const sx = t[0] + (px - viewW / 2) / scaleCss;
     const sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ;
     const a = sx / HX, b = sy / HY;
+    const xr = (a + b) / 2, yr = (b - a) / 2;
+    const c = Math.cos(this.angle), s = Math.sin(this.angle);
+    return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+  }
+  // art pixels (as returned by project) at height z -> world x, y
+  artToWorld(sx, sy, z) {
+    const a = sx / HX, b = (sy + z * HZ) / HY;
     const xr = (a + b) / 2, yr = (b - a) / 2;
     const c = Math.cos(this.angle), s = Math.sin(this.angle);
     return [CX + c * xr + s * yr, CY - s * xr + c * yr];

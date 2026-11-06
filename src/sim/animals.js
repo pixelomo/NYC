@@ -104,8 +104,11 @@ export class Animals {
     pg.tx = target.x; pg.ty = target.y; pg.tz = target.z;
     pg.ft = 0;
     pg.sx = pg.x; pg.sy = pg.y; pg.sz = pg.z;
-    pg.dur = clamp(dist(pg.x, pg.y, target.x, target.y) / 3.2, 0.8, 4.5);
-    pg.arc = this.rng.range(1.5, 4) + Math.abs(target.z - pg.z) * 0.3;
+    const d = dist(pg.x, pg.y, target.x, target.y), dz = target.z - pg.z;
+    // a short hop is a quick, low flutter; longer flights take longer and rise a little more
+    pg.dur = clamp(Math.hypot(d, dz) / 3.4, 0.35, 4.5);
+    // height above the straight line: none to speak of when gliding down from a roof or a wheel
+    pg.arc = clamp(0.08 + d * 0.11, 0.12, 1.3) * this.rng.range(0.8, 1.2) * (dz < -0.5 ? 0.2 : 1);
   }
   perchFor(pg) {
     const W = this.city.world;
@@ -156,11 +159,15 @@ export class Animals {
       if (pg.state === 'fly') {
         pg.ft += dt;
         const t = clamp(pg.ft / pg.dur, 0, 1);
-        const e = t * t * (3 - 2 * t);
+        // quick launch, gentle landing
+        const e = 0.35 * t + 0.65 * t * t * (3 - 2 * t);
         const px = pg.x;
         pg.x = pg.sx + (pg.tx - pg.sx) * e;
         pg.y = pg.sy + (pg.ty - pg.sy) * e;
-        pg.z = pg.sz + (pg.tz - pg.sz) * e + Math.sin(t * Math.PI) * pg.arc;
+        // climbing to a perch: rise early then glide in; dropping to the ground: glide down
+        const dz = pg.tz - pg.sz;
+        const g = dz > 0.5 ? 1 - (1 - t) * (1 - t) * (1 - t) : dz < -0.5 ? t * t * (3 - 2 * t) : e;
+        pg.z = pg.sz + dz * g + Math.sin(t * Math.PI) * pg.arc;
         pg.vx = pg.x - px;
         pg.anim = 'fly'; pg.f = Math.floor(pg.t * 12) % 2;
         if (t >= 1) { pg.state = pg.tz > CURB + 0.5 ? 'perched' : 'ground'; pg.z = pg.tz; pg.perchT = this.rng.range(6, 25); }

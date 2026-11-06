@@ -321,7 +321,17 @@ export const SHOPS = {
   boutique: { name: ['BOUTIQUE', 'VINTAGE', 'SHOES'], bg: 0x1b1b1b, fg: 0xf2efe6, awn: 0x8a2a6a, goods: 'clothes' },
   pharmacy: { name: ['PHARMACY', 'DRUGS'], bg: 0xf2efe6, fg: 0x2f8a46, awn: 0x1f4f9a, goods: 'pharmacy' },
   diner: { name: ['DINER', 'EAT', 'LUNCHEONETTE'], bg: 0x0f6f6a, fg: 0xff4f6a, awn: 0xc8302c, goods: 'diner' },
+  // shopping-street stores
+  shoes: { name: ['SHOES', 'SNEAKERS', 'KICKS', 'SHOE PALACE'], bg: 0x1b1b1b, fg: 0xf2c230, awn: 0x1b1b1b, goods: 'shoes' },
+  fashion: { name: ['FASHION', 'BOUTIQUE', 'DENIM', 'THREADS'], bg: 0xf2efe6, fg: 0x8a2a6a, awn: 0x8a2a6a, goods: 'mannequins' },
+  electronics: { name: ['ELECTRONICS', 'CAMERAS', 'PHONES', 'TV & AUDIO'], bg: 0x1f3a8a, fg: 0xffffff, awn: 0x1f3a8a, goods: 'tv' },
+  toys: { name: ['TOYS', 'TOY BOX', 'GAMES'], bg: 0xf2c230, fg: 0x2a5fb8, awn: 0xe8401a, goods: 'toys' },
+  jewelry: { name: ['JEWELRY', 'GOLD', 'WATCHES'], bg: 0x1b1b1b, fg: 0xe8c860, awn: 0x1b1b1b, goods: 'jewels' },
+  bakery: { name: ['BAKERY', 'PASTRY', 'CAKES', 'PANADERIA'], bg: 0xf2e2c8, fg: 0x8a4a2a, awn: 0xe58fb5, goods: 'cakes' },
+  records: { name: ['RECORDS', 'VINYL', 'MUSIC'], bg: 0x2a1a3a, fg: 0x4fd2ff, awn: 0x2a1a3a, goods: 'records' },
+  sports: { name: ['SPORTS', 'ATHLETIC', 'GYM GEAR'], bg: 0x2f8a46, fg: 0xffffff, awn: 0x2f8a46, goods: 'clothes' },
 };
+export const SHOPPING = ['shoes', 'fashion', 'electronics', 'toys', 'jewelry', 'bakery', 'records', 'sports', 'coffee', 'books', 'pharmacy', 'boutique', 'pizza'];
 
 function goods(p, x, y, w, h, kind, rng, t) {
   const cc = winCode(t, true);
@@ -380,6 +390,77 @@ function goods(p, x, y, w, h, kind, rng, t) {
       const c = colors[rng.int(0, colors.length - 1)];
       for (let j = 4; j < 14; j++) for (let i = 0; i < 5; i++) if (!(j < 6 && (i === 0 || i === 4))) put(xx + i, j, i === 0 ? shade(c, 1.1) : c);
     }
+    return;
+  }
+  if (kind === 'shoes') {
+    // stepped display shelves with shoes in pairs
+    for (let yy = 4; yy < h - 3; yy += 6) {
+      for (let xx = 0; xx < w; xx++) { put(xx, yy + 4, 0xd8d4cc); put(xx, yy + 5, 0x8a867e); }
+      for (let xx = 2; xx + 5 < w; xx += 7) {
+        const c = colors[(xx * 7 + yy) % colors.length];
+        for (const o2 of [0, 3]) { put(xx + o2, yy + 3, c); put(xx + o2 + 1, yy + 3, c); put(xx + o2 + 1, yy + 2, shade(c, 1.15)); put(xx + o2, yy + 3 - 0, shade(c, 0.85)); put(xx + o2 + 2, yy + 3, 0xf2efe6); }
+      }
+    }
+    return;
+  }
+  if (kind === 'mannequins') {
+    // dressed mannequins on a low plinth
+    for (let xx = 0; xx < w; xx++) for (let j = h - 3; j < h; j++) put(xx, j, 0xe8e2d0);
+    for (let xx = 3; xx + 6 < w; xx += 10) {
+      const c = colors[rng.int(0, colors.length - 1)];
+      put(xx + 2, h - 18, 0xe8e0d4); put(xx + 3, h - 18, 0xe8e0d4); put(xx + 2, h - 17, 0xd8d0c4); put(xx + 3, h - 17, 0xd8d0c4);
+      for (let j = h - 16; j < h - 8; j++) for (let i = 0; i < 6; i++) if (!(j === h - 16 && (i === 0 || i === 5))) put(xx + i, j, i === 0 ? shade(c, 1.12) : j > h - 10 ? shade(c, 0.85) : c);
+      for (let j = h - 8; j < h - 3; j++) { put(xx + 1, j, 0x2a3346); put(xx + 4, j, 0x2a3346); }
+    }
+    return;
+  }
+  if (kind === 'tv') {
+    // a wall of glowing screens
+    const sc = winCode(0.0, true);
+    for (let yy = 2; yy + 7 < h - 3; yy += 9)
+      for (let xx = 1; xx + 10 < w; xx += 12) {
+        for (let j = 0; j < 8; j++) for (let i = 0; i < 11; i++) p.set(x + xx + i, y + yy + j, i === 0 || j === 0 || i === 10 || j === 7 ? 0x1a1a1e : mixc(colors[(xx + yy) % colors.length], 0x2a5fb8, (j / 7) * 0.6), sc);
+      }
+    return;
+  }
+  if (kind === 'toys') {
+    for (let yy = 3; yy < h - 3; yy += 7) {
+      for (let xx = 0; xx < w; xx++) put(xx, yy + 6, 0xf2efe6);
+      for (let xx = 1; xx < w - 3; xx += 4) {
+        const c = colors[(xx * 5 + yy * 3) % colors.length];
+        const k = (xx + yy) % 3;
+        if (k === 0) { put(xx, yy + 3, c); put(xx + 1, yy + 3, c); put(xx, yy + 4, c); put(xx + 1, yy + 4, c); put(xx, yy + 5, shade(c, 0.7)); put(xx + 1, yy + 5, shade(c, 0.7)); }
+        else if (k === 1) { put(xx + 1, yy + 2, 0xf2c230); put(xx, yy + 3, c); put(xx + 1, yy + 3, c); put(xx + 2, yy + 3, c); put(xx, yy + 5, 0x1e1e22); put(xx + 2, yy + 5, 0x1e1e22); put(xx + 1, yy + 4, c); }
+        else { put(xx + 1, yy + 1, c); put(xx, yy + 2, c); put(xx + 2, yy + 2, c); put(xx + 1, yy + 3, c); put(xx + 1, yy + 4, 0x6a4a3a); put(xx + 1, yy + 5, 0x6a4a3a); }
+      }
+    }
+    return;
+  }
+  if (kind === 'jewels') {
+    // dark velvet with glinting pieces
+    for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) if (yy > h * 0.45) put(xx, yy, yy === Math.floor(h * 0.45) + 1 ? 0x6a5a3a : 0x2a1a2a);
+    for (let k = 0; k < Math.floor(w / 3); k++) {
+      const xx = rng.int(1, w - 2), yy = rng.int(Math.floor(h * 0.5), h - 3);
+      put(xx, yy, rng.chance(0.5) ? 0xf2e080 : 0xe8f0ff); if (rng.chance(0.4)) put(xx + 1, yy, 0xc8a840);
+    }
+    return;
+  }
+  if (kind === 'cakes') {
+    for (let xx = 0; xx < w; xx++) { put(xx, h - 6, 0xd8d4cc); for (let j = h - 5; j < h; j++) put(xx, j, 0xe8dcc8); }
+    for (let xx = 2; xx + 6 < w; xx += 8) {
+      const c = [0xf2d8e0, 0xf2efe6, 0x8a4a2a, 0xe8b860][(xx >> 3) % 4];
+      for (let j = 0; j < 4; j++) for (let i = 0; i < 6; i++) put(xx + i, h - 10 + j, j === 0 ? shade(c, 1.12) : c);
+      put(xx + 2, h - 11, 0xd8302c); put(xx + 3, h - 11, 0xd8302c);
+    }
+    for (let xx = 1; xx < w - 1; xx += 3) { put(xx, 4, 0xc49860); put(xx + 1, 4, 0xb07840); }
+    return;
+  }
+  if (kind === 'records') {
+    for (let yy = 2; yy + 6 < h - 2; yy += 8)
+      for (let xx = 1; xx + 6 < w; xx += 7) {
+        const c = colors[(xx + yy * 3) % colors.length];
+        for (let j = 0; j < 6; j++) for (let i = 0; i < 6; i++) put(xx + i, yy + j, (i - 2.5) ** 2 + (j - 2.5) ** 2 < 2.5 ? 0x1e1e22 : c);
+      }
     return;
   }
   // generic shelves of products

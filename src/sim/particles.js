@@ -100,13 +100,16 @@ export class Particles {
       if (s.kind === 'chimney') rate = env.season === 3 ? 0.5 : env.season === 2 ? 0.15 : 0;
       if (s.kind === 'roof') rate *= env.season === 3 ? 1.6 : 0.5;
       if (s.kind === 'manhole') rate *= 0.5 + 0.5 * Math.sin(this.city.time * 0.4 + i * 1.7);
+      // sidewalk grates breathe out in slow puffs (trains passing underneath)
+      if (s.kind === 'grate') rate *= 0.35 + 0.65 * Math.max(0, Math.sin(this.city.time * 0.33 + i * 2.3));
       if (rate <= 0) continue;
       let acc = (this.steamAcc.get(i) || 0) + dt * rate * 6;
       while (acc > 1) {
         acc -= 1;
-        const big = s.kind === 'stack' || s.kind === 'manhole';
-        this.add({ x: s.x + r.range(-0.1, 0.1), y: s.y + r.range(-0.1, 0.1), z: s.z, vx: wx * 0.6 + r.range(-0.12, 0.12), vy: wy * 0.6 + r.range(-0.12, 0.12), vz: big ? r.range(0.7, 1.2) : r.range(0.35, 0.6), g: -0.05,
-          life: big ? r.range(2.5, 4) : r.range(1.5, 2.6), max: 0, kind: 'steam', grow: big ? 4 : 2, row: this.row });
+        const big = s.kind === 'grate' || s.kind === 'manhole';
+        const ox = s.ax ? r.range(-s.ax, s.ax) : r.range(-0.1, 0.1), oy = s.ay ? r.range(-s.ay, s.ay) : r.range(-0.1, 0.1);
+        this.add({ x: s.x + ox, y: s.y + oy, z: s.z, vx: wx * 0.6 + r.range(-0.12, 0.12), vy: wy * 0.6 + r.range(-0.12, 0.12), vz: big ? r.range(0.6, 1.1) : r.range(0.35, 0.6), g: -0.05,
+          life: big ? r.range(2.2, 3.6) : r.range(1.5, 2.6), max: 0, kind: 'steam', grow: big ? 4 : 2, row: this.row });
         const q = this.p[this.p.length - 1];
         if (q) q.max = q.life;
       }
@@ -192,11 +195,12 @@ export class Particles {
     }
     // fireworks on summer nights
     this.fireworkTimer -= dt;
-    const fwNight = env.season === 1 && (env.hour > 21 || env.hour < 0.5) && env.precip < 0.2;
+    // summer nights, and a burst every winter midnight when the ball has dropped
+    const fwNight = (env.season === 1 && (env.hour > 21 || env.hour < 0.5) && env.precip < 0.2) || (env.season === 3 && env.hour >= 0 && env.hour < 0.25);
     if ((fwNight || this.forceFireworks > 0) && this.fireworkTimer <= 0) {
       this.fireworkTimer = r.range(0.6, 2.4);
       if (this.forceFireworks > 0) this.forceFireworks--;
-      const c = W.parkCenter || { x: MAP / 2, y: MAP / 2 };
+      const c = (env.season === 3 && W.timesSquare) || W.parkCenter || { x: MAP / 2, y: MAP / 2 };
       this.add({ x: c.x + r.range(-4, 4), y: c.y + r.range(-4, 4), z: CURB + 1, vx: r.range(-0.4, 0.4), vy: r.range(-0.4, 0.4), vz: r.range(9.5, 12), g: 4, life: r.range(1.8, 2.4), max: 2, kind: 'rocket', f: this.fr.dot2, row: this.fwRows[5] });
       this.city.audio?.event('launch', c);
     }

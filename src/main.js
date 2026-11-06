@@ -41,8 +41,8 @@ async function boot() {
   const camera = new Camera();
   const dpr = window.devicePixelRatio || 1;
   camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr));
-  camera.x = 62;
-  camera.y = 64;
+  camera.x = 89;
+  camera.y = 91;
   if (q.has('zoom')) camera.scale = camera.scaleTo = parseFloat(q.get('zoom'));
   if (q.has('x')) camera.x = parseFloat(q.get('x'));
   if (q.has('y')) camera.y = parseFloat(q.get('y'));
@@ -69,7 +69,7 @@ async function boot() {
   const ui = new UI(app);
   app.ui = ui;
   window.__city = app;
-  console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms, tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
+  console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms (${world.buildProfile}; blocks: ${world.blockProfile}), tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
 
   let last = performance.now();
   let fpsAcc = 0, fpsN = 0;

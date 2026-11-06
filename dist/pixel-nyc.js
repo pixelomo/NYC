@@ -69,6 +69,22 @@
     return gl.bindBuffer(target, b), gl.bufferData(target, data, usage), b;
   }
 
+  // src/world/layout.js
+  var roadStart = (k) => k * 27 + 2, roadEnd = (k) => k * 27 + 2 + 5, roadCenter = (k) => k * 27 + 2 + 2.5, lotStart = (b) => b * 27 + 9, lotEnd = (b) => b * 27 + 9 + 18, BLOCK_TYPES = [
+    ["walkups", "tenements", "redbrick", "billboards", "timessq", "billboards"],
+    ["redbrick", "deco", "glass", "office", "lofts", "tenements"],
+    ["shops", "modern", "park", "park", "commercial", "shops"],
+    ["shops", "tenements", "park", "park", "court", "redbrick"],
+    ["redbrick", "firehouse", "walkups", "brownstones", "bodega", "walkups"],
+    ["tenements", "redbrick", "shops", "shops", "brownstones", "redbrick"]
+  ], PARK = { bx0: 2, by0: 2, bx1: 3, by1: 3 }, parkRect = () => ({ x0: lotStart(PARK.bx0), y0: lotStart(PARK.by0), x1: lotEnd(PARK.bx1), y1: lotEnd(PARK.by1) }), parkPlinth = () => ({ x0: roadEnd(PARK.bx0), y0: roadEnd(PARK.by0), x1: roadStart(PARK.bx1 + 1), y1: roadStart(PARK.by1 + 1) }), blockInPark = (bx, by) => bx >= PARK.bx0 && bx <= PARK.bx1 && by >= PARK.by0 && by <= PARK.by1, isParkIntersection = (i, j) => i > PARK.bx0 && i <= PARK.bx1 && j > PARK.by0 && j <= PARK.by1, roadLegOpen = (i, j, dx, dy) => {
+    let ni = i + dx, nj = j + dy;
+    return ni < 0 || nj < 0 || ni > 6 || nj > 6 ? !1 : !isParkIntersection(i, j) && !isParkIntersection(ni, nj);
+  }, parkLoop = () => ({ i0: PARK.bx0, i1: PARK.bx1 + 1, j0: PARK.by0, j1: PARK.by1 + 1 });
+  function blockRect(bx, by) {
+    return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };
+  }
+
   // src/render/shaders.js
   var HEAD = `#version 300 es
 precision highp float;
@@ -131,7 +147,7 @@ float cloudAt(vec3 wp) {
 }
 vec3 lampAt(vec3 wp) {
   if (wp.z < -0.5) return vec3(0.0);
-  vec3 l = texture(uLightMap, wp.xy / 128.0).rgb;
+  vec3 l = texture(uLightMap, wp.xy / ${176 .toFixed(1)}).rgb;
   float hf = clamp(1.0 - (wp.z - 0.3) / 8.0, 0.0, 1.0);
   return l * (hf * hf);
 }
@@ -200,7 +216,18 @@ void main() {
   vec4 tex;
   if (ground) tex = texelFetch(uGround, ivec2(floor(vUV * uGroundScale)), 0);
   else {
-    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(floor(vUV), vec2(vRect.zw)));
+    vec2 rs = vec2(vRect.zw), uvi = floor(vUV), off = vec2(0.0);
+    if ((mat & 32u) != 0u) {
+      // animated screen: K frames stacked down the region, cycled; or (bit 3) a scrolling ticker
+      uint sd = vInfo.w;
+      if ((sd & 8u) != 0u) uvi.x += floor(uTime * 18.0);
+      else {
+        float K = float((sd & 7u) + 1u);
+        rs.y = floor(rs.y / K);
+        off.y = rs.y * mod(floor(uTime * 0.22 + float(sd >> 4u) * 0.618), K);
+      }
+    }
+    ivec2 tc = ivec2(vRect.xy) + ivec2(mod(uvi, rs) + off);
     tex = texelFetch(uAtlas, ivec3(tc, int(vInfo.x)), 0);
   }
   if (tex.a < 0.5 / 255.0) discard;
@@ -357,11 +384,14 @@ void main() {
   }
 
   col += emis;
+  // video screens shine day and night
+  bool screen = !ground && (mat & 32u) != 0u;
+  if (screen) { selfLit = 1.0; col = albedo * light * 0.2; }
   // self-coloured lights (neon, signs, curtains, billboards): show their own colour at full brightness
   vec3 sglow = vec3(0.0);
   if (selfLit > 0.0) {
     col = mix(col, albedo * 1.08, clamp(selfLit, 0.0, 1.0) * 0.92);
-    sglow = albedo * selfLit * 0.1;
+    sglow = albedo * selfLit * (screen ? 0.08 + 0.3 * uEmis : 0.1);
   }
   oColor = vec4(col, 1.0);
   oGlow = vec4(emis * 0.38 + sglow + lamp * puddle * 0.25, 1.0);
@@ -608,26 +638,12 @@ void main() {
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
-  // src/world/layout.js
-  var roadStart = (k) => k * 27 + 2, roadEnd = (k) => k * 27 + 2 + 5, roadCenter = (k) => k * 27 + 2 + 2.5, lotStart = (b) => b * 27 + 9, lotEnd = (b) => b * 27 + 9 + 18, BLOCK_TYPES = [
-    ["deco", "glass", "office", "lofts"],
-    ["modern", "park", "park", "commercial"],
-    ["tenements", "park", "park", "court"],
-    ["firehouse", "walkups", "brownstones", "bodega"]
-  ], PARK = { bx0: 1, by0: 1, bx1: 2, by1: 2 }, parkRect = () => ({ x0: lotStart(PARK.bx0), y0: lotStart(PARK.by0), x1: lotEnd(PARK.bx1), y1: lotEnd(PARK.by1) }), parkPlinth = () => ({ x0: roadEnd(PARK.bx0), y0: roadEnd(PARK.by0), x1: roadStart(PARK.bx1 + 1), y1: roadStart(PARK.by1 + 1) }), blockInPark = (bx, by) => bx >= PARK.bx0 && bx <= PARK.bx1 && by >= PARK.by0 && by <= PARK.by1, isParkIntersection = (i, j) => i > PARK.bx0 && i <= PARK.bx1 && j > PARK.by0 && j <= PARK.by1, roadLegOpen = (i, j, dx, dy) => {
-    let ni = i + dx, nj = j + dy;
-    return ni < 0 || nj < 0 || ni > 4 || nj > 4 ? !1 : !isParkIntersection(i, j) && !isParkIntersection(ni, nj);
-  };
-  function blockRect(bx, by) {
-    return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };
-  }
-
   // src/render/renderer.js
   var Renderer = class {
     constructor(gl) {
       this.gl = gl, this.progStatic = createProgram(gl, STATIC_VS, STATIC_FS, "static"), this.progShadow = createProgram(gl, SHADOW_VS, SHADOW_FS, "shadow"), this.progSky = createProgram(gl, FS_VS, SKY_FS, "sky"), this.progBlur = createProgram(gl, FS_VS, BLUR_FS, "blur"), this.progComp = createProgram(gl, FS_VS, COMPOSITE_FS, "composite"), this.emptyVAO = gl.createVertexArray(), this.noiseTex = this._makeNoise();
       let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), qs = new URLSearchParams(location.search);
-      this.shadowSize = Math.min(qs.has("shadow") ? parseInt(qs.get("shadow"), 10) : 4096, maxTex), this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this._makeStaticShadow(), this.floatOK = !!gl.getExtension("EXT_color_buffer_float"), gl.getExtension("OES_texture_float_linear"), this.lightSize = 512, this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR } : { filter: gl.LINEAR }), this.lightFBO = makeFBO(gl, [this.lightTex], null), this.bw = 0, this.bh = 0, this.layers = [], this.stats = { tris: 0 };
+      this.shadowSize = Math.min(qs.has("shadow") ? parseInt(qs.get("shadow"), 10) : 4096, maxTex), this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this._makeStaticShadow(), this.floatOK = !!gl.getExtension("EXT_color_buffer_float"), gl.getExtension("OES_texture_float_linear"), this.lightSize = 1024, this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR } : { filter: gl.LINEAR }), this.lightFBO = makeFBO(gl, [this.lightTex], null), this.bw = 0, this.bh = 0, this.layers = [], this.stats = { tris: 0 };
     }
     setShadowSize(n) {
       let gl = this.gl;
@@ -683,18 +699,41 @@ void main() {
       let hw = Math.max(1, bw >> 1), hh = Math.max(1, bh >> 1), qw = Math.max(1, bw >> 2), qh = Math.max(1, bh >> 2);
       this.bA = makeTexture(gl, hw, hh, { filter: gl.LINEAR }), this.bB = makeTexture(gl, hw, hh, { filter: gl.LINEAR }), this.bC = makeTexture(gl, qw, qh, { filter: gl.LINEAR }), this.bD = makeTexture(gl, qw, qh, { filter: gl.LINEAR }), this.fA = makeFBO(gl, [this.bA], null), this.fB = makeFBO(gl, [this.bB], null), this.fC = makeFBO(gl, [this.bC], null), this.fD = makeFBO(gl, [this.bD], null);
     }
-    shadowMatrix(sunDir) {
+    // Light-space ortho matrix. Depth spans the whole map (an occluder anywhere along the light can
+    // shade what is on screen) but x/y only cover what the camera can see, so the shadow map's
+    // texels go where they are looked at. The extent is quantised and the centre snapped to whole
+    // texels, so panning never makes shadow edges crawl.
+    shadowMatrix(sunDir, view = null) {
       let f = normalize3([-sunDir[0], -sunDir[1], -sunDir[2]]), up = [0, 0, 1];
       Math.abs(f[2]) > 0.98 && (up = [0, 1, 0]);
-      let r = normalize3(cross3(f, up)), u = cross3(r, f), mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
-      for (let x of [-3, 120])
-        for (let y of [-3, 120])
-          for (let z of [-7, 75]) {
-            let p = [x, y, z], a = [dot3(p, r), dot3(p, u), dot3(p, f)];
-            for (let i = 0; i < 3; i++)
-              mn[i] = Math.min(mn[i], a[i]), mx[i] = Math.max(mx[i], a[i]);
-          }
-      let c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2], h = [(mx[0] - mn[0]) / 2, (mx[1] - mn[1]) / 2, (mx[2] - mn[2]) / 2 + 1], m = new Float32Array(16);
+      let r = normalize3(cross3(f, up)), u = cross3(r, f), mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9], grow2 = (p, a, b, n) => {
+        for (let i = 0; i < n; i++) {
+          let v = i === 0 ? dot3(p, r) : i === 1 ? dot3(p, u) : dot3(p, f);
+          a[i] = Math.min(a[i], v), b[i] = Math.max(b[i], v);
+        }
+      };
+      for (let x of [-3, 174])
+        for (let y of [-3, 174])
+          for (let z of [-7, 75]) grow2([x, y, z], mn, mx, 3);
+      if (view) {
+        let cam = view.camera, t = cam.project(cam.x, cam.y, 0), vmn = [1e9, 1e9], vmx = [-1e9, -1e9], mx2 = view.w / 2 + 24, my2 = view.h / 2 + 24;
+        for (let sx of [t[0] - mx2, t[0] + mx2])
+          for (let sy of [t[1] - my2, t[1] + my2])
+            for (let z of [-7, 75]) {
+              let [x, y] = cam.artToWorld(sx, sy, z);
+              grow2([x, y, z], vmn, vmx, 2);
+            }
+        for (let i = 0; i < 2; i++) {
+          let a = Math.max(mn[i], vmn[i] - 2), b = Math.min(mx[i], vmx[i] + 2);
+          b > a + 1 && (mn[i] = a, mx[i] = b);
+        }
+      }
+      let ss = Math.min(this.shadowSize, this.shadowSizeS || this.shadowSize), q = (v) => Math.pow(2, Math.ceil(Math.log2(Math.max(v, 8)) * 4) / 4), h = [q((mx[0] - mn[0]) / 2), q((mx[1] - mn[1]) / 2), (mx[2] - mn[2]) / 2 + 1], c = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
+      for (let i = 0; i < 2; i++) {
+        let ts = 2 * h[i] / ss;
+        c[i] = Math.round(c[i] / ts) * ts;
+      }
+      let m = new Float32Array(16);
       return m[0] = r[0] / h[0], m[4] = r[1] / h[0], m[8] = r[2] / h[0], m[12] = -c[0] / h[0], m[1] = u[0] / h[1], m[5] = u[1] / h[1], m[9] = u[2] / h[1], m[13] = -c[1] / h[1], m[2] = f[0] / h[2], m[6] = f[1] / h[2], m[10] = f[2] / h[2], m[14] = -c[2] / h[2], m[15] = 1, this.shadowK = [Math.max(h[0], h[1]) * 2 / this.shadowSize, 1 / (2 * h[2])], this.shadowKS = [Math.max(h[0], h[1]) * 2 / this.shadowSizeS, 1 / (2 * h[2])], m;
     }
     // Common lit-surface uniforms
@@ -707,7 +746,7 @@ void main() {
       scale < 1 && (k = Math.min(1, scale * 2, 4096 * scale / (canvasW + 8), 4096 * scale / (canvasH + 8)));
       let bs = scale / k, linear = bs < 0.999, bw = Math.ceil(canvasW / bs) + 4, bh = Math.ceil(canvasH / bs) + 4;
       bw += bw & 1, bh += bh & 1, bw = Math.min(bw, 4096), bh = Math.min(bh, 4096), this._ensureTargets(bw, bh);
-      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
+      let { viewProj, frac, tsx, tsy } = camera.matrices(bw, bh, k), shadowOn = env.sunDir[2] > 0.02, shadowMat = this.shadowMatrix(env.sunDir, { camera, w: bw / k, h: bh / k }), ditherOff = [((tsx - bw / 2) % 4 + 4) % 4, ((tsy + bh / 2) % 4 + 4) % 4], ca = Math.cos(camera.angle), sa = Math.sin(camera.angle), right2 = [(ca - sa) / (2 * 32), -(sa + ca) / (2 * 32)], ctx = { viewProj, shadowMat, shadowK: this.shadowK, shadowKS: this.shadowKS, right: right2, ditherOff, k, shadowOn, env, camera, time, bw, bh, renderer: this, gl }, vis = env.vis >>> 0;
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
@@ -722,8 +761,8 @@ void main() {
         let p2 = this.progSky;
         gl.useProgram(p2.program), gl.uniform3fv(p2.u.uTop, env.skyTop), gl.uniform3fv(p2.u.uBottom, env.skyBottom), gl.uniform1f(p2.u.uStars, env.stars), gl.uniform1f(p2.u.uTime, time), gl.uniform2f(p2.u.uBuf, bw, bh), gl.uniform1f(p2.u.uRotA, camera.angle), gl.uniform3fv(p2.u.uMoon, env.moon);
         {
-          let c = camera.project(117 / 2, 117 / 2, -21), sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
-          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 117 * 32 * 0.62 * k, 117 * (32 / 2) * 0.62 * k);
+          let c = camera.project(171 / 2, 171 / 2, -21), sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
+          gl.uniform4f(p2.u.uShadowBlob, sx, sy, 171 * 32 * 0.62 * k, 171 * (32 / 2) * 0.62 * k);
         }
         gl.bindVertexArray(this.emptyVAO), gl.drawArrays(gl.TRIANGLES, 0, 3);
       }
@@ -747,7 +786,7 @@ void main() {
   };
 
   // src/render/camera.js
-  var HX = 32, HY = 32 / 2, HZ = 32, CX = 117 / 2, CY = 117 / 2, DEPTH_RANGE = 200, Camera = class {
+  var HX = 32, HY = 32 / 2, HZ = 32, CX = 171 / 2, CY = 171 / 2, DEPTH_RANGE = 200, Camera = class {
     constructor() {
       this.x = CX, this.y = CY, this.angle = 0, this.rot = 0, this.rotFrom = 0, this.rotT = 1, this.scale = 2, this.scaleFrom = 2, this.scaleTo = 2, this.scaleT = 1, this.follow = null, this.vx = 0, this.vy = 0;
     }
@@ -771,6 +810,10 @@ void main() {
         let e = easeInOut(this.scaleT);
         this.scale = Math.exp(Math.log(this.scaleFrom) + (Math.log(this.scaleTo) - Math.log(this.scaleFrom)) * e), this.scaleT >= 1 && (this.scale = this.scaleTo);
       }
+      if (this.glide && !this.follow) {
+        let g = this.glide, k = 1 - Math.exp(-dt * 3.2);
+        this.x += (g.x - this.x) * k, this.y += (g.y - this.y) * k, Math.hypot(g.x - this.x, g.y - this.y) < 0.05 && (this.glide = null);
+      }
       if (this.follow) {
         let f = this.follow, k = 1 - Math.exp(-dt * 4);
         this.x += (f.x - this.x) * k, this.y += (f.y - this.y) * k;
@@ -779,7 +822,7 @@ void main() {
         let decay = Math.exp(-dt * 6);
         this.vx *= decay, this.vy *= decay, Math.abs(this.vx) < 0.01 && (this.vx = 0), Math.abs(this.vy) < 0.01 && (this.vy = 0);
       }
-      this.x = clamp(this.x, -10, 127), this.y = clamp(this.y, -10, 127);
+      this.x = clamp(this.x, -10, 181), this.y = clamp(this.y, -10, 181);
     }
     // world -> art pixels (relative to map centre). Returns [sx, sy, depth]
     project(x, y, z) {
@@ -802,6 +845,11 @@ void main() {
     // screen pixel (CSS) -> world on plane z
     screenToWorld(px, py, viewW, viewH, z = 0) {
       let scaleCss = this.scale / (window.devicePixelRatio || 1), t = this.project(this.x, this.y, 0), sx = t[0] + (px - viewW / 2) / scaleCss, sy = t[1] + (py - viewH / 2) / scaleCss + z * HZ, a = sx / HX, b = sy / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
+      return [CX + c * xr + s * yr, CY - s * xr + c * yr];
+    }
+    // art pixels (as returned by project) at height z -> world x, y
+    artToWorld(sx, sy, z) {
+      let a = sx / HX, b = (sy + z * HZ) / HY, xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(this.angle), s = Math.sin(this.angle);
       return [CX + c * xr + s * yr, CY - s * xr + c * yr];
     }
     worldToScreen(x, y, z, viewW, viewH) {
@@ -1217,8 +1265,8 @@ void main() {
     // windows follow office lighting schedule
     WET: 16,
     // darkens in rain
-    WATER: 32,
-    // animated water
+    SCREEN: 32,
+    // animated video screen / ticker (frames or scroll set by the seed byte), always lit
     NOSHADOW: 64,
     // does not receive sun shadow (e.g. emissive signage)
     FLAT: 128
@@ -1562,11 +1610,11 @@ void main() {
   };
   function raisedIntervals() {
     let out = [], x = 0;
-    for (let k = 0; k <= 4; k++) {
+    for (let k = 0; k <= 6; k++) {
       let rs = roadStart(k), re = roadEnd(k);
       rs > x && out.push([x, rs]), x = re;
     }
-    return x < 117 && out.push([x, 117]), out;
+    return x < 171 && out.push([x, 171]), out;
   }
   function plinthRects() {
     let iv = raisedIntervals(), P = parkPlinth(), inPark = (a, b) => a >= P.x0 && b <= P.x1, out = [];
@@ -1579,7 +1627,7 @@ void main() {
     return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
   };
   function paintGround(region3, rng) {
-    let p = region3.p, N = 117 * 32, d = region3.page.data, cells = Math.ceil(N / 64), big = new Float32Array(cells * cells);
+    let p = region3.p, N = 171 * 32, d = region3.page.data, cells = Math.ceil(N / 64), big = new Float32Array(cells * cells);
     for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cells, i / cells | 0, 12) - 0.5;
     let ar = COL.asphalt >> 16 & 255, ag = COL.asphalt >> 8 & 255, ab = COL.asphalt & 255;
     for (let y = 0; y < N; y++) {
@@ -1613,7 +1661,7 @@ void main() {
       let x = rng.int(0, N), y = rng.int(0, N), rx = rng.range(4, 10), ry = rng.range(3, 8);
       p.ellipse(x, y, rx, ry, 4277325, GC.ASPHALT), p.ellipse(x + 1, y, rx * 0.6, ry * 0.6, COL.asphaltDark, GC.ASPHALT);
     }
-    for (let k = 0; k <= 4; k++) {
+    for (let k = 0; k <= 6; k++) {
       let rs = roadStart(k) * 32, re = roadEnd(k) * 32, pw = Math.round(1.1 * 32);
       markBand(p, 0, rs, N, pw, GC.PARKING), markBand(p, 0, re - pw, N, pw, GC.PARKING), markBand(p, rs, 0, pw, N, GC.PARKING), markBand(p, re - pw, 0, pw, N, GC.PARKING);
     }
@@ -1624,32 +1672,32 @@ void main() {
           p.set(xx, yy, worn ? mixc(c, 5592668, 0.55) : shade(c, 0.94 + hash2i(xx, yy, 78) * 0.1), code);
         }
     };
-    for (let k = 0; k <= 4; k++) {
+    for (let k = 0; k <= 6; k++) {
       let rc = Math.round(roadCenter(k) * 32);
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 6; i++) {
         let a = (i * 27 + 2 + 5 + 2) * 32 + 16, b = (i + 1) * 27 * 32 - 16;
         paintLine(a, rc - 5, b - a, 3, COL.yellow, GC.PAINT_Y), paintLine(a, rc + 2, b - a, 3, COL.yellow, GC.PAINT_Y), paintLine(rc - 5, a, 3, b - a, COL.yellow, GC.PAINT_Y), paintLine(rc + 2, a, 3, b - a, COL.yellow, GC.PAINT_Y);
       }
     }
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++) {
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j <= 6; j++) {
         let x0 = roadStart(i) * 32, x1 = roadEnd(i) * 32, y0 = roadStart(j) * 32, y1 = roadEnd(j) * 32, sx0 = i * 27 * 32, sx1 = (i * 27 + 2 * 2 + 5) * 32, sy0 = j * 27 * 32, sy1 = (j * 27 + 2 * 2 + 5) * 32;
         zebra(p, x0, sy0 + 6, x1 - x0, y0 - sy0 - 12, "v"), zebra(p, x0, y1 + 6, x1 - x0, sy1 - y1 - 12, "v"), zebra(p, sx0 + 6, y0, x0 - sx0 - 12, y1 - y0, "h"), zebra(p, x1 + 6, y0, sx1 - x1 - 12, y1 - y0, "h");
         let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32;
-        j > 0 && paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W), j < 4 && paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W), i > 0 && paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W), i < 4 && paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W);
+        j > 0 && paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W), j < 6 && paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W), i > 0 && paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W), i < 6 && paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W);
       }
     for (let [ax, ay, bx, by] of plinthRects()) paintSidewalkRect(p, ax * 32, ay * 32, (bx - ax) * 32, (by - ay) * 32, rng);
     let manholes = [];
-    for (let k = 0; k <= 4; k++)
-      for (let s = 0; s < 4; s++) {
+    for (let k = 0; k <= 6; k++)
+      for (let s = 0; s < 6; s++) {
         let along2 = s * 27 + 9 + rng.range(3, 15), off = roadCenter(k) + rng.pick([-0.7, 0.7, 0]);
         for (let axis of ["x", "y"]) {
           let wx = axis === "x" ? along2 : off, wy = axis === "x" ? off : along2;
           inParkPlinth(wx, wy, 0.5) || (manhole(p, wx * 32, wy * 32, rng), manholes.push({ x: wx, y: wy, axis }));
         }
       }
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++) {
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j <= 6; j++) {
         let rcx = roadCenter(i) * 32, rcy = roadCenter(j) * 32, h = 5 / 2 * 32;
         if (!isParkIntersection(i, j))
           for (let [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, !0], [rcx + h - 14, rcy + h + 58, !0], [rcx - h - 70, rcy + h - 14, !1], [rcx + h + 58, rcy - h + 2, !1]]) {
@@ -1708,7 +1756,7 @@ void main() {
   }
   function buildGroundGeometry(mb, ground, tex) {
     let g = { t: ground, world: !0, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-    mb.box(0, 0, -7, 117, 117, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
+    mb.box(0, 0, -7, 171, 171, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
     for (let [ax, ay, bx, by] of plinthRects())
       mb.box(ax, ay, 0, bx, by, 0.125, {
         pz: { t: ground, u0: ax * 32, v0: ay * 32, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
@@ -1718,7 +1766,7 @@ void main() {
         ny: tex.curb
       });
   }
-  var TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: 114, station: [14, 34] };
+  var TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: 168, station: [14, 34] };
   function buildSlabSides(mb, atlas, tex) {
     let T16 = 32, { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL, WH = Math.round((tz1 - tz0) * T16), wall = atlas.shared("tunnel_wall", 128, WH, (p) => {
       let H = p.h;
@@ -1765,9 +1813,9 @@ void main() {
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(6973024, 0.9 + hash2i(x, y, 2) * 0.2));
     }), soil = tex.soil, sides = [
       // [normal, point(a,d)->[x,y]]  a runs left->right as seen from outside; d goes into the slab
-      { key: "py", n: [0, 1], pt: (a, d) => [a, 117 - d] },
-      { key: "ny", n: [0, -1], pt: (a, d) => [117 - a, d] },
-      { key: "px", n: [1, 0], pt: (a, d) => [117 - d, 117 - a] },
+      { key: "py", n: [0, 1], pt: (a, d) => [a, 171 - d] },
+      { key: "ny", n: [0, -1], pt: (a, d) => [171 - a, d] },
+      { key: "px", n: [1, 0], pt: (a, d) => [171 - d, 171 - a] },
       { key: "nx", n: [-1, 0], pt: (a, d) => [d, a] }
     ], quadSide = (S2, aa0, aa1, d, zz0, zz1, texr, mat = 0) => {
       let p0 = S2.pt(aa0, d), p1 = S2.pt(aa1, d), u0 = aa0 * T16, u1 = aa1 * T16, v0 = -zz1 * T16, v1 = -zz0 * T16;
@@ -1783,7 +1831,7 @@ void main() {
       );
     };
     for (let S2 of sides) {
-      quadSide(S2, 0, 117, 0, tz1, 0, soil), quadSide(S2, 0, 117, 0, -7, tz0, soil), quadSide(S2, 0, a0, 0, tz0, tz1, soil), quadSide(S2, a1, 117, 0, tz0, tz1, soil);
+      quadSide(S2, 0, 171, 0, tz1, 0, soil), quadSide(S2, 0, 171, 0, -7, tz0, soil), quadSide(S2, 0, a0, 0, tz0, tz1, soil), quadSide(S2, a1, 171, 0, tz0, tz1, soil);
       let st = TUNNEL.station;
       S2.key === "py" ? (quadSide(S2, a0, st[0], TD, tz0, tz1, wall), quadSide(S2, st[0], st[1], TD, tz0, tz1, station), quadSide(S2, st[1], a1, TD, tz0, tz1, wall)) : quadSide(S2, a0, a1, TD, tz0, tz1, wall);
       {
@@ -2092,8 +2140,17 @@ void main() {
     gallery: { name: ["GALLERY", "ART"], bg: 15921126, fg: 1776411, awn: 1776411, goods: "art" },
     boutique: { name: ["BOUTIQUE", "VINTAGE", "SHOES"], bg: 1776411, fg: 15921126, awn: 9054826, goods: "clothes" },
     pharmacy: { name: ["PHARMACY", "DRUGS"], bg: 15921126, fg: 3115590, awn: 2051994, goods: "pharmacy" },
-    diner: { name: ["DINER", "EAT", "LUNCHEONETTE"], bg: 1011562, fg: 16732010, awn: 13119532, goods: "diner" }
-  };
+    diner: { name: ["DINER", "EAT", "LUNCHEONETTE"], bg: 1011562, fg: 16732010, awn: 13119532, goods: "diner" },
+    // shopping-street stores
+    shoes: { name: ["SHOES", "SNEAKERS", "KICKS", "SHOE PALACE"], bg: 1776411, fg: 15909424, awn: 1776411, goods: "shoes" },
+    fashion: { name: ["FASHION", "BOUTIQUE", "DENIM", "THREADS"], bg: 15921126, fg: 9054826, awn: 9054826, goods: "mannequins" },
+    electronics: { name: ["ELECTRONICS", "CAMERAS", "PHONES", "TV & AUDIO"], bg: 2046602, fg: 16777215, awn: 2046602, goods: "tv" },
+    toys: { name: ["TOYS", "TOY BOX", "GAMES"], bg: 15909424, fg: 2777016, awn: 15220762, goods: "toys" },
+    jewelry: { name: ["JEWELRY", "GOLD", "WATCHES"], bg: 1776411, fg: 15255648, awn: 1776411, goods: "jewels" },
+    bakery: { name: ["BAKERY", "PASTRY", "CAKES", "PANADERIA"], bg: 15917768, fg: 9062954, awn: 15044533, goods: "cakes" },
+    records: { name: ["RECORDS", "VINYL", "MUSIC"], bg: 2759226, fg: 5231359, awn: 2759226, goods: "records" },
+    sports: { name: ["SPORTS", "ATHLETIC", "GYM GEAR"], bg: 3115590, fg: 16777215, awn: 3115590, goods: "clothes" }
+  }, SHOPPING = ["shoes", "fashion", "electronics", "toys", "jewelry", "bakery", "records", "sports", "coffee", "books", "pharmacy", "boutique", "pizza"];
   function goods(p, x, y, w, h, kind, rng, t) {
     let cc = winCode(t, !0), put = (xx, yy, c) => {
       xx >= 0 && yy >= 0 && xx < w && yy < h && p.set(x + xx, y + yy, c, cc);
@@ -2168,6 +2225,76 @@ void main() {
         let c = colors[rng.int(0, colors.length - 1)];
         for (let j = 4; j < 14; j++) for (let i = 0; i < 5; i++) j < 6 && (i === 0 || i === 4) || put(xx + i, j, i === 0 ? shade(c, 1.1) : c);
       }
+      return;
+    }
+    if (kind === "shoes") {
+      for (let yy = 4; yy < h - 3; yy += 6) {
+        for (let xx = 0; xx < w; xx++)
+          put(xx, yy + 4, 14210252), put(xx, yy + 5, 9078398);
+        for (let xx = 2; xx + 5 < w; xx += 7) {
+          let c = colors[(xx * 7 + yy) % colors.length];
+          for (let o2 of [0, 3])
+            put(xx + o2, yy + 3, c), put(xx + o2 + 1, yy + 3, c), put(xx + o2 + 1, yy + 2, shade(c, 1.15)), put(xx + o2, yy + 3 - 0, shade(c, 0.85)), put(xx + o2 + 2, yy + 3, 15921126);
+        }
+      }
+      return;
+    }
+    if (kind === "mannequins") {
+      for (let xx = 0; xx < w; xx++) for (let j = h - 3; j < h; j++) put(xx, j, 15262416);
+      for (let xx = 3; xx + 6 < w; xx += 10) {
+        let c = colors[rng.int(0, colors.length - 1)];
+        put(xx + 2, h - 18, 15261908), put(xx + 3, h - 18, 15261908), put(xx + 2, h - 17, 14209220), put(xx + 3, h - 17, 14209220);
+        for (let j = h - 16; j < h - 8; j++) for (let i = 0; i < 6; i++) j === h - 16 && (i === 0 || i === 5) || put(xx + i, j, i === 0 ? shade(c, 1.12) : j > h - 10 ? shade(c, 0.85) : c);
+        for (let j = h - 8; j < h - 3; j++)
+          put(xx + 1, j, 2765638), put(xx + 4, j, 2765638);
+      }
+      return;
+    }
+    if (kind === "tv") {
+      let sc = winCode(0, !0);
+      for (let yy = 2; yy + 7 < h - 3; yy += 9)
+        for (let xx = 1; xx + 10 < w; xx += 12)
+          for (let j = 0; j < 8; j++) for (let i = 0; i < 11; i++) p.set(x + xx + i, y + yy + j, i === 0 || j === 0 || i === 10 || j === 7 ? 1710622 : mixc(colors[(xx + yy) % colors.length], 2777016, j / 7 * 0.6), sc);
+      return;
+    }
+    if (kind === "toys") {
+      for (let yy = 3; yy < h - 3; yy += 7) {
+        for (let xx = 0; xx < w; xx++) put(xx, yy + 6, 15921126);
+        for (let xx = 1; xx < w - 3; xx += 4) {
+          let c = colors[(xx * 5 + yy * 3) % colors.length], k = (xx + yy) % 3;
+          k === 0 ? (put(xx, yy + 3, c), put(xx + 1, yy + 3, c), put(xx, yy + 4, c), put(xx + 1, yy + 4, c), put(xx, yy + 5, shade(c, 0.7)), put(xx + 1, yy + 5, shade(c, 0.7))) : k === 1 ? (put(xx + 1, yy + 2, 15909424), put(xx, yy + 3, c), put(xx + 1, yy + 3, c), put(xx + 2, yy + 3, c), put(xx, yy + 5, 1973794), put(xx + 2, yy + 5, 1973794), put(xx + 1, yy + 4, c)) : (put(xx + 1, yy + 1, c), put(xx, yy + 2, c), put(xx + 2, yy + 2, c), put(xx + 1, yy + 3, c), put(xx + 1, yy + 4, 6965818), put(xx + 1, yy + 5, 6965818));
+        }
+      }
+      return;
+    }
+    if (kind === "jewels") {
+      for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) yy > h * 0.45 && put(xx, yy, yy === Math.floor(h * 0.45) + 1 ? 6969914 : 2759210);
+      for (let k = 0; k < Math.floor(w / 3); k++) {
+        let xx = rng.int(1, w - 2), yy = rng.int(Math.floor(h * 0.5), h - 3);
+        put(xx, yy, rng.chance(0.5) ? 15917184 : 15266047), rng.chance(0.4) && put(xx + 1, yy, 13150272);
+      }
+      return;
+    }
+    if (kind === "cakes") {
+      for (let xx = 0; xx < w; xx++) {
+        put(xx, h - 6, 14210252);
+        for (let j = h - 5; j < h; j++) put(xx, j, 15260872);
+      }
+      for (let xx = 2; xx + 6 < w; xx += 8) {
+        let c = [15915232, 15921126, 9062954, 15251552][(xx >> 3) % 4];
+        for (let j = 0; j < 4; j++) for (let i = 0; i < 6; i++) put(xx + i, h - 10 + j, j === 0 ? shade(c, 1.12) : c);
+        put(xx + 2, h - 11, 14168108), put(xx + 3, h - 11, 14168108);
+      }
+      for (let xx = 1; xx < w - 1; xx += 3)
+        put(xx, 4, 12884064), put(xx + 1, 4, 11565120);
+      return;
+    }
+    if (kind === "records") {
+      for (let yy = 2; yy + 6 < h - 2; yy += 8)
+        for (let xx = 1; xx + 6 < w; xx += 7) {
+          let c = colors[(xx + yy * 3) % colors.length];
+          for (let j = 0; j < 6; j++) for (let i = 0; i < 6; i++) put(xx + i, yy + j, (i - 2.5) ** 2 + (j - 2.5) ** 2 < 2.5 ? 1973794 : c);
+        }
       return;
     }
     for (let yy = 2; yy < h - 4; yy += 7) {
@@ -2376,9 +2503,9 @@ void main() {
     }
   };
   function markHeight(world, x0, y0, x1, y1, h) {
-    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(117, Math.ceil(y1)); y++)
-      for (let x = Math.max(0, Math.floor(x0)); x < Math.min(117, Math.ceil(x1)); x++) {
-        let i = y * 117 + x;
+    for (let y = Math.max(0, Math.floor(y0)); y < Math.min(171, Math.ceil(y1)); y++)
+      for (let x = Math.max(0, Math.floor(x0)); x < Math.min(171, Math.ceil(x1)); x++) {
+        let i = y * 171 + x;
         world.heights[i] < h && (world.heights[i] = h);
       }
   }
@@ -2695,15 +2822,9 @@ void main() {
           for (let yy = 0; yy < 26; yy++) for (let xx = 0; xx < sw; xx++) hash2i(xx + sx, yy + sy, 3) < 0.3 && p.blend(sx + xx, sy + yy, wallPal[0], 0.5);
         }
       }
-    }, front = region(C, tw, th, (p) => paintFacade(p, tw, !0, !1)), sideW = Math.round(D * 32), sideFacade = o.cornerSide ? region(C, sideW, th, (p) => paintFacade(p, sideW, !1, !0)) : null, plainSide = { brickRed: S2.brickRed, brickBrown: S2.brickBrown, brickOrange: S2.brickOrange, brickTan: S2.brickTan, brickPurple: S2.brickPurple }[brickName], back = region(C, tw, th, (p) => {
-      brickFill(p, 0, 0, tw, th, wallPal, rng.int(1, 999));
-      for (let f = 0; f < nF + 1; f++) {
-        let fy = Math.round((band2 + f * fH) * 32);
-        for (let b = 0; b < nb; b++) {
-          let cx = Math.round(bayW * b + bayW / 2);
-          drawWindow(p, cx - 8, fy + 12, 16, 24, { frame: 15921126, sill: 10132120, t: rng.next() }, rng);
-        }
-      }
+    }, front = region(C, tw, th, (p) => paintFacade(p, tw, !0, !1)), sideW = Math.round(D * 32), sideFacade = o.cornerSide ? region(C, sideW, th, (p) => paintFacade(p, sideW, !1, !0)) : null, plainSide = { brickRed: S2.brickRed, brickBrown: S2.brickBrown, brickOrange: S2.brickOrange, brickTan: S2.brickTan, brickPurple: S2.brickPurple }[brickName], back = C.atlas.shared(`wback_${brickName}`, 72, 48, (p) => {
+      brickFill(p, 0, 0, 72, 48, wallPal, 7);
+      for (let b = 0; b < 2; b++) drawWindow(p, b * 36 + 10, 12, 16, 24, { frame: 15921126, sill: 10132120, t: 0.3 + b * 0.4 }, rng);
     }), top = rng.pick([S2.roofTar, S2.roofSilver, S2.roofGravel]), sides = {
       left: o.cornerSide === "L" ? sideFacade : plainSide,
       right: o.cornerSide === "R" ? sideFacade : plainSide
@@ -2727,7 +2848,7 @@ void main() {
         for (let x = 0; x < valW; x++) (x % 8 === 0 || x % 8 === 7) && (p.setA(x, 7, 0), p.setA(x, 6, x % 8 === 0 ? 0 : 255));
         p.hline(0, 0, valW, shade(awnC, 1.2)), shopInfo.name && textWidth(shopInfo.name, 1, !0) < valW - 8 && p.text7(Math.floor((valW - textWidth(shopInfo.name, 1, !0)) / 2), 0, shopInfo.name, striped ? 1776411 : 16777215);
       });
-      if (rng.chance(0.8)) {
+      if (rng.chance(o.awning ?? 0.8)) {
         let p0 = fr.pt(aA0, 0), p1 = fr.pt(aA1, 0), q0 = fr.pt(aA0, -1), q1 = fr.pt(aA1, -1);
         mb.slope([q0[0], q0[1], zA - 0.35], [q1[0], q1[1], zA - 0.35], [p0[0], p0[1], zA + 0.1], [p1[0], p1[1], zA + 0.1], awTex, { mat: MAT.SNOW | MAT.WET }), fr.facadeQuad(mb, aA0, aA1, -1, zA - 0.6, zA - 0.35, valance);
       }
@@ -2749,7 +2870,65 @@ void main() {
     let roof = { a0, a1: a0 + W, d0: 0, d1: D, z: zTop };
     roofClutter(C, fr, roof, { waterTower: o.waterTower ?? rng.chance(0.45), billboard: o.billboard });
     let rdA = o.resDoorLeft ? toA(12) : toA(resDoorX + 10), st = fr.pt(shop ? rdA : a0 + W / 2, -0.7), dp = fr.pt(shop ? rdA : a0 + W / 2, 0.2);
-    return C.world.doors.push({ x: st[0], y: st[1], sx: st[0], sy: st[1], dx: dp[0], dy: dp[1], dz: z0, kind: "home", n: fr.n }), { H: zTop };
+    return C.world.doors.push({ x: st[0], y: st[1], sx: st[0], sy: st[1], dx: dp[0], dy: dp[1], dz: z0, kind: "home", n: fr.n }), o.canopy && entranceCanopy(C, fr, shop ? rdA : a0 + W / 2, z0, o.number, o.canopyColor ?? rng.pick([2050607, 5906218, 2043722, 2829104, 6954783])), { H: zTop };
+  }
+  function entranceCanopy(C, fr, a, z0, number, col) {
+    let { mb } = C, cw = 1.05, cd = 1.2, cz = z0 + 2.05, top = C.atlas.shared(`canopy_${col}`, 32, 32, (p2) => {
+      smoothFill(p2, 0, 0, 32, 32, col, 7, 0.05);
+      for (let x = 0; x < 32; x += 8) p2.vline(x, 0, 32, shade(col, 0.82));
+    }), label = number != null ? String(number) : "", val = C.atlas.shared(`canopy_v_${col}_${label}`, 34, 8, (p2) => {
+      p2.rect(0, 0, 34, 8, col), p2.hline(0, 0, 34, shade(col, 1.3)), p2.hline(0, 7, 34, shade(col, 0.55)), label && p2.text7(Math.floor((34 - textWidth(label, 1, !0)) / 2), 0, label, 15917744, winCode(0, !0));
+    }), side = C.atlas.shared(`canopy_s_${col}`, 32, 8, (p2) => {
+      p2.rect(0, 0, 32, 8, col), p2.hline(0, 0, 32, shade(col, 1.3)), p2.hline(0, 7, 32, shade(col, 0.55));
+    });
+    fr.box(mb, a - cw / 2, a + cw / 2, -cd, 0, cz, cz + 0.25, { front: val, left: side, right: side, top: { t: top } });
+    let brass = C.atlas.shared("brass", 8, 8, (p2) => smoothFill(p2, 0, 0, 8, 8, 13148240, 3, 0.06));
+    for (let pa of [a - cw / 2 + 0.05, a + cw / 2 - 0.05]) fr.box(mb, pa - 0.03, pa + 0.03, -cd + 0.03, -cd + 0.09, z0, cz, { front: brass, left: brass, right: brass, back: brass, top: brass });
+    let p = fr.pt(a, -cd + 0.06);
+    C.world.canopies.push({ x: p[0], y: p[1] }), C.world.lamps.push({ x: p[0] - fr.nx * 0.3, y: p[1] - fr.ny * 0.3, z: cz - 0.2, r: 1.6, color: [1, 0.86, 0.6], k: 0.45, kind: "shop" });
+  }
+  function deptStore(C, fr, a0, W, D, o = {}) {
+    let { mb, rng } = C, S2 = sharedTex(C), nF = o.floors ?? 6, gH = 2.5, fH = 1.6, band2 = 1, H = gH + nF * fH + band2, z0 = fr.z0, tw = Math.round(W * 32), th = Math.round(H * 32), name = o.name ?? rng.pick(["BEAUMONT & CO", "HALLORAN BROS", "GRAND EMPORIUM", "MERRIWEATHER"]), nb = Math.round(tw / 40), bw = tw / nb, paint = (p, wide, front2) => {
+      stoneFill(p, 0, 0, wide, th, PAL.limestone, 31, 16, { blocks: 32 }), p.rect(0, 0, wide, 10, 14208176), p.hline(0, 10, wide, 10129012);
+      for (let x = 2; x < wide; x += 6) p.rect(x, 3, 3, 4, 15524552);
+      let n = Math.max(2, Math.round(wide / 40)), bww = wide / n;
+      for (let f = 0; f < nF; f++) {
+        let fy = Math.round((band2 + f * fH) * 32);
+        for (let b = 0; b < n; b++) {
+          let cx = Math.round(bww * b + bww / 2);
+          drawWindow(p, cx - 10, fy + 10, 20, 34, { frame: 2829104, lintel: 15524552, sill: 15524552, t: rng.next() * 0.6, panes: "2/2", keystone: f === nF - 1 }, rng);
+        }
+        f === nF - 1 && (p.rect(0, fy + 50, wide, 3, 15524552), p.hline(0, fy + 52, wide, 10129012));
+      }
+      let gy = Math.round((band2 + nF * fH) * 32), gh = th - gy;
+      p.rect(0, gy, wide, 16, 2046511), p.hline(0, gy, wide, 13148240), p.hline(0, gy + 15, wide, 13148240), (front2 || wide > 160) && signBoard(p, Math.floor(wide * 0.15), gy + 2, Math.floor(wide * 0.7), 12, name, { bg: 2046511, fg: 15255648, t: 0, shadow: !1 });
+      let dn = Math.max(2, Math.round(wide / 48)), dww = wide / dn, lit = winCode(0, !0);
+      for (let b = 0; b < dn; b++) {
+        let x0 = Math.round(b * dww) + 4, x1 = Math.round((b + 1) * dww) - 4;
+        if (p.rect(x0 - 4, gy + 16, 4, gh - 16, 14208176), front2 && (b === 1 || b === dn - 2) && dn >= 4) {
+          p.rect(x0, gy + 20, x1 - x0, gh - 20, 13148240), p.rect(x0 + 3, gy + 24, x1 - x0 - 6, gh - 24, 4216685, winCode(0.02));
+          for (let k = 0; k < 3; k++) p.vline(x0 + 6 + k * Math.floor((x1 - x0 - 12) / 2), gy + 24, gh - 24, 13148240);
+          continue;
+        }
+        for (let yy = gy + 20; yy < th - 6; yy++) for (let xx = x0; xx < x1; xx++) p.set(xx, yy, shade(15918792, 1.02 - (yy - gy - 20) * 6e-3), lit);
+        for (let m = x0 + 6; m + 6 < x1; m += 14) {
+          let c = [14168108, 2777016, 1973794, 15254090, 3115590][(m + b * 3) % 5];
+          p.rect(m + 2, th - 30, 2, 2, 15261908, lit), p.rect(m, th - 28, 6, 12, c, lit), p.rect(m + 1, th - 16, 1, 8, 2763312, lit), p.rect(m + 4, th - 16, 1, 8, 2763312, lit);
+        }
+        p.rect(x0, th - 6, x1 - x0, 6, 9075290);
+      }
+    }, front = region(C, tw, th, (p) => paint(p, tw, !0)), sideW = Math.round(D * 32), sideT = region(C, sideW, th, (p) => paint(p, sideW, !1)), aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front, back: S2.limestone, left: sideT, right: sideT, top: { t: S2.roofGravel, world: !0 } }));
+    markHeight(C.world, ...aabb, z0 + H), fr.box(mb, a0 - 0.15, a0 + W + 0.15, -0.3, D + 0.15, z0 + H - 0.3, z0 + H, { front: S2.limestone, left: S2.limestone, right: S2.limestone, back: S2.limestone, top: { t: S2.limeTop, world: !0 } });
+    for (let f of [0.28, 0.72]) C.addFlag(fr, a0 + W * f, -0.05, z0 + gH + fH * 1.2, "hotel");
+    for (let k = 0; k < 4; k++) {
+      let lp = fr.pt(a0 + W * (k + 0.5) / 4, -0.9);
+      C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 2.6, color: [1, 0.9, 0.7], k: 0.55, kind: "shop" });
+    }
+    for (let f of [1.5 / 4, 2.5 / 4]) {
+      let st = fr.pt(a0 + W * f, -0.8), dp = fr.pt(a0 + W * f, 0.4);
+      C.world.shops.push({ kind: "dept", name, x: st[0], y: st[1], dx: dp[0], dy: dp[1], n: fr.n });
+    }
+    return roofClutter(C, fr, { a0, a1: a0 + W, d0: 0, d1: D, z: z0 + H }, { waterTower: !1 }), { H };
   }
   function ptObj(p) {
     return { x: p[0], y: p[1] };
@@ -3159,15 +3338,7 @@ void main() {
         let inset = Math.floor(y / 4);
         for (let x = inset; x < 14 - inset; x++) ((x + y) % 3 === 0 || (x - y + 99) % 3 === 0) && p.set(x, y, 15921904);
       }
-    }), P.rim = solid("rim", 15228954, 0.02), P.stack = A.shared("steam_stack", 32, 32, (p) => {
-      for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(Math.floor(y / 8) % 2 ? 15921902 : 15759898, 0.94 + hash2i(x, y, 3) * 0.08));
-    }), P.stackTop = A.shared("steam_stack_t", 16, 16, (p) => {
-      p.rect(0, 0, 16, 16, 3815994), p.ellipse(8, 8, 5, 5, 1710618);
-    }), P.barrel = A.shared("barrel", 16, 20, (p) => {
-      for (let y = 0; y < 20; y++) p.rect(0, y, 16, 1, y % 8 < 4 ? 15759898 : 15921902);
-      p.hline(0, 0, 16, 2763306);
-      for (let x = 0; x < 16; x += 4) p.set(x, 2, 16765088);
-    }), P.cone = A.shared("cone", 16, 14, (p) => {
+    }), P.rim = solid("rim", 15228954, 0.02), P.cone = A.shared("cone", 16, 14, (p) => {
       for (let y = 0; y < 14; y++) p.rect(0, y, 16, 1, y >= 5 && y <= 7 ? 15921902 : 15759898);
       p.rect(0, 12, 16, 2, 2763306);
     }), P.stoneWall = A.shared("parkwall", 64, 22, (p) => {
@@ -3267,12 +3438,9 @@ void main() {
     for (let t of [-0.45, 0, 0.45]) seats.push(axis === "x" ? { x: x + t, y, z: z + 0.32, face: [0, f] } : { x, y: y + t, z: z + 0.32, face: [f, 0] });
     C.world.benches.push({ x, y, axis, seats, used: [!1, !1, !1] });
   }
-  function steamStack(C, x, y) {
-    let P = propTex(C);
-    C.mb.cylinder(x, y, 0, 2.6, 0.32, 8, P.stack, P.stackTop);
-    for (let [dx, dy] of [[-0.7, -0.6], [0.7, 0.6], [0.65, -0.7], [-0.6, 0.7]])
-      C.mb.cylinder(x + dx, y + dy, 0, 0.62, 0.18, 6, P.barrel, P.orange);
-    C.world.steam.push({ x, y, z: 2.65, kind: "stack", rate: 1 }), markHeight(C.world, x - 0.4, y - 0.4, x + 0.4, y + 0.4, 2.6);
+  function steamGrate(C, x, y, axis, len = 1.8, wid = 0.72) {
+    let hx = axis === "x" ? len / 2 : wid / 2, hy = axis === "x" ? wid / 2 : len / 2;
+    C.paintGround(x - hx, y - hy, x + hx, y + hy, axis === "x" ? "grateX" : "grateY"), C.world.steam.push({ x, y, z: 0.125 + 0.02, kind: "grate", rate: 0.75, ax: hx - 0.15, ay: hy - 0.15 }), C.world.grates.push({ x, y, axis, len, wid });
   }
   function kiosk(C, x, y) {
     let P = propTex(C);
@@ -3336,21 +3504,44 @@ void main() {
     let back = C.atlas.alloc(W, H);
     smoothFill(back.p, 0, 0, W, H, 12170926, 4, 0.05), mural(back.p, 6, 6, W - 12, H - 24, C.rng), x1 - x0 > y1 - y0 ? C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { py: front, ny: back, px: P.concrete, nx: P.concrete, pz: P.concrete }) : C.mb.box(x0, y0, 0.125, x1, y1, 0.125 + h, { px: front, nx: back, py: P.concrete, ny: P.concrete, pz: P.concrete }), markHeight(C.world, x0, y0, x1, y1, 0.125 + h);
   }
+  function beam(C, a, b, w, tex) {
+    let dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2], L = Math.hypot(dx, dy, dz) || 1, d = [dx / L, dy / L, dz / L], u = Math.abs(d[2]) < 0.9 ? [d[1], -d[0], 0] : [1, 0, 0], ul = Math.hypot(u[0], u[1], u[2]);
+    u = u.map((v2) => v2 / ul);
+    let v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]], h = w / 2, P = (o, su, sv) => [o[0] + (u[0] * su + v[0] * sv) * h, o[1] + (u[1] * su + v[1] * sv) * h, o[2] + (u[2] * su + v[2] * sv) * h], corners = [[1, 1], [-1, 1], [-1, -1], [1, -1]], len = L * 32, wt = w * 32;
+    for (let k = 0; k < 4; k++) {
+      let [su0, sv0] = corners[k], [su1, sv1] = corners[(k + 1) % 4], n = [(u[0] * (su0 + su1) + v[0] * (sv0 + sv1)) / 2, (u[1] * (su0 + su1) + v[1] * (sv0 + sv1)) / 2, (u[2] * (su0 + su1) + v[2] * (sv0 + sv1)) / 2];
+      C.mb.quad(P(b, su0, sv0), P(b, su1, sv1), P(a, su1, sv1), P(a, su0, sv0), [[0, 0], [wt, 0], [wt, len], [0, len]], tex, n, 0);
+    }
+  }
   function playground(C, x0, y0, x1, y1) {
     let P = propTex(C), z = 0.125;
     C.paintGround(x0, y0, x1, y1, "rubber");
-    let sx = x0 + 1.2, sy = y0 + 0.8;
+    let sx = x0 + 1.2, sy = y0 + 0.8, top = z + 1.95;
     for (let dx of [0, 2.4])
-      solidBox(C, sx + dx - 0.05, sy - 0.05, z, sx + dx + 0.05, sy + 0.05, z + 1.9, P.red), solidBox(C, sx + dx - 0.05, sy + 1.15, z, sx + dx + 0.05, sy + 1.25, z + 1.9, P.red);
-    solidBox(C, sx - 0.05, sy + 0.55, z + 1.85, sx + 2.45, sy + 0.65, z + 1.95, P.red);
+      for (let ly of [sy - 0.05, sy + 1.25]) beam(C, [sx + dx, ly, z], [sx + dx, sy + 0.6, top - 0.05], 0.09, P.red);
+    solidBox(C, sx - 0.12, sy + 0.55, top - 0.1, sx + 2.52, sy + 0.65, top, P.red);
     for (let dx of [0.7, 1.7])
-      C.world.swings.push({ x: sx + dx, y: sy + 0.6, z: z + 0.45, top: z + 1.85 });
-    let tx = x1 - 1.6, ty = y0 + 0.8;
-    solidBox(C, tx, ty, z, tx + 0.8, ty + 0.8, z + 1.2, P.yellow, P.blue);
+      C.world.swings.push({ x: sx + dx, y: sy + 0.6, z: z + 0.42, top: top - 0.06, amp: 0, ph: dx * 2.1 });
+    let tx = x1 - 1.6, ty = y0 + 0.8, pz = z + 1.15, rz = pz + 1.15;
+    for (let [px, py] of [[tx, ty], [tx + 0.8, ty], [tx, ty + 0.8], [tx + 0.8, ty + 0.8]]) solidBox(C, px - 0.05, py - 0.05, z, px + 0.05, py + 0.05, rz, P.blue);
+    solidBox(C, tx - 0.02, ty - 0.02, pz - 0.08, tx + 0.82, ty + 0.82, pz, P.yellow, P.wood);
+    for (let px of [tx, tx + 0.8]) solidBox(C, px - 0.03, ty, pz, px + 0.03, ty + 0.8, pz + 0.42, P.yellow, P.yellow);
+    C.mb.pyramid(tx - 0.12, ty - 0.12, tx + 0.92, ty + 0.92, rz, rz + 0.42, P.red), solidBox(C, tx - 0.12, ty - 0.12, rz - 0.06, tx + 0.92, ty + 0.92, rz + 0.01, P.red);
+    for (let lx of [tx + 0.18, tx + 0.62]) solidBox(C, lx - 0.03, ty - 0.08, z, lx + 0.03, ty - 0.02, pz + 0.35, P.silver);
+    for (let k = 1; k <= 4; k++) solidBox(C, tx + 0.18, ty - 0.08, z + k * 0.24 - 0.02, tx + 0.62, ty - 0.03, z + k * 0.24 + 0.02, P.silver);
     let chute = C.atlas.shared("chute", 24, 32, (p) => {
-      p.rect(0, 0, 24, 32, 15253552), p.rect(0, 0, 3, 32, 13146656), p.rect(21, 0, 3, 32, 13146656), p.vline(3, 0, 32, 16310384);
-    });
-    C.mb.slope([tx + 0.05, ty + 2.6, z + 0.1], [tx + 0.75, ty + 2.6, z + 0.1], [tx + 0.05, ty + 0.8, z + 1.2], [tx + 0.75, ty + 0.8, z + 1.2], chute, { mat: MAT.SNOW }), C.world.slides.push({ x: tx + 0.4, y: ty + 0.4, z: z + 1.2, ex: tx + 0.4, ey: ty + 2.5 });
+      p.rect(0, 0, 24, 32, 15253552), p.rect(0, 0, 2, 32, 13146656), p.rect(22, 0, 2, 32, 13146656), p.vline(2, 0, 32, 16310384);
+      for (let y = 0; y < 32; y += 8) p.hline(3, y, 18, 15780936);
+    }), cx0 = tx + 0.08, cx1 = tx + 0.72, c0 = ty + 0.8, c1 = ty + 2.5, zt = pz, zb = z + 0.24;
+    C.mb.slope([cx0, c1, zb], [cx1, c1, zb], [cx0, c0, zt], [cx1, c0, zt], chute, { mat: MAT.SNOW });
+    let wallH = 0.16;
+    for (let wx of [cx0, cx1]) {
+      let len = Math.hypot(c1 - c0, zt - zb) * 32;
+      C.mb.quad([wx, c0, zt + wallH], [wx, c1, zb + wallH], [wx, c1, zb], [wx, c0, zt], [[0, 0], [len, 0], [len, 6], [0, 6]], P.yellow, [wx === cx0 ? -1 : 1, 0, 0], 0), solidBox(C, wx - 0.02, c1, zb - 0.06, wx + 0.02, c1 + 0.45, zb + wallH, P.yellow);
+    }
+    solidBox(C, cx0, c1, zb - 0.06, cx1, c1 + 0.45, zb, P.yellow, chute);
+    for (let lx of [cx0 + 0.04, cx1 - 0.04]) solidBox(C, lx - 0.03, c1 - 0.03, z, lx + 0.03, c1 + 0.03, zb - 0.06, P.blue);
+    C.world.slides.push({ x: tx + 0.4, y: ty + 0.45, z: pz, ex: tx + 0.4, ey: c1 + 0.35, ez: zb, cy: c0, cz: zt, by: c1, lx: tx + 0.4, ly: ty - 0.32 });
     let cx = (x0 + x1) / 2, cy = y1 - 1.3;
     for (let k = -2; k <= 2; k++)
       solidBox(C, cx + k * 0.35 - 0.03, cy - 0.8, z, cx + k * 0.35 + 0.03, cy + 0.8, z + 0.9 - Math.abs(k) * 0.15, P.blue), solidBox(C, cx - 0.8, cy + k * 0.35 - 0.03, z + 0.9 - Math.abs(k) * 0.15 - 0.06, cx + 0.8, cy + k * 0.35 + 0.03, z + 0.9 - Math.abs(k) * 0.15, P.green);
@@ -3789,6 +3980,289 @@ void main() {
     }
   }
 
+  // src/world/timessq.js
+  var PI2 = Math.PI;
+  function fitText(p, s, x, y, w, h, c, a, sh = null, maxScale = 4) {
+    for (let sc = maxScale; sc >= 1; sc--) {
+      let tw = textWidth(s, sc, !0);
+      if (tw <= w && 7 * sc <= h) {
+        let tx = x + Math.floor((w - tw) / 2), ty = y + Math.floor((h - 7 * sc) / 2);
+        return sh != null && p.text7(tx + Math.max(1, sc >> 1), ty + Math.max(1, sc >> 1), s, sh, a, sc), p.text7(tx, ty, s, c, a, sc), sc;
+      }
+    }
+    return 0;
+  }
+  var AD_KINDS = ["cola", "musical", "noodles", "phone", "sale", "news", "movie", "perfume", "game", "jeans", "hello", "wave", "burger", "cruise"];
+  function paintAd(p, x, y, w, h, kind, rng, a) {
+    let R2 = (xx, yy, ww, hh, c) => p.rect(x + Math.round(xx), y + Math.round(yy), Math.round(ww), Math.round(hh), c, a), E = (cx, cy, rx, ry, c) => p.ellipse(x + cx, y + cy, rx, ry, c, a), G3 = (c0, c1) => p.vgrad(x, y, w, h, c0, c1, a), big = h > 70;
+    switch (kind) {
+      case "cola": {
+        R2(0, 0, w, h, 14164012);
+        for (let xx = 0; xx < w; xx++) {
+          let wy = Math.floor(h * 0.68 + Math.sin(xx * 0.08) * h * 0.05);
+          R2(xx, wy, 1, Math.max(2, h * 0.06), 16777215);
+        }
+        let bw = Math.max(8, w * 0.12), bx = w - bw * 1.8;
+        R2(bx, h * 0.18, bw, h * 0.7, 5901838), R2(bx + bw * 0.2, h * 0.22, bw * 0.2, h * 0.6, 12075072), R2(bx + bw * 0.25, h * 0.08, bw * 0.5, h * 0.12, 14211288), R2(bx, h * 0.45, bw, h * 0.12, 15921126), fitText(p, "PIXEL", x + 4, y + 2, bx - 8, h * 0.32, 16777215, a, 6950420), fitText(p, "COLA", x + 4, y + h * 0.32, bx - 8, h * 0.34, 16767055, a, 6950420);
+        break;
+      }
+      case "musical": {
+        G3(3805280, 1049886);
+        for (let k = 0; k < Math.floor(w * h / 120); k++) {
+          let sx = rng.int(0, w - 1), sy = rng.int(0, h - 1);
+          R2(sx, sy, 1, 1, rng.chance(0.5) ? 16769658 : 11571455);
+        }
+        for (let k = 0; k < 5; k++) {
+          let sx = (k + 0.5) * w / 5, sy = h * 0.15 + k % 2 * h * 0.08;
+          R2(sx - 1, sy - 3, 2, 6, 16767055), R2(sx - 3, sy - 1, 6, 2, 16767055);
+        }
+        fitText(p, "SKYLINE", x + 3, y + h * 0.28, w - 6, h * 0.36, 16767055, a, 6961664), fitText(p, "THE MUSICAL", x + 3, y + h * 0.66, w - 6, h * 0.22, 16777215, a, null, 2);
+        break;
+      }
+      case "noodles": {
+        R2(0, 0, w, h, 15759898);
+        let cx = w * 0.72, cy = h * 0.62, r = Math.min(w, h) * 0.26;
+        E(cx, cy, r, r * 0.55, 15921126), E(cx, cy - r * 0.1, r * 0.85, r * 0.35, 15253600);
+        for (let k = 0; k < 6; k++) R2(cx - r * 0.6 + k * r * 0.22, cy - r * 0.25, 1, r * 0.25, 14196800);
+        R2(cx - r * 0.3, cy - r * 1.3, 2, r, 6961690), R2(cx + r * 0.1, cy - r * 1.35, 2, r, 6961690);
+        for (let k = 0; k < 3; k++) for (let j = 0; j < 4; j++) R2(cx - r * 0.6 + k * r * 0.5 + Math.sin(j) * 2, cy - r * 0.9 - j * 3, 1, 2, 16773840);
+        fitText(p, "NEON", x + 3, y + 3, w * 0.5, h * 0.4, 16777215, a, 9058816), fitText(p, "NOODLES", x + 3, y + h * 0.45, w * 0.5, h * 0.3, 2759184, a);
+        break;
+      }
+      case "phone": {
+        R2(0, 0, w, h, 723728);
+        let pw = Math.max(10, w * 0.18), ph = h * 0.8, px = w * 0.68, py = h * 0.1;
+        R2(px - 1, py - 1, pw + 2, ph + 2, 6974068);
+        for (let yy = 0; yy < ph; yy++) R2(px, py + yy, pw, 1, mixc(2810111, 16726744, yy / ph));
+        fitText(p, "ROCKET X", x + 3, y + h * 0.18, px - 8, h * 0.3, 16777215, a), fitText(p, "NEW", x + 3, y + h * 0.55, px - 8, h * 0.22, 2810111, a, null, 2);
+        break;
+      }
+      case "sale": {
+        R2(0, 0, w, h, 16766976);
+        for (let k = -h; k < w; k += 12) for (let yy = 0; yy < h; yy++) {
+          let xx = k + yy;
+          xx >= 0 && xx < w && yy & 1 && R2(xx, yy, 1, 1, 16761856);
+        }
+        fitText(p, "SALE", x + 3, y + 2, w - 6, h * 0.5, 14164012, a, 7999504), fitText(p, "50% OFF", x + 3, y + h * 0.52, w - 6, h * 0.4, 1776411, a);
+        break;
+      }
+      case "news": {
+        G3(801418, 268874), R2(0, h * 0.62, w, h * 0.12, 14164012), fitText(p, "NEWS 24", x + 3, y + h * 0.08, w - 6, h * 0.5, 16777215, a, 135210), fitText(p, "LIVE", x + 3, y + h * 0.62, w * 0.4, h * 0.12, 16777215, a, null, 2), R2(w * 0.75, h * 0.8, w * 0.2, h * 0.12, 16777215);
+        break;
+      }
+      case "movie": {
+        G3(1705221, 5900816), E(w * 0.7, h * 0.35, h * 0.22, h * 0.22, 15918784);
+        for (let k = 0; k < 9; k++) {
+          let bw = w / 9, bh = h * (0.18 + hash2i(k, 3, 9) * 0.3);
+          R2(k * bw, h - bh, bw - 1, bh, 656645);
+        }
+        fitText(p, "LAST TAXI", x + 3, y + h * 0.05, w * 0.62, h * 0.3, 16764719, a, 3801088), fitText(p, "FRIDAY", x + 3, y + h * 0.4, w * 0.5, h * 0.16, 16777215, a, null, 2);
+        break;
+      }
+      case "perfume": {
+        G3(16165072, 11571440);
+        let bx = w * 0.62, bw = Math.max(10, w * 0.16);
+        R2(bx, h * 0.38, bw, h * 0.48, 16314623), R2(bx + 2, h * 0.42, bw - 4, h * 0.4, 14708912), R2(bx + bw * 0.3, h * 0.24, bw * 0.4, h * 0.14, 13148240), fitText(p, "BLOSSOM", x + 3, y + h * 0.3, bx - 6, h * 0.3, 16777215, a, 9058922);
+        break;
+      }
+      case "game": {
+        R2(0, 0, w, h, 3115590);
+        for (let xx = 0; xx < w; xx += 10) R2(xx, 0, 5, h, 3381836);
+        R2(0, h * 0.5, w, 1, 16777215), E(w * 0.5, h * 0.5, h * 0.18, h * 0.18, 16777215), E(w * 0.5, h * 0.5, h * 0.16, h * 0.16, 3115590), E(w * 0.78, h * 0.3, h * 0.1, h * 0.1, 15921126), R2(w * 0.78 - 1, h * 0.3 - 1, 2, 2, 1776411), fitText(p, "GAME NIGHT", x + 3, y + h * 0.05, w - 6, h * 0.3, 16777215, a, 670234);
+        break;
+      }
+      case "jeans": {
+        R2(0, 0, w, h, 2771594);
+        for (let yy = 0; yy < h; yy++) for (let xx = yy * 3 % 4; xx < w; xx += 4) R2(xx, yy, 1, 1, 3430042);
+        R2(0, h * 0.85, w, 1, 15245376), R2(w * 0.06, 0, 1, h, 15245376), fitText(p, "SUNSET", x + 3, y + h * 0.12, w - 6, h * 0.38, 16751162, a, 1056842), fitText(p, "JEANS", x + 3, y + h * 0.52, w - 6, h * 0.3, 16777215, a);
+        break;
+      }
+      case "hello": {
+        R2(0, 0, w, h, 16316660), fitText(p, "HELLO", x + 3, y + 3, w * 0.62, h * 0.42, 1776411, a), fitText(p, "PIXEL CITY", x + 3, y + h * 0.52, w * 0.62, h * 0.32, 1776411, a), fitText(p, "@", x + w * 0.62, y + 2, w * 0.36, h - 4, 14164012, a, null, 8);
+        break;
+      }
+      case "wave": {
+        let cols = [16726618, 16751146, 16769082, 4907114, 2799871, 9067263];
+        for (let xx = 0; xx < w; xx++) for (let yy = 0; yy < h; yy++) {
+          let k = Math.floor((yy + Math.sin(xx * 0.09) * h * 0.18) / h * cols.length + 6) % cols.length;
+          R2(xx, yy, 1, 1, cols[k]);
+        }
+        fitText(p, "LIVE", x + 3, y + 3, w - 6, h - 6, 16777215, a, 1776411);
+        break;
+      }
+      case "burger": {
+        R2(0, 0, w, h, 16764719);
+        let cx = w * 0.72, cy = h * 0.58, r = Math.min(w * 0.18, h * 0.32);
+        E(cx, cy - r * 0.45, r, r * 0.55, 14191152), R2(cx - r, cy - r * 0.1, r * 2, r * 0.25, 4885034), R2(cx - r, cy + r * 0.12, r * 2, r * 0.3, 6957594), E(cx, cy + r * 0.55, r, r * 0.3, 14191152);
+        for (let k = 0; k < 6; k++) R2(cx - r * 0.6 + k * r * 0.25, cy - r * 0.7, 1, 1, 16314576);
+        fitText(p, "BIG BITE", x + 3, y + h * 0.15, w * 0.5, h * 0.4, 13119532, a, 6953472);
+        break;
+      }
+      default: {
+        G3(8048895, 2783928), R2(0, h * 0.7, w, h * 0.3, 1727130);
+        for (let xx = 0; xx < w; xx += 6) R2(xx, h * 0.72 + (xx % 12 ? 1 : 3), 3, 1, 14217471);
+        R2(w * 0.5, h * 0.52, w * 0.36, h * 0.18, 16316660), R2(w * 0.58, h * 0.42, w * 0.2, h * 0.1, 16316660), R2(w * 0.66, h * 0.32, w * 0.04, h * 0.1, 14164012), fitText(p, "SAIL AWAY", x + 3, y + h * 0.06, w - 6, h * 0.34, 16777215, a, 1060954);
+        break;
+      }
+    }
+    big && (p.rect(x, y, w, 1, 2763312, a), p.rect(x, y + h - 1, w, 1, 2763312, a));
+  }
+  function screenTex(C, w, h, rng, K = 4) {
+    let kinds = [];
+    for (; kinds.length < K; ) {
+      let k = rng.pick(AD_KINDS);
+      (!kinds.includes(k) || kinds.length >= AD_KINDS.length) && kinds.push(k);
+    }
+    let r = C.atlas.alloc(w, h * K);
+    for (let f = 0; f < K; f++) paintAd(r.p, 0, f * h, w, h, kinds[f], rng, 255);
+    return r.cast = "none", r;
+  }
+  function billboardTex(C, w, h, rng) {
+    let r = C.atlas.alloc(w, h);
+    return rng.chance(0.35) ? billboardArt(r.p, w, h, rng.pick(["cola", "bagel", "jazz", "show", "taxi", "sun", "gin"]), rng) : paintAd(r.p, 0, 0, w, h, rng.pick(AD_KINDS), rng, winCode(0, !0)), r.cast = "none", r;
+  }
+  function tickerTex(C, len, rng) {
+    let lines = ["PIXEL CITY 72F SUNNY", "STOCKS UP", "SUBWAY RUNNING ON TIME", "NEW SHOW OPENS FRIDAY", "HOT DOGS 2 FOR $5", "PIGEONS SPOTTED IN THE PARK", "TAXI FARES UNCHANGED", "BAGEL OF THE YEAR"], r = C.atlas.alloc(len, 18), p = r.p;
+    p.rect(0, 0, len, 18, 657932, 255), p.rect(0, 0, len, 1, 3816e3, 255), p.rect(0, 17, len, 1, 3816e3, 255);
+    let x = 4;
+    for (; x < len - 20; ) {
+      let s = rng.pick(lines), tw = textWidth(s, 2, !0);
+      if (x + tw > len - 4) break;
+      p.text7(x, 2, s, 16756768, 255, 2), x += tw + 10, p.rect(x, 8, 4, 4, 14164012, 255), x += 14;
+    }
+    return r.cast = "none", r;
+  }
+  var SCREEN = MAT.SCREEN | MAT.FLAT | MAT.NOSHADOW;
+  function coverFace(C, fr, a0, a1, z0, z1, rng, o = {}) {
+    let { mb } = C, S2 = sharedTex(C), W = a1 - a0, back = S2.darkMetal, z = z0, row = 0;
+    for (; z < z1 - 1.5; ) {
+      let ph = Math.min(z1 - z, rng.pick(o.heights ?? [2.5, 3, 3.5, 4]));
+      if (ph < 1.5) break;
+      let cols = W > 5 && rng.chance(o.split ?? 0.45) ? 2 : 1, gap = 0.25, pw = (W - 0.3 - gap * (cols - 1)) / cols;
+      for (let c = 0; c < cols; c++) {
+        let pa0 = a0 + 0.15 + c * (pw + gap), pa1 = pa0 + pw;
+        fr.box(mb, pa0 - 0.06, pa1 + 0.06, -0.14, 0, z - 0.06, z + ph + 0.06, { front: back, left: back, right: back, top: { t: back } });
+        let tw = Math.round(pw * 32), th = Math.round(ph * 32);
+        if (rng.chance(o.screens ?? 0.6)) {
+          let tex = screenTex(C, tw, th, rng, 4);
+          fr.facadeQuad(mb, pa0, pa0 + tw / 32, -0.15, z, z + th / 32, tex, { mat: SCREEN, seed: 3 | rng.int(0, 15) << 4 });
+        } else {
+          let tex = billboardTex(C, tw, th, rng);
+          fr.facadeQuad(mb, pa0, pa0 + tw / 32, -0.15, z, z + th / 32, tex, { mat: MAT.FLAT | MAT.NOSHADOW });
+          for (let k = 0; k < 3; k++) {
+            let la = pa0 + (k + 0.5) * pw / 3;
+            fr.box(mb, la - 0.08, la + 0.08, -0.45, -0.15, z + ph + 0.06, z + ph + 0.16, { front: S2.darkMetal, left: S2.darkMetal, right: S2.darkMetal, top: { t: S2.darkMetal } });
+          }
+        }
+      }
+      let mid = fr.pt((a0 + a1) / 2, -3);
+      row < 3 && C.world.lamps.push({ x: mid[0], y: mid[1], z: 1.5, r: 5.5 + W * 0.15, color: [1, 1, 1], k: 0.55, kind: "screen" }), z += ph + 0.35, row++;
+    }
+  }
+  function signTower(C, fr, a0, W, D, floors, rng, o = {}) {
+    let { mb } = C, S2 = sharedTex(C), z0 = fr.z0, gH = 2.6, H = gH + floors * 1.5 + 0.6, style = o.style ?? rng.int(0, 2), wall = C.atlas.shared(`tsq_wall${style}`, 64, 48, (p) => {
+      let [base2, glass, mull] = [[5923440, 2373710, 9081502], [13155492, 3030610, 14735040], [9062970, 2765894, 12101776]][style];
+      smoothFill(p, 0, 0, 64, 48, base2, 41 + style, 0.05);
+      for (let b = 0; b < 4; b++) {
+        let t = hash2i(b, style, 7);
+        style === 0 ? (p.rect(b * 16 + 1, 4, 14, 40, glass, winCode(t)), p.rect(b * 16 + 1, 4, 14, 1, 6982312), p.vline(b * 16 + 8, 4, 40, mull)) : (p.rect(b * 16 + 3, 10, 10, 26, glass, winCode(t)), p.rect(b * 16 + 2, 36, 12, 2, mull), p.rect(b * 16 + 3, 9, 10, 1, mull));
+      }
+      p.rect(0, 0, 64, 2, mull), p.hline(0, 47, 64, shade(base2, 0.8));
+    }), aabb = mb.body(() => fr.box(mb, a0, a0 + W, 0, D, z0, z0 + H, { front: wall, back: wall, left: wall, right: wall, top: { t: S2.roofTar, world: !0 } }, { mat: MAT.OFFICE }));
+    markHeight(C.world, ...aabb, z0 + H);
+    let tw = Math.round(W * 32), gh = Math.round(gH * 32), base = C.atlas.alloc(tw, gh);
+    base.p.rect(0, 0, tw, gh, 1776411);
+    let kinds = o.shops ?? ["electronics", "toys", "pizza", "jewelry", "shoes", "coffee"], n = W > 6 ? 2 : 1;
+    for (let k = 0; k < n; k++) drawShopfront(base.p, Math.round(k * tw / n) + 1, 0, Math.round(tw / n) - 2, gh, rng.pick(kinds), rng, { signH: 18, frame: 1776411 });
+    fr.facadeQuad(mb, a0, a0 + W, -0.03, z0, z0 + gH, base, { mat: 0 });
+    for (let k = 0; k < n; k++) {
+      let st = fr.pt(a0 + (k + 0.5) * W / n, -0.8), dp = fr.pt(a0 + (k + 0.5) * W / n, 0.3);
+      C.world.shops.push({ kind: "electronics", name: "SHOP", x: st[0], y: st[1], dx: dp[0], dy: dp[1], n: fr.n });
+    }
+    fr.box(mb, a0 + 0.1, a0 + W - 0.1, -0.9, 0, z0 + gH - 0.25, z0 + gH, { front: S2.darkMetal, left: S2.darkMetal, right: S2.darkMetal, top: { t: S2.darkMetal } });
+    let tk = tickerTex(C, Math.round(W * 32), rng);
+    fr.box(mb, a0 - 0.05, a0 + W + 0.05, -0.25, 0, z0 + gH + 0.15, z0 + gH + 0.15 + 18 / 32, { left: S2.darkMetal, right: S2.darkMetal, top: { t: S2.darkMetal } }), fr.facadeQuad(mb, a0, a0 + tk.w / 32, -0.26, z0 + gH + 0.15, z0 + gH + 0.15 + 18 / 32, tk, { mat: SCREEN, seed: 8 }), coverFace(C, fr, a0, a0 + W, z0 + gH + 1, z0 + H - 0.5, rng, o);
+    for (let side of o.sides ?? []) {
+      let sf = side === "left" ? new Frame(...fr.pt(a0, D), -fr.ux, -fr.uy) : new Frame(...fr.pt(a0 + W, 0), fr.ux, fr.uy), top = z0 + gH + 1 + Math.min(H - gH - 2, rng.range(8, 14));
+      coverFace(C, sf, 0, D, z0 + gH + 1, Math.min(z0 + H - 0.5, top), rng, { ...o, split: 0.2 });
+    }
+    let lp = fr.pt(a0 + W / 2, -1);
+    return C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.6, r: 3, color: [1, 0.92, 0.8], k: 0.6, kind: "shop" }), { H: z0 + H };
+  }
+  function billboardsBlock(C, L, sq, seed) {
+    let rng = new RNG(seed), F = {
+      N: new Frame(L.x1, L.y0, 0, -1),
+      S: new Frame(L.x0, L.y1, 0, 1),
+      E: new Frame(L.x1, L.y1, 1, 0),
+      W: new Frame(L.x0, L.y0, -1, 0)
+    };
+    C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
+    let D = 8;
+    signTower(C, F[sq], 0, 9, D, rng.int(14, 16), rng, { sides: ["left"] }), signTower(C, F[sq], 9, 9, D, rng.int(11, 13), rng, { sides: ["right"] });
+    let sSide = F.S;
+    sq === "E" ? signTower(C, sSide, 0, 10, 7, rng.int(8, 10), rng, { heights: [2.5, 3], split: 0.6, sides: ["left"] }) : signTower(C, sSide, 8, 10, 7, rng.int(8, 10), rng, { heights: [2.5, 3], split: 0.6, sides: ["right"] });
+    let nSide = F.N;
+    sq === "E" ? signTower(C, nSide, 8, 10, 7, rng.int(7, 9), rng, { screens: 0.3, sides: ["right"] }) : signTower(C, nSide, 0, 10, 7, rng.int(7, 9), rng, { screens: 0.3, sides: ["left"] });
+  }
+  function timesSquareBlock(C, L, seed) {
+    let rng = new RNG(seed), { mb } = C, W = C.world, S2 = sharedTex(C), P = propTex(C), cx = (L.x0 + L.x1) / 2;
+    C.paintGround(L.x0, L.y0, L.x1, L.y1, "tsq");
+    let tx0 = cx - 2.3, tx1 = cx + 2.3, ty0 = L.y0 + 0.6, ty1 = L.y0 + 4.4, faces = [
+      new Frame(tx0, ty1, 0, 1),
+      new Frame(tx1, ty1, 1, 0),
+      new Frame(tx1, ty0, 0, -1),
+      new Frame(tx0, ty0, -1, 0)
+    ], top = signTower(C, faces[0], 0, tx1 - tx0, ty1 - ty0, 16, rng, { heights: [3, 3.5, 4], split: 0.2, screens: 0.8 }).H;
+    coverFace(C, faces[1], 0, ty1 - ty0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 }), coverFace(C, faces[3], 0, ty1 - ty0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 }), coverFace(C, faces[2], 0, tx1 - tx0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4], split: 0.3, screens: 0.5 }), mb.box(tx0 + 0.6, ty0 + 0.6, top, tx1 - 0.6, ty1 - 0.6, top + 1.2, { px: S2.darkMetal, nx: S2.darkMetal, py: S2.darkMetal, ny: S2.darkMetal, pz: { t: S2.darkMetal } }), mb.box(cx - 0.08, (ty0 + ty1) / 2 - 0.08, top + 1.2, cx + 0.08, (ty0 + ty1) / 2 + 0.08, top + 4.6, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver }), W.ball = { x: cx, y: (ty0 + ty1) / 2, z0: top + 1.3, z1: top + 4.4 }, W.beacons.push({ x: cx, y: (ty0 + ty1) / 2, z: top + 4.7 });
+    let sx0 = cx - 3.6, sx1 = cx + 3.6, sy0 = L.y1 - 7, steps = 7, sd = 0.5, rise = 0.32, red = C.atlas.shared("red_step", 32, 10, (p) => {
+      p.rect(0, 0, 32, 10, 13114922, winCode(0, !0)), p.rect(0, 0, 32, 2, 16738922, winCode(0, !0)), p.rect(0, 8, 32, 2, 9048088, winCode(0, !0));
+    }), redTop = C.atlas.shared("red_step_t", 32, 16, (p) => {
+      p.rect(0, 0, 32, 16, 12065318, winCode(0, !0));
+      for (let x = 0; x < 32; x += 8) p.vline(x, 0, 16, 14168128, winCode(0, !0));
+    });
+    for (let k = 0; k < steps; k++) {
+      mb.box(sx0, sy0 + k * sd, 0.125, sx1, sy0 + steps * sd, 0.125 + (k + 1) * rise, { py: S2.darkMetal, ny: red, px: S2.darkMetal, nx: S2.darkMetal, pz: { t: redTop } }, { mat: MAT.NOSHADOW });
+      for (let s = 0; s < 4; s++) {
+        let bx = sx0 + 0.9 + s * ((sx1 - sx0 - 1.8) / 3), by = sy0 + k * sd + sd * 0.55, bz = 0.125 + (k + 1) * rise, seats = [-0.45, 0, 0.45].map((t) => ({ x: bx + t, y: by, z: bz, face: [0, -1] }));
+        W.benches.push({ x: bx, y: by, axis: "x", seats, used: [!1, !1, !1], steps: !0 });
+      }
+    }
+    {
+      let fb2 = new Frame(sx0, sy0 + steps * sd, 0, 1), sw = Math.round((sx1 - sx0 - 0.6) * 32), sh = Math.round((steps * rise - 0.5) * 32);
+      fb2.facadeQuad(mb, 0.3, 0.3 + sw / 32, -0.02, 0.125 + 0.25, 0.125 + 0.25 + sh / 32, screenTex(C, sw, sh, rng, 4), { mat: SCREEN, seed: 3 | rng.int(0, 15) << 4 });
+    }
+    W.lamps.push({ x: cx, y: sy0 - 0.5, z: 0.6, r: 4.5, color: [1, 0.25, 0.25], k: 0.5, kind: "neon" }), mb.box(cx - 1, sy0 - 1.3, 0.125, cx + 1, sy0 - 0.2, 0.125 + 1.6, { px: S2.darkMetal, nx: S2.darkMetal, py: S2.darkMetal, ny: S2.glassBlue, pz: { t: S2.darkMetal } });
+    let sign = C.atlas.alloc(64, 12);
+    sign.p.rect(0, 0, 64, 12, 1776411, 255), sign.p.text7(Math.floor((64 - textWidth("TICKETS", 1, !0)) / 2), 2, "TICKETS", 16767055, winCode(0, !0));
+    let yb = sy0 - 0.75;
+    mb.vquad(cx + 1, yb - 0.02, cx - 1, yb - 0.02, 0.125 + 1.6, 0.125 + 1.6 + 12 / 32, sign, { mat: MAT.FLAT | MAT.NOSHADOW }), mb.vquad(cx - 1, yb + 0.02, cx + 1, yb + 0.02, 0.125 + 1.6, 0.125 + 1.6 + 12 / 32, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+    let tables = [];
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
+      let x = cx - 4.8 + i * 4.8 + (j ? 1.2 : -1.2), y = L.y0 + 7 + j * 2.6;
+      tables.push([x, y]), mb.cylinder(x, y, 0.125, 0.125 + 0.7, 0.06, 6, S2.darkMetal, null), mb.cylinder(x, y, 0.125 + 0.7, 0.125 + 0.74, 0.4, 10, P.silver, P.silver), mb.cylinder(x, y, 0.125 + 0.74, 0.125 + 1.75, 0.03, 4, P.silver, null);
+      for (let [dx, dy] of [[0.55, 0], [-0.55, 0], [0, 0.55]])
+        mb.box(x + dx - 0.15, y + dy - 0.15, 0.125, x + dx + 0.15, y + dy + 0.15, 0.125 + 0.42, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.wood });
+      C.addSprite("cartUmbrella", x, y, 0.125 + 1.75, { cart: ["hotdog", "halal", "pretzel"][(i + j) % 3] });
+    }
+    for (let [x, y] of [[L.x0 + 0.8, L.y0 + 6], [L.x0 + 0.8, L.y1 - 4], [L.x1 - 0.8, L.y0 + 6], [L.x1 - 0.8, L.y1 - 4], [cx - 5.5, L.y1 - 1], [cx + 5.5, L.y1 - 1]]) C.addPlanter(x, y);
+    subwayEntrance(C, L.x0 - 1, L.y1 - 4.5, "y"), W.carts.push({ x: L.x0 + 2.2, y: L.y0 + 12, kind: "pretzel", axis: "y" }), W.carts.push({ x: L.x1 - 2.2, y: L.y0 + 12.5, kind: "halal", axis: "y" });
+    for (let [x, y] of [[L.x0 + 0.5, L.y0 + 0.5], [L.x1 - 0.5, L.y0 + 0.5], [L.x0 + 0.5, L.y1 - 0.5], [L.x1 - 0.5, L.y1 - 0.5]])
+      mb.box(x - 0.08, y - 0.08, 0.125, x + 0.08, y + 0.08, 0.125 + 5.2, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver }), mb.box(x - 0.3, y - 0.3, 0.125 + 5.2, x + 0.3, y + 0.3, 0.125 + 5.45, { px: P.lampHead, nx: P.lampHead, py: P.lampHead, ny: P.lampHead, pz: P.silver }), W.lamps.push({ x: x + (cx - x) * 0.2, y: y + ((L.y0 + L.y1) / 2 - y) * 0.2, z: 0.125 + 5, r: 7, color: [0.95, 0.97, 1], k: 0.8, kind: "flood" }), W.lampHeads.push({ x, y, z: 0.125 + 5.2, kind: "flood" });
+    let nodes = [], edges = [], gates = [], block = (x, y) => x > tx0 - 0.6 && x < tx1 + 0.6 && y < ty1 + 0.6 || x > sx0 - 0.4 && x < sx1 + 0.4 && y > sy0 - 1.5 || tables.some(([tx, ty]) => Math.hypot(tx - x, ty - y) < 0.9), idx = /* @__PURE__ */ new Map(), step = 2.6;
+    for (let gy = 0; gy < 7; gy++) for (let gx = 0; gx < 7; gx++) {
+      let x = L.x0 + 1.2 + gx * step, y = L.y0 + 1.2 + gy * step;
+      block(x, y) || (idx.set(`${gx},${gy}`, nodes.length), nodes.push({ x, y }), gx === 0 && gates.push({ node: nodes.length - 1, sx: L.x0 - 1, sy: y }), gx === 6 && gates.push({ node: nodes.length - 1, sx: L.x1 + 1, sy: y }), gy === 0 && gates.push({ node: nodes.length - 1, sx: x, sy: L.y0 - 1 }), gy === 6 && gates.push({ node: nodes.length - 1, sx: x, sy: L.y1 + 1 }));
+    }
+    for (let [k, i] of idx) {
+      let [gx, gy] = k.split(",").map(Number);
+      for (let [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+        let j = idx.get(`${gx + dx},${gy + dy}`);
+        j != null && edges.push([i, j]);
+      }
+    }
+    W.extraNets.push({ name: "tsq", rect: { ...L }, nodes, edges, gates }), W.timesSquare = { x: cx, y: (L.y0 + L.y1) / 2, x0: L.x0, y0: L.y0, x1: L.x1, y1: L.y1 };
+  }
+
   // src/world/blocks.js
   function makeContext(world, mb, atlas, rng) {
     let gp = world.ground.p, C = {
@@ -3933,6 +4407,18 @@ void main() {
         let n = valueNoise(x * 0.09, y * 0.09, 16), n2 = valueNoise(x * 0.3, y * 0.3, 17), c = mixc(COL.grassDark, 3107368, 0.35);
         return n > 0.66 && (c = mixc(c, n2 > 0.5 ? 6187572 : 6970936, Math.min(0.75, (n - 0.66) * 3.5))), c = shade(c, 0.9 + h * 0.16), h > 0.985 && (c = n2 > 0.5 ? 9071162 : 4880946), [c, GC.GRASS];
       }
+      case "grateX":
+      case "grateY": {
+        let lx = x - X0, ly = y - Y0, w = X1 - X0, hh = Y1 - Y0, e = Math.min(lx, ly, w - 1 - lx, hh - 1 - ly);
+        if (e === 0) return [4079426, GC.METAL];
+        if (e < 3) return [e === 1 ? 10132640 : 7632506, GC.METAL];
+        let along2 = kind === "grateX" ? lx : ly, across = kind === "grateX" ? ly - 3 : lx - 3, span = (kind === "grateX" ? hh : w) - 6;
+        return across === Math.floor(span / 3) || across === Math.floor(2 * span / 3) ? [5592923, GC.METAL] : along2 % 3 === 0 ? [shade(9211538, 0.95 + h * 0.1), GC.METAL] : along2 % 3 === 1 ? [6053474, GC.METAL] : [shade(1513498, 0.9 + h * 0.3), GC.METAL];
+      }
+      case "tsq": {
+        let jx = x % 40 === 0, jy = y % 20 === 0, tile = hash2i(Math.floor(x / 40), Math.floor(y / 20), 81), c = shade(mixc(12098200, 11045512, tile), 0.96 + h * 0.07);
+        return (jx || jy) && (c = 13813956), [c, GC.PLAZA];
+      }
       case "pathEdge":
         return [shade(10262413, 0.92 + h * 0.12), GC.PATH];
       case "shore": {
@@ -3951,13 +4437,17 @@ void main() {
     };
   }
   function buildBlocks(C) {
-    for (let by = 0; by < 4; by++)
-      for (let bx = 0; bx < 4; bx++) {
+    let prof = {}, time = (name, fn) => {
+      let t = performance.now();
+      fn(), prof[name] = (prof[name] || 0) + performance.now() - t;
+    };
+    for (let by = 0; by < 6; by++)
+      for (let bx = 0; bx < 6; bx++) {
         if (blockInPark(bx, by)) continue;
         let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), fn = BLOCKS[type];
-        fn && fn(C, L, bx, by);
+        fn && time(type, () => fn(C, L, bx, by));
       }
-    bigPark(C), streetFurniture(C);
+    time("park", () => bigPark(C)), time("furniture", () => streetFurniture(C)), C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(", ");
   }
   var BLOCKS = {
     brownstones: (C, L) => brownstoneBlock(C, L),
@@ -3972,7 +4462,24 @@ void main() {
     modern: (C, L) => modernTower(C, L),
     office: (C, L) => limestoneOffice(C, L),
     court: (C, L) => courtBlock(C, L),
-    park: (C, L) => parkBlock(C, L)
+    park: (C, L) => parkBlock(C, L),
+    // pre-war red-brick apartment houses: taller, mostly residential, canopied entrances
+    redbrick: (C, L) => walkupBlock(C, L, {
+      shops: 0.15,
+      residential: !0,
+      fireEscape: !0,
+      floors: [6, 7],
+      canopy: 0.55,
+      billboards: 0.1,
+      waterTowers: 0.6,
+      brick: ["brickRed", "brickRed", "brickBrown", "brickOrange"],
+      widths: [[6, 6, 6], [6.5, 5, 6.5], [9, 9], [4.5, 9, 4.5]]
+    }),
+    // shopping streets: a storefront in every building, and sometimes a department store
+    shops: (C, L, bx, by) => walkupBlock(C, L, { shops: 1, shopKinds: SHOPPING, floors: [4, 6], dept: (bx + by) % 3 === 0 ? "S" : null, billboards: 0.5, awning: 1 }),
+    // the mini Times Square: sign towers either side of a pedestrian square
+    billboards: (C, L, bx, by) => billboardsBlock(C, L, BLOCK_TYPES[by][bx + 1] === "timessq" ? "E" : "W", 900 + bx * 7 + by),
+    timessq: (C, L, bx, by) => timesSquareBlock(C, L, 950 + bx * 7 + by)
   };
   function brownstoneBlock(C, L) {
     let { rng } = C, F = frames(L), style = rng.pick(["brownstone", "brick", "mixed", "mixed"]);
@@ -4011,25 +4518,42 @@ void main() {
   function walkupBlock(C, L, o) {
     let { rng } = C, F = frames(L);
     C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
-    let shopP = o.shops ?? 0.6, pickShop = () => rng.chance(shopP) ? rng.pick(["bodega", "pizza", "laundry", "coffee", "bar", "books", "flowers", "chinese", "nails", "hardware", "bagels", "diner", "pharmacy"]) : null, num = rng.int(100, 400);
+    let shopP = o.shops ?? 0.6, kinds = o.shopKinds ?? ["bodega", "pizza", "laundry", "coffee", "bar", "books", "flowers", "chinese", "nails", "hardware", "bagels", "diner", "pharmacy"], pickShop = () => rng.chance(shopP) ? rng.pick(kinds) : null, fl = o.floors ?? [4, 6], brick = () => o.brick ? rng.pick(o.brick) : void 0, num = rng.int(100, 400);
     for (let side of ["N", "S"]) {
-      let fr = F[side], widths = rng.pick([[5, 4, 4, 5], [5, 3.5, 4.5, 5], [4.5, 4.5, 4.5, 4.5], [5, 8, 5]]), a = 0;
+      let fr = F[side];
+      if (o.dept === side) {
+        deptStore(C, fr, 0, 18, 7), num += 8;
+        continue;
+      }
+      let widths = rng.pick(o.widths ?? [[5, 4, 4, 5], [5, 3.5, 4.5, 5], [4.5, 4.5, 4.5, 4.5], [5, 8, 5]]), a = 0;
       widths.forEach((w, k) => {
         let corner = k === 0 ? "L" : k === widths.length - 1 ? "R" : null, shop = pickShop();
-        o.bodegaCorner && side === "S" && k === widths.length - 1 && (shop = "bodega"), o.firehouse && side === "S" && k === 1 ? firehouse(C, fr, a, w, 7) : o.theater && side === "S" && w >= 8 ? theater(C, fr, a, w, 7) : walkup(C, fr, a, w, 7, {
-          cornerSide: corner,
-          shop: corner ? shop ?? pickShop() : shop,
-          number: num,
-          billboard: corner && rng.chance(0.35) ? rng.pick(["cola", "bagel", "jazz", "show", "taxi", "sun", "gin"]) : null,
-          floors: rng.int(4, 6),
-          fireEscape: o.fireEscape ? !0 : void 0,
-          resDoorLeft: corner === "R"
-        }), num += 2, a += w;
+        if (o.bodegaCorner && side === "S" && k === widths.length - 1 && (shop = "bodega"), o.firehouse && side === "S" && k === 1)
+          firehouse(C, fr, a, w, 7);
+        else if (o.theater && side === "S" && w >= 8)
+          theater(C, fr, a, w, 7);
+        else {
+          let sh = corner && !o.residential ? shop ?? pickShop() : shop;
+          walkup(C, fr, a, w, 7, {
+            cornerSide: corner,
+            shop: sh,
+            number: num,
+            brick: brick(),
+            billboard: corner && rng.chance(o.billboards ?? 0.35) ? rng.pick(["cola", "bagel", "jazz", "show", "taxi", "sun", "gin"]) : null,
+            floors: rng.int(fl[0], fl[1]),
+            fireEscape: o.fireEscape ? !0 : void 0,
+            resDoorLeft: corner === "R",
+            canopy: o.canopy && rng.chance(o.canopy),
+            waterTower: o.waterTowers != null ? rng.chance(o.waterTowers) : void 0,
+            awning: o.awning
+          });
+        }
+        num += 2, a += w;
       });
     }
     for (let side of ["E", "W"]) {
       let fr = F[side];
-      walkup(C, fr, 7, 4, 6.5, { shop: pickShop(), floors: rng.int(4, 5), number: num++ });
+      walkup(C, fr, 7, 4, 6.5, { shop: pickShop(), floors: rng.int(fl[0], Math.max(fl[0], fl[1] - 1)), number: num++, brick: brick(), canopy: o.canopy && rng.chance(o.canopy * 0.5), awning: o.awning });
     }
     C.addTree((L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, "plane", !1, { scale: 0.9 }), C.addSprite("laundry", (L.x0 + L.x1) / 2 + 1.2, (L.y0 + L.y1) / 2 - 1, 0.125, { group: "warm" });
   }
@@ -4239,36 +4763,37 @@ void main() {
   }
   function streetFurniture(C) {
     let { rng } = C, W = C.world;
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++) {
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j <= 6; j++) {
         if (isParkIntersection(i, j)) continue;
         let rx = roadCenter(i), ry = roadCenter(j);
         for (let sx of [-1, 1])
           for (let sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: isParkIntersection(i + sx, j), closedY: isParkIntersection(i, j + sy) });
       }
-    for (let by = 0; by < 4; by++)
-      for (let bx = 0; bx < 4; bx++) {
+    for (let by = 0; by < 6; by++)
+      for (let bx = 0; bx < 6; bx++) {
         if (blockInPark(bx, by)) continue;
-        let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), residential = ["brownstones", "walkups", "tenements", "bodega", "firehouse", "commercial", "lofts"].includes(type), sides = [
+        let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), residential = ["brownstones", "walkups", "tenements", "bodega", "firehouse", "commercial", "lofts", "redbrick", "shops"].includes(type), sides = [
           { ax: "x", y: L.y0 - 2 + 0.35, x0: L.x0, x1: L.x1, ny: -1, nx: 0, name: "N" },
           { ax: "x", y: L.y1 + 2 - 0.35, x0: L.x0, x1: L.x1, ny: 1, nx: 0, name: "S" },
           { ax: "y", x: L.x0 - 2 + 0.35, y0: L.y0, y1: L.y1, nx: -1, ny: 0, name: "W" },
           { ax: "y", x: L.x1 + 2 - 0.35, y0: L.y0, y1: L.y1, nx: 1, ny: 0, name: "E" }
         ];
         for (let s of sides) {
-          let at = (t, off = 0) => s.ax === "x" ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t];
+          let at = (t, off = 0) => s.ax === "x" ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t], used = [];
           for (let t of [5, 13]) {
             let [x, y] = at(t);
-            streetLamp(C, x, y, s.nx, s.ny);
+            streetLamp(C, x, y, s.nx, s.ny), type === "shops" && lampBanner(C, x, y, s.nx, s.ny, bx * 3 + by);
           }
           let treeTs = residential ? [2.6, 7.6, 10.4, 15.4] : type === "park" ? [3, 9, 15] : type === "court" ? [3, 15] : [3.2, 14.8];
           for (let t of treeTs)
             if (rng.chance(residential ? 0.9 : 0.8)) {
               let [x, y] = at(t, 0.35);
-              C.addTree(x, y, residential ? rng.pick(["plane", "locust", "plane", "oak"]) : "plane", !0);
+              if (W.canopies.some((c) => Math.hypot(c.x - x, c.y - y) < 1.1)) continue;
+              C.addTree(x, y, residential ? rng.pick(["plane", "locust", "plane", "oak"]) : "plane", !0), used.push([t, 0.5]);
             }
           {
-            let [x, y] = at(rng.range(8.2, 9.6), 0);
+            let t = rng.range(8.2, 9.6), [x, y] = at(t, 0);
             hydrant(C, x, y);
           }
           {
@@ -4277,28 +4802,77 @@ void main() {
           }
           if (rng.chance(0.35)) {
             let [x, y] = at(17, 0.1);
-            mailbox(C, x, y);
+            mailbox(C, x, y), used.push([17, 0.4]);
           } else if (rng.chance(0.35)) {
             let [x, y] = at(16.6, 0.1);
-            newsBoxes(C, x, y, s.ax);
+            newsBoxes(C, x, y, s.ax), used.push([17, 0.7]);
           }
           if (!residential && rng.chance(0.5)) {
             let [x, y] = at(11.2, 0);
             kiosk(C, x, y);
           }
+          rng.chance(0.42) && sidewalkGrate(C, s, at, used, rng);
         }
       }
+    for (let sh of W.shops) {
+      let bx = Math.floor((sh.x - 9) / 27 + 0.5), by = Math.floor((sh.y - 9) / 27 + 0.5);
+      ![[bx, by], [bx - 1, by], [bx, by - 1], [bx - 1, by - 1]].some(([i, j]) => i >= 0 && j >= 0 && i < 6 && j < 6 && BLOCK_TYPES[j][i] === "shops" && Math.abs(sh.x - (lotStart(i) + 9)) < 11.5 && Math.abs(sh.y - (lotStart(j) + 9)) < 11.5) || !SHOPPING.includes(sh.kind) || !rng.chance(0.45) || !sh.n || sandwichBoard(C, sh.x - sh.n[0] * 0.15, sh.y - sh.n[1] * 0.15, sh.n[0], sh.n[1], rng);
+    }
     let PR = parkRect(), pcx = (PR.x0 + PR.x1) / 2, pcy = (PR.y0 + PR.y1) / 2;
-    busShelter(C, PR.x0 + 9, PR.y0 - 2 + 0.8, "x", -1), busShelter(C, PR.x1 + 2 - 0.8, PR.y0 + 9, "y", 1), W.busRoute = !0, subwayEntrance(C, PR.x0 - 1, pcy - 7.5, "y"), W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4, kind: "pretzel", axis: "y" }), W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: "hotdog", axis: "x" }), parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4], [pcx - 4.2, PR.y1 + 1]]);
-    let stacks = [
-      { x: roadCenter(1) - 1.85, y: PR.y0 + 13 },
-      { x: roadCenter(3) + 1.85, y: lotStart(1) + 6 },
-      { x: lotStart(2) + 12, y: roadCenter(4) + 1.85 }
-    ];
-    for (let st of stacks) steamStack(C, st.x, st.y);
-    W.stacksBlock = stacks, subwayEntrance(C, lotStart(0) + 14, lotEnd(3) + 1, "x"), W.carts.push({ x: lotStart(1) + 14, y: lotEnd(0) + 1.3, kind: "halal", axis: "x" });
+    busShelter(C, PR.x0 + 9, PR.y0 - 2 + 0.8, "x", -1), busShelter(C, PR.x1 + 2 - 0.8, PR.y0 + 9, "y", 1), W.busRoute = !0, subwayEntrance(C, PR.x0 - 1, pcy - 7.5, "y"), W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4, kind: "pretzel", axis: "y" }), W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: "hotdog", axis: "x" }), parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4], [pcx - 4.2, PR.y1 + 1]]), subwayEntrance(C, lotStart(1) + 14, lotEnd(4) + 1, "x"), subwayEntrance(C, lotStart(0) - 1, lotStart(2) + 9, "y"), subwayEntrance(C, lotEnd(5) + 1, lotStart(3) + 4, "y"), subwayEntrance(C, lotStart(3) + 4, lotEnd(5) + 1, "x"), W.carts.push({ x: lotStart(2) + 14, y: lotEnd(1) + 1.3, kind: "halal", axis: "x" });
     for (let c of W.carts) buildCart(C, c);
     for (let m of W.groundInfo.manholes) rng.chance(0.35) && W.steam.push({ x: m.x, y: m.y, z: 0.02, kind: "manhole", rate: 0.4 });
+  }
+  function lampBanner(C, x, y, nx, ny, k) {
+    let cols = [9054858, 2067082, 14168108, 2777016, 15239706], col = cols[k % cols.length], tex = C.atlas.shared(`banner_${col}`, 12, 30, (p) => {
+      p.rect(0, 0, 12, 30, col), p.rect(0, 0, 12, 2, 2763310), p.vline(0, 2, 28, shade(col, 1.2)), p.vline(11, 2, 28, shade(col, 0.75)), p.rect(3, 12, 6, 7, 15921126), p.frame(4, 9, 4, 4, 15921126), p.rect(3, 22, 6, 2, 15909424);
+      for (let yy = 26; yy < 30; yy++) p.set(yy % 2 ? 4 : 7, yy, 15909424);
+    });
+    tex.cast = "none";
+    let ux = ny, uy = -nx;
+    for (let sgn of [-1, 1]) {
+      let x0 = x + ux * 0.08 * sgn, y0 = y + uy * 0.08 * sgn;
+      C.mb.vquad(x0, y0, x0 + ux * 0.375 * sgn, y0 + uy * 0.375 * sgn, 0.125 + 2.55, 0.125 + 2.55 + 30 / 32, tex, { mat: MAT.FLAT });
+    }
+  }
+  function sandwichBoard(C, x, y, nx, ny, rng) {
+    let word = rng.pick(["SALE", "OPEN", "NEW", "50% OFF", "HELLO"]), tex = C.atlas.shared(`board_${word}`, 16, 20, (p) => {
+      p.rect(0, 0, 16, 20, 2763310), p.rect(1, 1, 14, 18, 1980970);
+      let w2 = Math.min(14, word.length * 4);
+      p.text(Math.max(1, Math.floor((16 - w2) / 2)), 4, word.slice(0, 3), 15921126), word.length > 3 && p.text(2, 11, word.slice(3).trim().slice(0, 3), 15909424), p.hline(2, 17, 12, 15909424);
+    });
+    tex.cast = "none";
+    let ux = ny, uy = -nx, h = 20 / 32, w = 16 / 32, lean = 0.12, ax = x - ux * w / 2, ay = y - uy * w / 2, bx = x + ux * w / 2, by = y + uy * w / 2;
+    C.mb.quad(
+      [ax, ay, 0.125 + h],
+      [bx, by, 0.125 + h],
+      [bx + nx * lean, by + ny * lean, 0.125],
+      [ax + nx * lean, ay + ny * lean, 0.125],
+      [[0, 0], [16, 0], [16, 20], [0, 20]],
+      tex,
+      [nx, ny, 0.3],
+      0
+    ), C.mb.quad(
+      [bx, by, 0.125 + h],
+      [ax, ay, 0.125 + h],
+      [ax - nx * lean, ay - ny * lean, 0.125],
+      [bx - nx * lean, by - ny * lean, 0.125],
+      [[0, 0], [16, 0], [16, 20], [0, 20]],
+      tex,
+      [-nx, -ny, 0.3],
+      0
+    );
+  }
+  function sidewalkGrate(C, s, at, used, rng, tMax = 18) {
+    let W = C.world, len = rng.range(1.5, 2.1), half = len / 2, others = [...W.busStops.map((b) => [b.x, b.y, 2]), ...W.subways.map((b) => [b.x, b.y, 2.2]), ...W.carts.map((c) => [c.x, c.y, 1.4]), ...W.benches.map((b) => [b.x, b.y, 1.2]), ...W.grates.map((g) => [g.x, g.y, 2.5])], t0 = rng.range(1.6, tMax - 1.6);
+    for (let k = 0; k < (tMax - 3) * 2; k++) {
+      let t = 1.5 + (t0 - 1.5 + k * 0.5) % (tMax - 3);
+      if (t - half < 0.6 || t + half > tMax - 0.6 || used.some(([u, r]) => Math.abs(u - t) < half + r + 0.12)) continue;
+      let [x, y] = at(t, 0.65);
+      if (!others.some(([ox, oy, r]) => Math.hypot(ox - x, oy - y) < r + half))
+        return steamGrate(C, x, y, s.ax, len), used.push([t, half]), !0;
+    }
+    return !1;
   }
   function parkSidewalks(C, PR, avoid) {
     let { rng } = C, len = PR.x1 - PR.x0, sides = [
@@ -4321,9 +4895,14 @@ void main() {
         let [x, y] = at(t, 0.35);
         C.addTree(x, y, rng.pick(["plane", "plane", "locust", "oak"]), !0);
       }
+      let ht = rng.pick([11.2, 33.8]);
       {
-        let [x, y] = at(rng.pick([11.2, 33.8]));
+        let [x, y] = at(ht);
         hydrant(C, x, y);
+      }
+      {
+        let used = [...[1.8, 9, 18, 22.5, 31.2, 36, 43.2].map((t) => [t, 0.5]), ...[6.6, 15.6, 29.4, 38.4].map((t) => [t, 0.8])];
+        for (let k = 0; k < 2; k++) sidewalkGrate(C, s, at, used, rng, len);
       }
       for (let t of [0.8, 44.2]) {
         let [x, y] = at(t, -0.05);
@@ -4372,9 +4951,11 @@ void main() {
   // src/world/world.js
   function buildWorld(seed = 1977, progress = () => {
   }) {
-    let rng = new RNG(seed), atlas = new Atlas(2048), groundPage = new Page(117 * 32, 117 * 32), groundReg = { layer: 0, x: 0, y: 0, w: 117 * 32, h: 117 * 32, p: new Painter(groundPage, 0, 0, 117 * 32, 117 * 32), page: groundPage };
-    progress("Paving streets");
-    let groundInfo = paintGround(groundReg, rng), tex = makeBaseTextures(atlas), mb = new MeshBuilder();
+    let rng = new RNG(seed), atlas = new Atlas(2048), groundPage = new Page(171 * 32, 171 * 32), groundReg = { layer: 0, x: 0, y: 0, w: 171 * 32, h: 171 * 32, p: new Painter(groundPage, 0, 0, 171 * 32, 171 * 32), page: groundPage }, prof = [], tick = (name) => prof.push([name, performance.now()]);
+    tick("start"), progress("Paving streets");
+    let groundInfo = paintGround(groundReg, rng);
+    tick("ground");
+    let tex = makeBaseTextures(atlas), mb = new MeshBuilder();
     buildGroundGeometry(mb, groundReg, tex), buildSlabSides(mb, atlas, tex);
     let world = {
       rng,
@@ -4383,7 +4964,7 @@ void main() {
       ground: groundReg,
       groundPage,
       groundInfo,
-      heights: new Float32Array(117 * 117),
+      heights: new Float32Array(171 * 171),
       lamps: [],
       lampHeads: [],
       trees: [],
@@ -4410,13 +4991,16 @@ void main() {
       subways: [],
       carts: [],
       marquees: [],
+      grates: [],
+      canopies: [],
+      extraNets: [],
       blocks: []
     };
-    for (let by = 0; by < 4; by++)
-      for (let bx = 0; bx < 4; bx++) world.blocks.push({ bx, by, type: BLOCK_TYPES[by][bx] });
-    progress("Raising buildings");
+    for (let by = 0; by < 6; by++)
+      for (let bx = 0; bx < 6; bx++) world.blocks.push({ bx, by, type: BLOCK_TYPES[by][bx] });
+    tick("base"), progress("Raising buildings");
     let C = makeContext(world, mb, atlas, rng);
-    return buildBlocks(C), world.mesh = mb.finish(), world;
+    return buildBlocks(C), tick("blocks"), world.mesh = mb.finish(), tick("mesh"), world.buildProfile = prof.slice(1).map(([n, t], i) => `${n} ${Math.round(t - prof[i][1])}ms`).join(", "), world;
   }
 
   // src/sim/environment.js
@@ -5485,7 +6069,20 @@ void main() {
       for (let x = 1; x < 6; x++)
         sp.set(x, 0, S.C1, 110), sp.set(x, 2, S.C1, 110);
       for (let x = 0; x < 7; x++) sp.set(x, 1, S.C1, x === 0 || x === 6 ? 110 : x >= 2 && x <= 4 ? 160 : 140);
-    }, 3, 0), A.add("dot", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("dot2", 2, 2, (sp) => {
+    }, 3, 0), A.add("dot", 1, 1, (sp) => sp.set(0, 0, S.C1, 128), 0, 0), A.add("tsqBall", 14, 14, (sp) => {
+      for (let y = 0; y < 14; y++) for (let x = 0; x < 14; x++) {
+        let dx = x - 6.5, dy = y - 6.5;
+        if (Math.hypot(dx, dy) > 6.6) continue;
+        let facet = (x + y) % 4 === 0 || (x - y + 28) % 4 === 0, lit = 150 - Math.round((dx + dy) * 3) - (facet ? 22 : 0);
+        sp.set(x, y, S.C1, Math.max(90, Math.min(170, lit)));
+      }
+      sp.set(4, 3, S.C2, 170), sp.set(5, 3, S.C2, 160), sp.set(4, 4, S.C2, 160);
+    }, 7, 13), A.add("swingSeat", 12, 4, (sp) => {
+      for (let x = 1; x < 11; x++)
+        sp.set(x, 0, S.C2, 150), sp.set(x, 1, S.C2, 128), sp.set(x, 2, S.C2, 112);
+      for (let x = 2; x < 10; x++) sp.set(x, 3, S.C2, 96);
+      sp.set(0, 0, S.C1, 140), sp.set(11, 0, S.C1, 140), sp.set(0, 1, S.C1, 120), sp.set(11, 1, S.C1, 120);
+    }, 6, 1), A.add("dot2", 2, 2, (sp) => {
       sp.set(0, 0, S.C1, 140), sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 110);
     }, 1, 1), A.add("flake", 3, 3, (sp) => {
       sp.set(1, 0, S.C1, 128), sp.set(0, 1, S.C1, 128), sp.set(1, 1, S.C1, 150), sp.set(2, 1, S.C1, 128), sp.set(1, 2, S.C1, 128);
@@ -5679,7 +6276,7 @@ void main() {
   }
   float cn = texture(uNoise, vWorldR.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorldR.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorldR.xy / ${176 .toFixed(1)}).rgb;
   float hf = clamp(1.0 - (vWorld.z - 0.3) / 8.0, 0.0, 1.0);
   vec3 light = uAmb * 0.92 + uSunCol * 0.8 * s * cl * smoothstep(0.0, 0.15, uSunDir.z + 0.05) + lm * hf * hf * 1.1 + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.2, 0.19, 0.16);
@@ -5713,7 +6310,7 @@ void main() {
   o = vec4(1.0);
 }`, SF = { FLIP: 1, EMISSIVE: 2, NOSHADOW: 4, TALL: 8, NOSHADE: 16, BRIGHT: 32 }, STRIDE = 13, SpriteLayer = class {
     constructor(gl, atlas, pal) {
-      this.gl = gl, this.atlas = atlas, this.pal = pal, this.prog = createProgram(gl, VS, FS, "sprites"), this.shadowProg = createProgram(gl, SHADOW_VS2, SHADOW_FS2, "spriteShadow"), this.cap = 8192, this.data = new Float32Array(this.cap * STRIDE), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
+      this.gl = gl, this.atlas = atlas, this.pal = pal, this.prog = createProgram(gl, VS, FS, "sprites"), this.shadowProg = createProgram(gl, SHADOW_VS2, SHADOW_FS2, "spriteShadow"), this.cap = 16384, this.data = new Float32Array(this.cap * STRIDE), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
       let corner = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, corner), gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
       let B2 = STRIDE * 4, attr = (loc, n, off) => {
@@ -5761,7 +6358,7 @@ void main() {
   vec2 w = iA.xy + d * (c.x * iA.z) + pp * (c.y * iA.w);
   vL = c;
   vCol = iC * iB.z;
-  gl_Position = vec4(w / 128.0 * 2.0 - 1.0, 0.0, 1.0);
+  gl_Position = vec4(w / ${176 .toFixed(1)} * 2.0 - 1.0, 0.0, 1.0);
 }`, FS2 = `#version 300 es
 precision highp float;
 in vec2 vL;
@@ -5809,7 +6406,7 @@ void main() {
   };
 
   // src/render/carLayer.js
-  var sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross32 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v, bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]], cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
+  var CAR_CAP = 768, sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross32 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot32 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2], clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v, bodySec = (w, zb, zs, zt, inset = 0.045) => [[-w, zb], [-w, zs], [-(w - inset), zt], [w - inset, zt], [w, zs], [w, zb]], cabSec = (wb, zb, wr, zr) => [[-wb, zb], [-wr, zr], [wr, zr], [wb, zb]];
   function bboxOf(st) {
     let bb = { x0: 1 / 0, x1: -1 / 0, y0: 1 / 0, y1: -1 / 0, z0: 1 / 0, z1: -1 / 0 };
     for (let s of st) {
@@ -5944,7 +6541,7 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / 128.0).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / ${176 .toFixed(1)}).rgb;
   vec3 light = uAmb * faceShade(n) + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.6 + 0.4 * max(n.z, 0.0)) + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;
@@ -6347,7 +6944,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let m = defs[k], vao = gl.createVertexArray();
         gl.bindVertexArray(vao), makeBuffer(gl, m.pos), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 3, gl.FLOAT, !1, 0, 0), makeBuffer(gl, m.uv), gl.enableVertexAttribArray(1), gl.vertexAttribPointer(1, 2, gl.FLOAT, !1, 0, 0), makeBuffer(gl, m.rect), gl.enableVertexAttribArray(2), gl.vertexAttribIPointer(2, 4, gl.UNSIGNED_SHORT, 0, 0), makeBuffer(gl, m.nrm), gl.enableVertexAttribArray(3), gl.vertexAttribPointer(3, 4, gl.BYTE, !0, 0, 0), makeBuffer(gl, m.info), gl.enableVertexAttribArray(4), gl.vertexAttribIPointer(4, 4, gl.UNSIGNED_BYTE, 0, 0), makeBuffer(gl, m.idx, gl.ELEMENT_ARRAY_BUFFER);
         let ibuf = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, ibuf), gl.bufferData(gl.ARRAY_BUFFER, 256 * 8 * 4, gl.DYNAMIC_DRAW), gl.enableVertexAttribArray(5), gl.vertexAttribPointer(5, 4, gl.FLOAT, !1, 32, 0), gl.vertexAttribDivisor(5, 1), gl.enableVertexAttribArray(6), gl.vertexAttribPointer(6, 4, gl.FLOAT, !1, 32, 16), gl.vertexAttribDivisor(6, 1), gl.bindVertexArray(null), this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(256 * 8), n: 0 };
+        gl.bindBuffer(gl.ARRAY_BUFFER, ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAR_CAP * 8 * 4, gl.DYNAMIC_DRAW), gl.enableVertexAttribArray(5), gl.vertexAttribPointer(5, 4, gl.FLOAT, !1, 32, 0), gl.vertexAttribDivisor(5, 1), gl.enableVertexAttribArray(6), gl.vertexAttribPointer(6, 4, gl.FLOAT, !1, 32, 16), gl.vertexAttribDivisor(6, 1), gl.bindVertexArray(null), this.types[k] = { vao, count: m.indexCount, ibuf, data: new Float32Array(CAR_CAP * 8), n: 0 };
       }
     }
     assignPalette(car) {
@@ -6413,7 +7010,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let c of cars) {
         if (!view.visible(c.x, c.y, (c.z || 0) + 1, 6)) continue;
         let t = this.types[c.type];
-        if (!t || t.n >= 256) continue;
+        if (!t || t.n >= CAR_CAP) continue;
         this.updatePalette(c, time);
         let o = t.n * 8, d = t.data;
         d[o] = c.x, d[o + 1] = c.y, d[o + 2] = c.z || 0, d[o + 3] = c.h, d[o + 4] = c.palRow, d[o + 5] = c.fadeOut != null ? Math.max(0, c.fadeOut) : 1 - (c.fadeIn || 0), d[o + 6] = c.state === "parked" ? snow : snow * 0.25, d[o + 7] = 0.02, t.n++;
@@ -6478,8 +7075,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }, this.xmasRow = pal.alloc(), treePalette(pal, "pine", 3, !0, 4863526, this.xmasRow), this.season = -1, this.snowy = null;
       let rng = new RNG(5);
       this.lampDelay = world.lamps.map(() => rng.range(0, 0.6)), this.lampFlicker = world.lamps.map(() => rng.chance(0.04) ? rng.range(0.5, 2) : 0), this.frames = {};
-      for (let n of ["dish", "antenna", "deckchair", "bush", "grill", "laundry", "statue", "xmas", "snowman", "glow", "lamp2", "lamp1", "beacon", "treeBundle", "cartUmbrella", "pedWalk", "pedHand"]) this.frames[n] = atlas.get(n);
-      this.umbRows = {
+      for (let n of ["dish", "antenna", "deckchair", "bush", "grill", "laundry", "statue", "xmas", "snowman", "glow", "lamp2", "lamp1", "beacon", "treeBundle", "cartUmbrella", "pedWalk", "pedHand", "tsqBall"]) this.frames[n] = atlas.get(n);
+      this.ballRows = [15922943, 6994175, 16739032, 16767055].map((c) => pal.alloc({ [S.C1]: c, [S.C2]: 16777215 })), this.umbRows = {
         hotdog: pal.alloc({ [S.C1]: 15909424, [S.C2]: 2052e3, [S.C3]: 10132899 }),
         halal: pal.alloc({ [S.C1]: 15921902, [S.C2]: 13119532, [S.C3]: 10132899 }),
         pretzel: pal.alloc({ [S.C1]: 15909424, [S.C2]: 3115590, [S.C3]: 10132899 })
@@ -6532,6 +7129,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       if (env.lampsOn)
         for (let h of world.lampHeads)
           vis(h.x, h.y, h.z, 2) && L.push(h.x, h.y, h.z - 0.02, this.frames.glow, this.glowRows[h.kind] ?? this.glowRows.street, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
+      if (world.ball && vis(world.ball.x, world.ball.y, world.ball.z1, 3)) {
+        let b = world.ball, h = env.hour, z = b.z1;
+        env.season === 3 && (h >= 23.75 || h < 0.1) && (z = b.z1 + (b.z0 - b.z1) * (h >= 23.75 ? (h - 23.75) / 0.25 : 1)), L.push(b.x, b.y, z - 0.2, this.frames.tsqBall, this.ballRows[Math.floor(time * 0.6) % this.ballRows.length], SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
+      }
       if (time % 1.6 < 0.5) for (let b of world.beacons) L.push(b.x, b.y, b.z, this.frames.beacon, this.glowRows.beacon, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
       let tr = this.city.traffic;
       if (tr) {
@@ -6567,6 +7168,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           let on = Math.min(1, Math.max(0, (dark - 0.35 - this.lampDelay[i] * 0.3) * 6));
           if (on <= 0) continue;
           k *= on, this.lampFlicker[i] && Math.sin(time * 13 * this.lampFlicker[i]) + Math.sin(time * 31 + i) > 1.2 && (k *= 0.15), l.kind === "flood" && (k *= env.hour > 23 || env.hour < 6 ? 0 : 1);
+        } else if (l.kind === "screen") {
+          k *= 0.15 + Math.max(0, dark - 0.15) * 1.25;
+          let a = time * 0.35 + i * 1.7;
+          LL.add(l.x, l.y, l.r, [0.62 + 0.38 * Math.sin(a), 0.62 + 0.38 * Math.sin(a + 2.1), 0.62 + 0.38 * Math.sin(a + 4.2)], k * 0.85);
+          continue;
         } else if (l.kind === "shop") {
           if (!shopsOpen) continue;
           k *= Math.max(0, dark - 0.2) * 1.3;
@@ -6618,9 +7224,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   }, Traffic = class {
     constructor(city) {
       this.city = city, this.rng = new RNG(321), this.cars = [], this.clock = 0, this.links = /* @__PURE__ */ new Map(), this.inLinks = /* @__PURE__ */ new Map(), this.connectors = /* @__PURE__ */ new Map(), this.offsets = [];
-      for (let i = 0; i <= 4; i++) {
+      for (let i = 0; i <= 6; i++) {
         this.offsets.push([]);
-        for (let j = 0; j <= 4; j++) this.offsets[i].push((i * 7 + j * 3) % 5 * 4.3 + (i + j) * 2.1);
+        for (let j = 0; j <= 6; j++) this.offsets[i].push((i * 7 + j * 3) % 5 * 4.3 + (i + j) * 2.1);
       }
       this.exitLock = /* @__PURE__ */ new Map(), this.pedHold = /* @__PURE__ */ new Map(), this.buildNetwork(), this.buildParking(), this.nextId = 1, this.special = { fireTimer: 90, iceTimer: 20, garbageTimer: 5, plowTimer: 10 }, this.honks = [];
     }
@@ -6628,8 +7234,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return [roadCenter(i), roadCenter(j)];
     }
     buildNetwork() {
-      for (let i = 0; i <= 4; i++)
-        for (let j = 0; j <= 4; j++)
+      for (let i = 0; i <= 6; i++)
+        for (let j = 0; j <= 6; j++)
           for (let d = 0; d < 4; d++) {
             let [dx, dy] = DIRS[d], ni = i + dx, nj = j + dy;
             if (!roadLegOpen(i, j, dx, dy)) continue;
@@ -6656,14 +7262,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let W = this.city.world, blockers = [];
       for (let h of W.hydrants) blockers.push([h.x, h.y, 1.3]);
       for (let b of W.busStops) blockers.push([b.x, b.y, 3.2]);
-      for (let s of W.stacksBlock || []) blockers.push([s.x, s.y, 2.2]);
       for (let c of W.carts) blockers.push([c.x, c.y, 1.5]);
       W.firehouse && blockers.push([W.firehouse.x, W.firehouse.y, 3]);
       for (let L of this.links.values()) {
         let [dx, dy] = DIRS[L.d], px = -dy * (1.85 - 0.7), py = dx * (1.85 - 0.7);
         for (let s = 1.6; s < L.len - 1.4; s += 2.75) {
           let x = L.pts[0][0] + dx * s + px, y = L.pts[0][1] + dy * s + py;
-          blockers.some(([bx, by, r]) => dist2(x, y, bx, by) < r * r) || x < 0.5 || y < 0.5 || x > 117 - 0.5 || y > 117 - 0.5 || L.park.push({ s, x, y, car: null, link: L });
+          blockers.some(([bx, by, r]) => dist2(x, y, bx, by) < r * r) || x < 0.5 || y < 0.5 || x > 171 - 0.5 || y > 171 - 0.5 || L.park.push({ s, x, y, car: null, link: L });
         }
       }
     }
@@ -6763,7 +7368,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       for (let k = 0; k < 2; k++) this.spawnBus(k);
     }
     targetCount(env) {
-      let h = env.hour, base = h < 5 ? 14 : h < 7 ? 30 : h < 10 ? 60 : h < 16 ? 46 : h < 19.5 ? 62 : h < 23 ? 40 : 22;
+      let h = env.hour, base = h < 5 ? 25 : h < 7 ? 52 : h < 10 ? 105 : h < 16 ? 80 : h < 19.5 ? 108 : h < 23 ? 70 : 38;
       return env.snowing && (base *= 0.7), Math.round(base);
     }
     spawnMoving(anywhere = !1) {
@@ -6786,9 +7391,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       return null;
     }
     spawnBus(k) {
-      let route = [
-        (L2) => L2.d === 0 ? L2.ti === 3 && L2.tj === 1 ? 1 : 0 : L2.d === 1 ? L2.ti === 3 && L2.tj === 3 ? 2 : 1 : L2.d === 2 ? L2.ti === 1 && L2.tj === 3 ? 3 : 2 : L2.ti === 1 && L2.tj === 1 ? 0 : 3
-      ], L = k === 0 ? this.links.get("1,1,0") : this.links.get("3,3,2");
+      let { i0, i1, j0, j1 } = parkLoop(), route = [
+        (L2) => L2.d === 0 ? L2.ti === i1 && L2.tj === j0 ? 1 : 0 : L2.d === 1 ? L2.ti === i1 && L2.tj === j1 ? 2 : 1 : L2.d === 2 ? L2.ti === i0 && L2.tj === j1 ? 3 : 2 : L2.ti === i0 && L2.tj === j0 ? 0 : 3
+      ], L = k === 0 ? this.links.get(`${i0},${j0},0`) : this.links.get(`${i1},${j1},2`);
       if (!L) return;
       let car = this.makeCar("bus", L, 2, { route, color: 0 });
       car.v = 2, car.life = 1e9, car.busStops = this.city.world.busStops, this.addCar(car);
@@ -6882,8 +7487,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (sp.iceTimer -= dt, env.season === 1 && h > 12 && h < 20 && sp.iceTimer <= 0 && !this.cars.some((c) => c.special === "icecream")) {
         sp.iceTimer = this.rng.range(80, 160);
-        let L = this.links.get("3,3,2") || this.rng.pick([...this.links.values()]);
-        this.spawnSpecial("icecream", { special: "icecream", link: L, life: 150, stopAt: { link: "3,3,2", s: 8 } });
+        let { i1, j1 } = parkLoop(), id = `${i1},${j1},2`, L = this.links.get(id) || this.rng.pick([...this.links.values()]);
+        this.spawnSpecial("icecream", { special: "icecream", link: L, life: 150, stopAt: { link: id, s: 8 } });
       }
       sp.garbageTimer -= dt, h > 5 && h < 8.5 && sp.garbageTimer <= 0 && !this.cars.some((c) => c.special === "garbage") && (sp.garbageTimer = this.rng.range(60, 120), this.spawnSpecial("garbage", { special: "garbage", life: 120 })), sp.plowTimer -= dt, env.season === 3 && (env.snowing || env.snowCover > 0.5) && sp.plowTimer <= 0 && !this.cars.some((c) => c.special === "plow") && (sp.plowTimer = this.rng.range(70, 140), this.spawnSpecial("plow", { special: "plow", life: 100 }));
     }
@@ -7016,17 +7621,39 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     // A* path from node a to node b, returns array of {node, cross}
     path(a, b) {
       if (a === b) return [{ node: a, cross: null }];
-      let open = /* @__PURE__ */ new Map(), came = /* @__PURE__ */ new Map(), g = /* @__PURE__ */ new Map(), h = (n2) => dist(n2.x, n2.y, b.x, b.y);
-      g.set(a, 0), open.set(a, h(a));
+      let g = /* @__PURE__ */ new Map(), came = /* @__PURE__ */ new Map(), closed = /* @__PURE__ */ new Set(), h = (n2) => dist(n2.x, n2.y, b.x, b.y), heap = [], push = (f, n2) => {
+        heap.push([f, n2]);
+        let i = heap.length - 1;
+        for (; i > 0; ) {
+          let p = i - 1 >> 1;
+          if (heap[p][0] <= heap[i][0]) break;
+          [heap[p], heap[i]] = [heap[i], heap[p]], i = p;
+        }
+      }, pop = () => {
+        let top = heap[0], last = heap.pop();
+        if (heap.length) {
+          heap[0] = last;
+          let i = 0;
+          for (; ; ) {
+            let l = i * 2 + 1, r = l + 1, m = i;
+            if (l < heap.length && heap[l][0] < heap[m][0] && (m = l), r < heap.length && heap[r][0] < heap[m][0] && (m = r), m === i) break;
+            [heap[m], heap[i]] = [heap[i], heap[m]], i = m;
+          }
+        }
+        return top;
+      };
+      g.set(a, 0), push(h(a), a);
       let iter = 0;
-      for (; open.size && iter++ < 4e3; ) {
-        let cur = null, cf = 1 / 0;
-        for (let [n2, f] of open) f < cf && (cf = f, cur = n2);
+      for (; heap.length && iter++ < 2e4; ) {
+        let [, cur] = pop();
+        if (closed.has(cur)) continue;
         if (cur === b) break;
-        open.delete(cur);
+        closed.add(cur);
+        let gc = g.get(cur);
         for (let e of cur.edges) {
-          let ng = g.get(cur) + e.len + (e.cross ? 2.5 : 0);
-          ng < (g.get(e.to) ?? 1 / 0) && (g.set(e.to, ng), came.set(e.to, { from: cur, cross: e.cross }), open.set(e.to, ng + h(e.to)));
+          if (closed.has(e.to)) continue;
+          let ng = gc + e.len + (e.cross ? 2.5 : 0);
+          ng < (g.get(e.to) ?? 1 / 0) && (g.set(e.to, ng), came.set(e.to, { from: cur, cross: e.cross }), push(ng + h(e.to), e.to));
         }
       }
       if (!came.has(b)) return null;
@@ -7040,8 +7667,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   };
   function buildNav(world) {
     let G3 = new NavGraph(), corner = {}, key = (i, j, qx, qy) => `${i},${j},${qx},${qy}`, park = (i, j) => isParkIntersection(i, j);
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++)
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j <= 6; j++)
         if (!park(i, j))
           for (let qx of [-1, 1])
             for (let qy of [-1, 1]) {
@@ -7049,8 +7676,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
               n.i = i, n.j = j, corner[key(i, j, qx, qy)] = n;
             }
     let walk = (a, b) => G3.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j <= 4; j++)
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j <= 6; j++)
         if (!park(i, j)) {
           for (let qy of [-1, 1]) {
             let a = corner[key(i, j, -1, qy)], b = corner[key(i, j, 1, qy)];
@@ -7061,15 +7688,15 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
             park(i + qx, j) ? walk(a, b) : G3.link(a, b, { i, j, axis: "y", side: qx < 0 ? 2 : 0 });
           }
         }
-    for (let j = 0; j <= 4; j++)
-      for (let i = 0; i < 4; i++)
+    for (let j = 0; j <= 6; j++)
+      for (let i = 0; i < 6; i++)
         for (let qy of [-1, 1]) {
           if (park(i, j) || park(i + 1, j)) continue;
           let a = corner[key(i, j, 1, qy)], b = corner[key(i + 1, j, -1, qy)];
           G3.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
         }
-    for (let i = 0; i <= 4; i++)
-      for (let j = 0; j < 4; j++)
+    for (let i = 0; i <= 6; i++)
+      for (let j = 0; j < 6; j++)
         for (let qx of [-1, 1]) {
           if (park(i, j) || park(i, j + 1)) continue;
           let a = corner[key(i, j, qx, 1)], b = corner[key(i, j + 1, qx, -1)];
@@ -7137,6 +7764,22 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let P = world.park, nearestPark = (x, y) => poi.park.paths.reduce((b, n) => dist(n.x, n.y, x, y) < dist(b.x, b.y, x, y) ? n : b);
       for (let b of world.benches)
         b.x > P.x0 && b.x < P.x1 && b.y > P.y0 && b.y < P.y1 && poi.benches.push({ bench: b, node: nearestPark(b.x, b.y), park: !0 });
+    }
+    poi.squares = {};
+    for (let N of world.extraNets || []) {
+      let pn = N.nodes.map((n) => G3.add(n.x, n.y, 0.125, "plaza"));
+      for (let [a, b] of N.edges) G3.link(pn[a], pn[b]);
+      for (let g of N.gates) {
+        let sw = G3.attach(g.sx, g.sy, 2.5);
+        sw && G3.link(pn[g.node], sw);
+      }
+      poi.squares[N.name] = pn;
+      let R2 = N.rect;
+      for (let b of world.benches)
+        if (b.x > R2.x0 && b.x < R2.x1 && b.y > R2.y0 && b.y < R2.y1 && pn.length) {
+          let n = pn.reduce((best, q) => dist(q.x, q.y, b.x, b.y) < dist(best.x, best.y, b.x, b.y) ? q : best);
+          poi.benches.push({ bench: b, node: n, park: !1 });
+        }
     }
     for (let b of world.benches) {
       if (poi.benches.some((p) => p.bench === b)) continue;
@@ -7211,13 +7854,13 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     "Destiny",
     "Sal",
     "Ivy"
-  ], DOG_NAMES = ["Biscuit", "Lola", "Rocco", "Pretzel", "Bella", "Mookie", "Daisy", "Frank", "Peanut", "Luna", "Bodega", "Pickles"], POP = [[0, 50], [2, 26], [5, 34], [7, 170], [9, 240], [12, 250], [15, 270], [17, 310], [19, 270], [21, 190], [23, 95], [24, 50]];
+  ], DOG_NAMES = ["Biscuit", "Lola", "Rocco", "Pretzel", "Bella", "Mookie", "Daisy", "Frank", "Peanut", "Luna", "Bodega", "Pickles"], POP = [[0, 90], [2, 46], [5, 60], [7, 300], [9, 420], [12, 440], [15, 470], [17, 540], [19, 470], [21, 330], [23, 165], [24, 90]];
   function popTarget(h) {
     for (let i = 1; i < POP.length; i++) if (h <= POP[i][0]) {
       let a = POP[i - 1], b = POP[i];
       return a[1] + (b[1] - a[1]) * (h - a[0]) / (b[0] - a[0]);
     }
-    return 26;
+    return 46;
   }
   var People = class {
     constructor(city) {
@@ -7374,7 +8017,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           return steps.push(go(home, "Cool down"), { t: "enter" }), steps;
         }
         case "tourist": {
-          let steps = [], spots = [...P.offices.slice(0, 4), ...P.park.ring || []];
+          let steps = [], tsq = P.squares && P.squares.tsq || [], spots = [...P.offices.slice(0, 4), ...P.park.ring || [], ...tsq, ...tsq];
           for (let k = 0; k < 3; k++) steps.push(go(r.pick(spots).sw || r.pick(spots), "Is that the famous one?"), { t: "idle", dur: r.range(3, 6), anim: "phone", thought: "Taking a photo" });
           return steps.push(go(subway(), "Next stop: Times Square?"), { t: "enter" }), steps;
         }
@@ -7437,7 +8080,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     spawn(anywhere = !1) {
       let role = this.chooseRole(), kind = this.chooseKind(role), p = this.create(role), P = this.poi(), r = this.rng, h = this.env().hour, src;
       if (role === "worker" && (kind === "lunch" || kind === "commute") ? src = r.pick(P.offices) : role === "worker" || role === "tourist" || kind === "goHome" || kind === "night" && r.chance(0.5) ? src = r.pick(P.subways) : src = this.pickHome(), kind === "goHome" ? p.home = this.pickHome() : src.kind === "door" && src.data?.kind === "home" && (p.home = src), role === "dogwalker" && (p.dogName = r.pick(DOG_NAMES), this.city.animals?.spawnDog(p)), p.plan = this.plan(p, kind), p.node = src, p.x = src.x, p.y = src.y, p.z = src.z, p.state = "appear", p.alpha = 0, anywhere) {
-        let n = r.pick(this.nav.nodes.filter((nn) => nn.kind === "walk" || nn.kind === "corner" || nn.kind === "park"));
+        let n = r.pick(this.nav.nodes.filter((nn) => nn.kind === "walk" || nn.kind === "corner" || nn.kind === "park" || nn.kind === "plaza"));
         p.node = n, p.x = n.x, p.y = n.y, p.z = n.z, p.alpha = 1, p.state = "idle", p.timer = r.range(0, 0.5);
       }
       return p.dog && (p.dog.x = p.x, p.dog.y = p.y), this.list.push(p), p;
@@ -7676,13 +8319,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   };
 
   // src/sim/activities.js
-  var G2 = 5, Activities = class {
+  var G2 = 5;
+  function swingSeat(s) {
+    let th = (s.amp || 0) * Math.sin(s.ph || 0), L = s.top - s.z;
+    return { x: s.x, y: s.y + Math.sin(th) * L, z: s.top - Math.cos(th) * L, th };
+  }
+  var Activities = class {
     constructor(city) {
       this.city = city, this.people = city.people, this.rng = new RNG(777);
       let W = city.world;
       this.court = W.court, this.hoops = W.hoops.filter((h) => this.court && h.x > this.court.x0 - 1 && h.x < this.court.x1 + 1 && h.y > this.court.y0 - 1 && h.y < this.court.y1 + 1), this.groups = { basketball: [], snowball: [], hydrant: [], skate: [], lawn: [], playground: [], dogrun: [] }, this.ball = null, this.snowballs = [], this.snowmen = [], this.hydrantOpen = null, this.hydrantTimer = 5, this.frisbee = null;
       let A = city.atlas;
-      this.frames = { ball: A.get("ball"), snowball: A.get("snowball"), snowman: A.get("snowman"), frisbee: A.get("frisbee") }, this.row = city.pal.alloc({ [S.C1]: 15233050, [S.C2]: 16054527, [S.C3]: 1973794, [S.C4]: 6965802, [S.C5]: 14168108, [S.C6]: 15909424, [S.C7]: 15763994 }), this.possession = 0, this.score = [0, 0], this.shotClock = 0, this.season = city.env.season;
+      this.frames = { ball: A.get("ball"), snowball: A.get("snowball"), snowman: A.get("snowman"), frisbee: A.get("frisbee"), seat: A.get("swingSeat"), dot: A.get("dot") }, this.swingRow = city.pal.alloc({ [S.C1]: 9080210, [S.C2]: 2763312 }), this.row = city.pal.alloc({ [S.C1]: 15233050, [S.C2]: 16054527, [S.C3]: 1973794, [S.C4]: 6965802, [S.C5]: 14168108, [S.C6]: 15909424, [S.C7]: 15763994 }), this.possession = 0, this.score = [0, 0], this.shotClock = 0, this.season = city.env.season;
     }
     // Populate activities at start / season change so the city feels alive immediately
     seed() {
@@ -7797,7 +8445,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let i = g.indexOf(p);
         i >= 0 && g.splice(i, 1);
       }
-      this.ball && this.ball.holder === p && (this.ball.holder = null, this.ball.state = "loose"), p.pg && p.pg.kind === "swing" && (p.pg.s.used = !1), p.pg = null, p.dog && (p.dog.mode = "follow"), p.animFrame = null, p.forceFace = !1;
+      this.ball && this.ball.holder === p && (this.ball.holder = null, this.ball.state = "loose"), p.pg && p.pg.kind === "swing" && (p.pg.s.used = !1), p.slideStage = null, p.slideRoute = null, p.onSwing = !1, p.z = 0.125, p.pg = null, p.dog && (p.dog.mode = "follow"), p.animFrame = null, p.forceFace = !1;
       let back = p.joinNode;
       p.actKind = null, back ? (p.walkTo = { x: back.x, y: back.y, z: back.z }, p.state = "return") : this.people.nextStep(p);
     }
@@ -7960,37 +8608,56 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       for (let p of this.groups.lawn)
         dist(p.x, p.y, p.tx, p.ty) > 0.08 ? (this.moveTo(p, p.tx, p.ty, p.speed, dt), p.anim = "walk", p.forceFace = !0) : (p.anim = p.lawnPose, p.animFrame = 0, p.forceFace = !1);
+      for (let sw of this.city.world.swings)
+        sw.ph = (sw.ph || 0) + dt * 1.9, sw.used || (sw.amp = (sw.amp || 0) * Math.exp(-dt * 0.7));
       for (let p of this.groups.playground) {
         let o = p.pg;
         if (o)
           if (o.kind === "swing") {
-            let s = o.s;
-            if (dist(p.x, p.y, s.x, s.y) > 0.6 && !p.onSwing) {
-              this.moveTo(p, s.x, s.y, p.speed, dt), p.anim = "walk", p.forceFace = !0;
+            let s = o.s, seat = swingSeat(s);
+            if (!p.onSwing && dist(p.x, p.y, seat.x, seat.y) > 0.25) {
+              this.moveTo(p, s.x, s.y + 0.05, p.speed, dt), p.anim = "walk", p.forceFace = !0;
               continue;
             }
-            p.onSwing = !0, p.pgPhase += dt * 2.6;
-            let sw = Math.sin(p.pgPhase) * 0.55;
-            p.x = s.x, p.y = s.y + sw, p.z = s.z + (1 - Math.cos(p.pgPhase * 1)) * 0.05 + Math.abs(sw) * 0.25, p.anim = "sit", p.animFrame = 0, p.forceFace = !1, this.face(p, s.x, s.y + 1);
+            p.onSwing = !0, s.amp = Math.min(0.62, (s.amp || 0) + dt * 0.12), p.x = seat.x, p.y = seat.y + 0.02, p.z = seat.z, p.anim = "sit", p.animFrame = 0, p.forceFace = !1, this.face(p, s.x, s.y + 1);
           } else {
             let s = o.s;
-            p.pgT = (p.pgT ?? 0) + dt;
-            let cyc = p.pgT % 6;
-            if (cyc < 2.5)
-              this.moveTo(p, s.x, s.y + 0.6, p.speed, dt), p.z = 0.125 + Math.min(1, cyc / 2.5) * 0.2, p.anim = "walk", p.forceFace = !0;
-            else if (cyc < 3.5)
-              p.x = s.x, p.y = s.y, p.z = s.z, p.anim = "wave", p.animFrame = 0;
-            else {
-              let t = Math.min(1, (cyc - 3.5) / 0.9);
-              p.x = s.x + (s.ex - s.x) * t, p.y = s.y + (s.ey - s.y) * t, p.z = s.z + (0.125 + 0.05 - s.z) * t, p.anim = "sit", p.animFrame = 0, p.forceFace = !1, this.face(p, s.ex, s.ey + 1);
+            if (p.pgT = (p.pgT ?? 0) + dt, p.onSwing = !1, p.slideStage == null && (p.slideStage = 0), p.slideStage === 0) {
+              p.slideRoute || (p.slideRoute = p.y > s.ly ? [[s.x + 1.05, Math.max(p.y, s.ly)], [s.x + 1.05, s.ly], [s.lx, s.ly]] : [[s.lx, s.ly]]);
+              let [gx, gy] = p.slideRoute[0];
+              if (p.slideRoute.length === 1 && this.groups.playground.some((q) => q !== p && q.pg && q.pg.s === s && q.slideStage >= 1 && q.slideStage <= 3) && dist(p.x, p.y, gx, gy) < 1.1) {
+                p.anim = "idle", p.forceFace = !1, p.z = 0.125;
+                continue;
+              }
+              this.moveTo(p, gx, gy, p.speed, dt) && (p.slideRoute.shift(), p.slideRoute.length || (p.slideRoute = null, p.slideStage = 1, p.pgT = 0)), p.anim = "walk", p.forceFace = !0, p.z = 0.125;
+            } else if (p.slideStage === 1) {
+              let t = Math.min(1, p.pgT / 1.4);
+              p.x = s.lx, p.y = s.ly + (s.y - s.ly) * Math.max(0, t - 0.75) * 4, p.z = 0.125 + (s.z - 0.125) * Math.min(1, t / 0.8), p.anim = "walk", p.animFrame = Math.floor(p.pgT * 6) % 2, p.forceFace = !0, p.dx = 0, p.dy = 1, t >= 1 && (p.slideStage = 2, p.pgT = 0);
+            } else if (p.slideStage === 2)
+              p.x = s.x, p.y = s.y, p.z = s.z, p.anim = "wave", p.animFrame = 0, p.forceFace = !1, p.pgT > 0.9 && (p.slideStage = 3, p.pgT = 0, this.rng.chance(0.4) && this.city.audio?.event("giggle", p));
+            else if (p.slideStage === 3) {
+              let t = Math.min(1, p.pgT / 1.1), tt = t * t, yEnd = s.by;
+              tt < 1 && (p.x = s.x, p.y = s.cy + (yEnd - s.cy) * tt, p.z = s.cz + (s.ez - s.cz) * tt), p.anim = "sit", p.animFrame = 0, p.forceFace = !1, this.face(p, s.ex, s.ey + 1), t >= 1 && (p.slideStage = 4, p.pgT = 0);
+            } else {
+              let t = Math.min(1, p.pgT / 0.35);
+              p.y = s.by + (s.ey - s.by) * t, p.z = s.ez, t >= 1 && (p.z = 0.125, p.slideStage = 0);
             }
-            p.onSwing = !1;
           }
       }
       for (let p of this.groups.dogrun)
         dist(p.x, p.y, p.tx, p.ty) > 0.08 ? (this.moveTo(p, p.tx, p.ty, p.speed, dt), p.anim = "walk", p.forceFace = !0) : (p.anim = this.rng.chance(dt * 0.3) ? "throw" : "idle", p.animFrame = null, p.forceFace = !1, p.dog && this.face(p, p.dog.x, p.dog.y));
     }
     emit(L, view) {
+      for (let sw of this.city.world.swings) {
+        if (!view.visible(sw.x, sw.y, sw.top, 1)) continue;
+        let seat = swingSeat(sw);
+        L.push(seat.x, seat.y, seat.z - 0.02, this.frames.seat, this.swingRow, 0, 1, -4e-3);
+        for (let ox of [-0.19, 0.19])
+          for (let k = 0; k < 48; k++) {
+            let t = k / 48;
+            L.push(sw.x + ox, sw.y + (seat.y - sw.y) * t, sw.top + (seat.z + 0.03 - sw.top) * t, this.frames.dot, this.swingRow, SF.NOSHADOW, 1, 3e-3);
+          }
+      }
       let b = this.ball;
       b && this.groups.basketball.length && view.visible(b.x, b.y, b.z, 1) && L.push(b.x, b.y, b.z, this.frames.ball, this.row, 0, 1, 6e-3);
       for (let s of this.snowballs) L.push(s.x, s.y, s.z, this.frames.snowball, this.row, 0, 1, 6e-3);
@@ -8081,7 +8748,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
     }
     takeOff(pg, target) {
-      pg.state = "fly", pg.tx = target.x, pg.ty = target.y, pg.tz = target.z, pg.ft = 0, pg.sx = pg.x, pg.sy = pg.y, pg.sz = pg.z, pg.dur = clamp(dist(pg.x, pg.y, target.x, target.y) / 3.2, 0.8, 4.5), pg.arc = this.rng.range(1.5, 4) + Math.abs(target.z - pg.z) * 0.3;
+      pg.state = "fly", pg.tx = target.x, pg.ty = target.y, pg.tz = target.z, pg.ft = 0, pg.sx = pg.x, pg.sy = pg.y, pg.sz = pg.z;
+      let d = dist(pg.x, pg.y, target.x, target.y), dz = target.z - pg.z;
+      pg.dur = clamp(Math.hypot(d, dz) / 3.4, 0.35, 4.5), pg.arc = clamp(0.08 + d * 0.11, 0.12, 1.3) * this.rng.range(0.8, 1.2) * (dz < -0.5 ? 0.2 : 1);
     }
     perchFor(pg) {
       let W = this.city.world, best = null, bd = 900;
@@ -8111,8 +8780,10 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         }
         if (pg.state === "fly") {
           pg.ft += dt;
-          let t = clamp(pg.ft / pg.dur, 0, 1), e = t * t * (3 - 2 * t), px = pg.x;
-          pg.x = pg.sx + (pg.tx - pg.sx) * e, pg.y = pg.sy + (pg.ty - pg.sy) * e, pg.z = pg.sz + (pg.tz - pg.sz) * e + Math.sin(t * Math.PI) * pg.arc, pg.vx = pg.x - px, pg.anim = "fly", pg.f = Math.floor(pg.t * 12) % 2, t >= 1 && (pg.state = pg.tz > 0.125 + 0.5 ? "perched" : "ground", pg.z = pg.tz, pg.perchT = this.rng.range(6, 25));
+          let t = clamp(pg.ft / pg.dur, 0, 1), e = 0.35 * t + 0.65 * t * t * (3 - 2 * t), px = pg.x;
+          pg.x = pg.sx + (pg.tx - pg.sx) * e, pg.y = pg.sy + (pg.ty - pg.sy) * e;
+          let dz = pg.tz - pg.sz, g = dz > 0.5 ? 1 - (1 - t) * (1 - t) * (1 - t) : dz < -0.5 ? t * t * (3 - 2 * t) : e;
+          pg.z = pg.sz + dz * g + Math.sin(t * Math.PI) * pg.arc, pg.vx = pg.x - px, pg.anim = "fly", pg.f = Math.floor(pg.t * 12) % 2, t >= 1 && (pg.state = pg.tz > 0.125 + 0.5 ? "perched" : "ground", pg.z = pg.tz, pg.perchT = this.rng.range(6, 25));
           continue;
         }
         if (pg.state === "perched") {
@@ -8265,8 +8936,8 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (this.gooseTimer -= dt, !this.geese && env.season === 2 && this.gooseTimer <= 0 && env.darkness < 0.5) {
         this.gooseTimer = this.rng.range(60, 140);
-        let y0 = this.rng.range(10, 107);
-        this.geese = { x: 142, y: y0, z: 42, vx: -3.2, vy: this.rng.range(-0.5, 0.5), t: 0 }, this.city.audio?.event("geese", this.geese);
+        let y0 = this.rng.range(10, 161);
+        this.geese = { x: 196, y: y0, z: 42, vx: -3.2, vy: this.rng.range(-0.5, 0.5), t: 0 }, this.city.audio?.event("geese", this.geese);
       }
       if (this.geese) {
         let g = this.geese;
@@ -8275,11 +8946,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       if (this.planeTimer -= dt, this.planeTimer <= 0 && this.planes.length < 2) {
         this.planeTimer = this.rng.range(25, 70);
         let fromW = this.rng.chance(0.5);
-        this.planes.push({ x: fromW ? -40 : 157, y: this.rng.range(0, 117), z: this.rng.range(70, 90), vx: fromW ? 7 : -7, vy: this.rng.range(-1.5, 1.5), t: 0 });
+        this.planes.push({ x: fromW ? -40 : 211, y: this.rng.range(0, 171), z: this.rng.range(70, 90), vx: fromW ? 7 : -7, vy: this.rng.range(-1.5, 1.5), t: 0 });
       }
       for (let i = this.planes.length - 1; i >= 0; i--) {
         let p = this.planes[i];
-        p.t += dt, p.x += p.vx * dt, p.y += p.vy * dt, (p.x < -60 || p.x > 177) && this.planes.splice(i, 1);
+        p.t += dt, p.x += p.vx * dt, p.y += p.vy * dt, (p.x < -60 || p.x > 231) && this.planes.splice(i, 1);
       }
     }
     update(dt) {
@@ -8364,11 +9035,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     // random point currently on screen at height z
     screenPoint(view, z) {
       let cam = this.city.camera, sx = view.tsx + this.rng.range(-view.bw / 2, view.bw / 2), sy = view.tsy + this.rng.range(-view.bh / 2 - 40, view.bh / 2), a = sx / 32, b = (sy + z * 32) / (32 / 2), xr = (a + b) / 2, yr = (b - a) / 2, c = Math.cos(cam.angle), s = Math.sin(cam.angle);
-      return [117 / 2 + c * xr + s * yr, 117 / 2 - s * xr + c * yr];
+      return [171 / 2 + c * xr + s * yr, 171 / 2 - s * xr + c * yr];
     }
     groundZ(x, y) {
       let W = this.city.world, ix = Math.floor(x), iy = Math.floor(y);
-      return ix < 0 || iy < 0 || ix >= 117 || iy >= 117 ? -99 : Math.max(W.heights[iy * 117 + ix], 0);
+      return ix < 0 || iy < 0 || ix >= 171 || iy >= 171 ? -99 : Math.max(W.heights[iy * 171 + ix], 0);
     }
     update(dt) {
       let env = this.city.env, view = this.city.view, r = this.rng, wind = env.wind, wx = Math.cos(env.windDir) * wind * 0.8, wy = Math.sin(env.windDir) * wind * 0.8;
@@ -8393,20 +9064,20 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let s = W.steam[i];
         if (!view.visible(s.x, s.y, s.z, 4)) continue;
         let rate = s.rate * cold;
-        if (s.kind === "chimney" && (rate = env.season === 3 ? 0.5 : env.season === 2 ? 0.15 : 0), s.kind === "roof" && (rate *= env.season === 3 ? 1.6 : 0.5), s.kind === "manhole" && (rate *= 0.5 + 0.5 * Math.sin(this.city.time * 0.4 + i * 1.7)), rate <= 0) continue;
+        if (s.kind === "chimney" && (rate = env.season === 3 ? 0.5 : env.season === 2 ? 0.15 : 0), s.kind === "roof" && (rate *= env.season === 3 ? 1.6 : 0.5), s.kind === "manhole" && (rate *= 0.5 + 0.5 * Math.sin(this.city.time * 0.4 + i * 1.7)), s.kind === "grate" && (rate *= 0.35 + 0.65 * Math.max(0, Math.sin(this.city.time * 0.33 + i * 2.3))), rate <= 0) continue;
         let acc = (this.steamAcc.get(i) || 0) + dt * rate * 6;
         for (; acc > 1; ) {
           acc -= 1;
-          let big = s.kind === "stack" || s.kind === "manhole";
+          let big = s.kind === "grate" || s.kind === "manhole", ox = s.ax ? r.range(-s.ax, s.ax) : r.range(-0.1, 0.1), oy = s.ay ? r.range(-s.ay, s.ay) : r.range(-0.1, 0.1);
           this.add({
-            x: s.x + r.range(-0.1, 0.1),
-            y: s.y + r.range(-0.1, 0.1),
+            x: s.x + ox,
+            y: s.y + oy,
             z: s.z,
             vx: wx * 0.6 + r.range(-0.12, 0.12),
             vy: wy * 0.6 + r.range(-0.12, 0.12),
-            vz: big ? r.range(0.7, 1.2) : r.range(0.35, 0.6),
+            vz: big ? r.range(0.6, 1.1) : r.range(0.35, 0.6),
             g: -0.05,
-            life: big ? r.range(2.5, 4) : r.range(1.5, 2.6),
+            life: big ? r.range(2.2, 3.6) : r.range(1.5, 2.6),
             max: 0,
             kind: "steam",
             grow: big ? 4 : 2,
@@ -8476,9 +9147,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
               this.add({ x: s.x, y: s.y, z: 0.125 + 0.6, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, vz: r.range(1.8, 2.6), g: 5, life: 1, max: 1, kind: "water", f: this.fr.dot, row: this.row, slot: S.C8, floor: 0.125 });
             }
       }
-      if (this.fireworkTimer -= dt, (env.season === 1 && (env.hour > 21 || env.hour < 0.5) && env.precip < 0.2 || this.forceFireworks > 0) && this.fireworkTimer <= 0) {
+      if (this.fireworkTimer -= dt, (env.season === 1 && (env.hour > 21 || env.hour < 0.5) && env.precip < 0.2 || env.season === 3 && env.hour >= 0 && env.hour < 0.25 || this.forceFireworks > 0) && this.fireworkTimer <= 0) {
         this.fireworkTimer = r.range(0.6, 2.4), this.forceFireworks > 0 && this.forceFireworks--;
-        let c = W.parkCenter || { x: 117 / 2, y: 117 / 2 };
+        let c = env.season === 3 && W.timesSquare || W.parkCenter || { x: 171 / 2, y: 171 / 2 };
         this.add({ x: c.x + r.range(-4, 4), y: c.y + r.range(-4, 4), z: 0.125 + 1, vx: r.range(-0.4, 0.4), vy: r.range(-0.4, 0.4), vz: r.range(9.5, 12), g: 4, life: r.range(1.8, 2.4), max: 2, kind: "rocket", f: this.fr.dot2, row: this.fwRows[5] }), this.city.audio?.event("launch", c);
       }
       let ffOn = env.season === 1 && env.hour > 20 && env.hour < 23.5 && !env.raining;
@@ -8547,7 +9218,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   var CAR_LEN = 3.25, GAP = 0.15, NCARS = 5, OFF = 0.9, Subway = class {
     constructor(city) {
       this.city = city, this.rng = new RNG(23);
-      let c = OFF, r = 0.9, M = 117, pts = [], arc = (cx, cy, a0, a1) => {
+      let c = OFF, r = 0.9, M = 171, pts = [], arc = (cx, cy, a0, a1) => {
         for (let k = 0; k <= 6; k++) {
           let a = a0 + (a1 - a0) * k / 6;
           pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
@@ -8611,7 +9282,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     makePassenger(x, alpha) {
       let P = this.city.people, role = this.rng.pick(["resident", "worker", "tourist", "resident"]), p = P.create(role);
-      return p.x = x, p.y = 117 - TUNNEL.depth + 0.42, p.z = TUNNEL.z0 + 0.5, p.alpha = alpha, p.t = this.rng.range(0, 3), p.front = !0, p.flip = this.rng.chance(0.5), p;
+      return p.x = x, p.y = 171 - TUNNEL.depth + 0.42, p.z = TUNNEL.z0 + 0.5, p.alpha = alpha, p.t = this.rng.range(0, 3), p.front = !0, p.flip = this.rng.chance(0.5), p;
     }
     board() {
       let p = this.waiting.shift();
@@ -8726,6 +9397,18 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         o.value = w, this.wxSel.append(o);
       }
       this.wxSel.addEventListener("change", () => this.app.env.setWeather(this.wxSel.value === "auto" ? null : this.wxSel.value)), this.wxSel.addEventListener("pointerdown", (e) => e.stopPropagation()), g3.append(this.wxSel);
+      let W = this.app.world, places = [["GO TO\u2026", null]];
+      W.park && places.push(["CENTRAL PARK", [W.park.cx, W.park.cy]]), W.pond && places.push(["THE LAKE", [W.pond.x, W.pond.y + 4]]), W.timesSquare && places.push(["TIMES SQUARE", [W.timesSquare.x, W.timesSquare.y + 4]]), W.court && places.push(["BASKETBALL COURT", [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
+      let dept = W.shops.find((sh) => sh.kind === "dept");
+      dept && places.push(["DEPARTMENT STORE", [dept.x, dept.y]]);
+      let firehouse2 = W.firehouse;
+      firehouse2 && places.push(["FIREHOUSE", [firehouse2.x, firehouse2.y]]), this.placeSel = this.h("select", "sel"), places.forEach(([name], i) => {
+        let o = this.h("option", null, name);
+        o.value = String(i), this.placeSel.append(o);
+      }), this.placeSel.addEventListener("change", () => {
+        let pl = places[+this.placeSel.value];
+        pl && pl[1] && (this.app.camera.follow && this.unfollow(), this.app.camera.vx = this.app.camera.vy = 0, this.app.camera.glide = { x: pl[1][0], y: pl[1][1] }), this.placeSel.value = "0";
+      }), this.placeSel.addEventListener("pointerdown", (e) => e.stopPropagation()), g3.append(this.placeSel);
       let g4 = this.h("div", "group");
       g4.append(
         this.btn("\u27F2", "Rotate left (Q)", () => this.rotate(-1)),
@@ -8741,6 +9424,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       <div class="hrow"><b>Q / E</b> rotate the view</div>
       <div class="hrow"><b>Click a person</b> follow them</div>
       <div class="hrow"><b>WASD / arrows</b> pan</div>
+      <div class="hrow"><b>GO TO menu</b> glide to a place</div>
       <div class="hrow"><b>Space</b> pause \xB7 <b>T</b> time speed</div>
       <div class="hrow"><b>1-4</b> season \xB7 <b>0</b> auto seasons</div>
       <div class="hrow"><b>F</b> follow someone \xB7 <b>Esc</b> stop</div>
@@ -8830,7 +9514,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           if (drag) {
             let dx = e.clientX - drag.x, dy = e.clientY - drag.y;
             if (moved += Math.abs(dx) + Math.abs(dy), drag.x = e.clientX, drag.y = e.clientY, moved > 4) {
-              cv.classList.add("dragging"), app.camera.follow && this.unfollow();
+              cv.classList.add("dragging"), app.camera.follow && this.unfollow(), app.camera.glide = null;
               let scaleCss = app.camera.scale / (window.devicePixelRatio || 1), [wx, wy] = app.camera.unprojectDelta(-dx / scaleCss, -dy / scaleCss);
               app.camera.x += wx, app.camera.y += wy, app.camera.vx = wx / 0.016 * 0.5, app.camera.vy = wy / 0.016 * 0.5;
             }
@@ -8862,7 +9546,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       if (!k) return;
       let sx = 0, sy = 0;
       if ((k.has("a") || k.has("arrowleft")) && (sx -= 1), (k.has("d") || k.has("arrowright")) && (sx += 1), (k.has("w") || k.has("arrowup")) && (sy -= 1), (k.has("s") || k.has("arrowdown")) && (sy += 1), !sx && !sy) return;
-      this.app.camera.follow && this.unfollow();
+      this.app.camera.follow && this.unfollow(), this.app.camera.glide = null;
       let cam = this.app.camera, speed = 420 / (cam.scale / (window.devicePixelRatio || 1)), [wx, wy] = cam.unprojectDelta(sx * speed * dt, sy * speed * dt);
       cam.x += wx, cam.y += wy;
     }
@@ -9154,7 +9838,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         let w = this.where(city.activities.hydrantOpen.h);
         w.g * 1.4 > water && (water = w.g * 1.4, wpan = w.pan);
       }
-      for (let s of W.steam) if (s.kind === "stack" || s.kind === "manhole") {
+      for (let s of W.steam) if (s.kind === "grate" || s.kind === "manhole") {
         let w = this.where(s);
         w.g > steam && (steam = w.g, span = w.pan);
       }
@@ -9215,7 +9899,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (this.chirpT -= dt, this.chirpT <= 0) {
         this.chirpT = 0.5;
-        let cx = app.camera.x, cy = app.camera.y, i = clamp(Math.round((cx - 4.5) / 27), 0, 4), j = clamp(Math.round((cy - 4.5) / 27), 0, 4);
+        let cx = app.camera.x, cy = app.camera.y, i = clamp(Math.round((cx - 4.5) / 27), 0, 6), j = clamp(Math.round((cy - 4.5) / 27), 0, 6);
         if (isParkIntersection(i, j)) {
           this.lastWalk = null;
           return;
@@ -9248,7 +9932,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     let renderer = new Renderer(gl);
     renderer.setStatic(world.mesh, world.atlas, world.groundPage);
     let q = new URLSearchParams(location.search), env = new Environment(), camera = new Camera(), dpr = window.devicePixelRatio || 1;
-    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 62, camera.y = 64, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
+    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), camera.x = 89, camera.y = 91, q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
     let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
     app.audio = audio, city.audio = audio, env.onEvent((ev, d) => {
       ev === "lightning" && audio.thunder(d.dist), ev === "season" && city.activities?.seed();
@@ -9256,7 +9940,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       !audio.ctx || !audio.enabled || (document.hidden ? audio.ctx.suspend() : audio.ctx.resume());
     });
     let ui = new UI(app);
-    app.ui = ui, window.__city = app, console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms, tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
+    app.ui = ui, window.__city = app, console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms (${world.buildProfile}; blocks: ${world.blockProfile}), tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
     let last = performance.now(), fpsAcc = 0, fpsN = 0;
     function resize() {
       let d = window.devicePixelRatio || 1, w = Math.round(canvas.clientWidth * d), h = Math.round(canvas.clientHeight * d);

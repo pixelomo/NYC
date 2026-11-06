@@ -4,15 +4,16 @@ import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart,
 import { GC, COL } from './ground.js';
 import { MAT, GRP } from './mesh.js';
 import { shade, mixc, hash2i, valueNoise } from '../core/math.js';
-import { Frame, rowhouse, walkup, gardenWall, sharedTex, markHeight } from './buildings.js';
+import { Frame, rowhouse, walkup, gardenWall, sharedTex, markHeight, deptStore } from './buildings.js';
 import { decoTower, glassTower, modernTower, limestoneOffice, loft } from './towers.js';
 import {
-  propTex, streetLamp, parkLamp, signalPole, hydrant, mailbox, newsBoxes, trashBasket, bench, steamStack, kiosk,
+  propTex, streetLamp, parkLamp, signalPole, hydrant, mailbox, newsBoxes, trashBasket, bench, steamGrate, kiosk,
   busShelter, subwayEntrance, parkWall, chainFence, hoop, bleachers, handballWall, playground, scaffolding,
 } from './props.js';
-import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard } from './facades.js';
+import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard, SHOPPING } from './facades.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { bigPark } from './park.js';
+import { billboardsBlock, timesSquareBlock } from './timessq.js';
 
 export function makeContext(world, mb, atlas, rng) {
   const gp = world.ground.p;
@@ -202,6 +203,27 @@ function groundFill(kind, x, y, X0, Y0, X1, Y1) {
       if (h > 0.985) c = n2 > 0.5 ? 0x8a6a3a : 0x4a7a32; // twigs, clover
       return [c, GC.GRASS];
     }
+    case 'grateX':
+    case 'grateY': {
+      // steel bar grating over a dark shaft: frame, cross bars every 3 texels, two bearers
+      const lx = x - X0, ly = y - Y0, w = X1 - X0, hh = Y1 - Y0;
+      const e = Math.min(lx, ly, w - 1 - lx, hh - 1 - ly);
+      if (e === 0) return [0x3e3f42, GC.METAL];
+      if (e < 3) return [e === 1 ? 0x9a9ca0 : 0x74767a, GC.METAL];
+      const along = kind === 'grateX' ? lx : ly, across = kind === 'grateX' ? ly - 3 : lx - 3, span = (kind === 'grateX' ? hh : w) - 6;
+      if (across === Math.floor(span / 3) || across === Math.floor((2 * span) / 3)) return [0x55575b, GC.METAL];
+      if (along % 3 === 0) return [shade(0x8c8e92, 0.95 + h * 0.1), GC.METAL];
+      if (along % 3 === 1) return [0x5c5e62, GC.METAL];
+      return [shade(0x17181a, 0.9 + h * 0.3), GC.METAL];
+    }
+    case 'tsq': {
+      // Times Square plaza: rose-grey concrete pavers with pale joints
+      const jx = x % 40 === 0, jy = y % 20 === 0;
+      const tile = hash2i(Math.floor(x / 40), Math.floor(y / 20), 81);
+      let c = shade(mixc(0xb89a98, 0xa88a88, tile), 0.96 + h * 0.07);
+      if (jx || jy) c = 0xd2c8c4;
+      return [c, GC.PLAZA];
+    }
     case 'pathEdge':
       return [shade(0x9c978d, 0.92 + h * 0.12), GC.PATH];
     case 'shore': {
@@ -228,16 +250,19 @@ function frames(L) {
 
 // ---------------------------------------------------------------------------
 export function buildBlocks(C) {
+  const prof = {};
+  const time = (name, fn) => { const t = performance.now(); fn(); prof[name] = (prof[name] || 0) + performance.now() - t; };
   for (let by = 0; by < NB; by++)
     for (let bx = 0; bx < NB; bx++) {
       if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const fn = BLOCKS[type];
-      if (fn) fn(C, L, bx, by);
+      if (fn) time(type, () => fn(C, L, bx, by));
     }
-  bigPark(C);
-  streetFurniture(C);
+  time('park', () => bigPark(C));
+  time('furniture', () => streetFurniture(C));
+  C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ');
 }
 
 const BLOCKS = {
@@ -254,6 +279,16 @@ const BLOCKS = {
   office: (C, L) => limestoneOffice(C, L),
   court: (C, L) => courtBlock(C, L),
   park: (C, L) => parkBlock(C, L),
+  // pre-war red-brick apartment houses: taller, mostly residential, canopied entrances
+  redbrick: (C, L) => walkupBlock(C, L, {
+    shops: 0.15, residential: true, fireEscape: true, floors: [6, 7], canopy: 0.55, billboards: 0.1, waterTowers: 0.6,
+    brick: ['brickRed', 'brickRed', 'brickBrown', 'brickOrange'], widths: [[6, 6, 6], [6.5, 5, 6.5], [9, 9], [4.5, 9, 4.5]],
+  }),
+  // shopping streets: a storefront in every building, and sometimes a department store
+  shops: (C, L, bx, by) => walkupBlock(C, L, { shops: 1, shopKinds: SHOPPING, floors: [4, 6], dept: (bx + by) % 3 === 0 ? 'S' : null, billboards: 0.5, awning: 1 }),
+  // the mini Times Square: sign towers either side of a pedestrian square
+  billboards: (C, L, bx, by) => billboardsBlock(C, L, BLOCK_TYPES[by][bx + 1] === 'timessq' ? 'E' : 'W', 900 + bx * 7 + by),
+  timessq: (C, L, bx, by) => timesSquareBlock(C, L, 950 + bx * 7 + by),
 };
 
 // ---------------------------------------------------------------------------
@@ -311,11 +346,15 @@ function walkupBlock(C, L, o) {
   const F = frames(L);
   C.paintGround(L.x0, L.y0, L.x1, L.y1, 'patio');
   const shopP = o.shops ?? 0.6;
-  const pickShop = () => (rng.chance(shopP) ? rng.pick(['bodega', 'pizza', 'laundry', 'coffee', 'bar', 'books', 'flowers', 'chinese', 'nails', 'hardware', 'bagels', 'diner', 'pharmacy']) : null);
+  const kinds = o.shopKinds ?? ['bodega', 'pizza', 'laundry', 'coffee', 'bar', 'books', 'flowers', 'chinese', 'nails', 'hardware', 'bagels', 'diner', 'pharmacy'];
+  const pickShop = () => (rng.chance(shopP) ? rng.pick(kinds) : null);
+  const fl = o.floors ?? [4, 6];
+  const brick = () => (o.brick ? rng.pick(o.brick) : undefined);
   let num = rng.int(100, 400);
   for (const side of ['N', 'S']) {
     const fr = F[side];
-    const widths = rng.pick([[5, 4, 4, 5], [5, 3.5, 4.5, 5], [4.5, 4.5, 4.5, 4.5], [5, 8, 5]]);
+    if (o.dept === side) { deptStore(C, fr, 0, 18, 7); num += 8; continue; }
+    const widths = rng.pick(o.widths ?? [[5, 4, 4, 5], [5, 3.5, 4.5, 5], [4.5, 4.5, 4.5, 4.5], [5, 8, 5]]);
     let a = 0;
     widths.forEach((w, k) => {
       const corner = k === 0 ? 'L' : k === widths.length - 1 ? 'R' : null;
@@ -326,10 +365,12 @@ function walkupBlock(C, L, o) {
       } else if (o.theater && side === 'S' && w >= 8) {
         theater(C, fr, a, w, 7);
       } else {
+        const sh = corner && !o.residential ? shop ?? pickShop() : shop;
         walkup(C, fr, a, w, 7, {
-          cornerSide: corner, shop: corner ? shop ?? pickShop() : shop, number: num,
-          billboard: corner && rng.chance(0.35) ? rng.pick(['cola', 'bagel', 'jazz', 'show', 'taxi', 'sun', 'gin']) : null,
-          floors: rng.int(4, 6), fireEscape: o.fireEscape ? true : undefined, resDoorLeft: corner === 'R',
+          cornerSide: corner, shop: sh, number: num, brick: brick(),
+          billboard: corner && rng.chance(o.billboards ?? 0.35) ? rng.pick(['cola', 'bagel', 'jazz', 'show', 'taxi', 'sun', 'gin']) : null,
+          floors: rng.int(fl[0], fl[1]), fireEscape: o.fireEscape ? true : undefined, resDoorLeft: corner === 'R',
+          canopy: o.canopy && rng.chance(o.canopy), waterTower: o.waterTowers != null ? rng.chance(o.waterTowers) : undefined, awning: o.awning,
         });
       }
       num += 2;
@@ -338,7 +379,7 @@ function walkupBlock(C, L, o) {
   }
   for (const side of ['E', 'W']) {
     const fr = F[side];
-    walkup(C, fr, 7, 4, 6.5, { shop: pickShop(), floors: rng.int(4, 5), number: num++ });
+    walkup(C, fr, 7, 4, 6.5, { shop: pickShop(), floors: rng.int(fl[0], Math.max(fl[0], fl[1] - 1)), number: num++, brick: brick(), canopy: o.canopy && rng.chance(o.canopy * 0.5), awning: o.awning });
   }
   // courtyard tree
   C.addTree((L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, 'plane', false, { scale: 0.9 });
@@ -689,7 +730,7 @@ function streetFurniture(C) {
       if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
-      const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts'].includes(type);
+      const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts', 'redbrick', 'shops'].includes(type);
       // sides: [x0,y0,x1,y1 of the curb line], normal toward road
       const sides = [
         { ax: 'x', y: L.y0 - 2 + 0.35, x0: L.x0, x1: L.x1, ny: -1, nx: 0, name: 'N' },
@@ -699,22 +740,27 @@ function streetFurniture(C) {
       ];
       for (const s of sides) {
         const at = (t, off = 0) => (s.ax === 'x' ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t]);
-        // street lamps
+        const used = []; // [t, half-length] taken along this side
+        // street lamps (with shopping-district banners on shopping blocks)
         for (const t of [5, 13]) {
           const [x, y] = at(t);
           streetLamp(C, x, y, s.nx, s.ny);
+          if (type === 'shops') lampBanner(C, x, y, s.nx, s.ny, bx * 3 + by);
         }
         // trees
         const treeTs = residential ? [2.6, 7.6, 10.4, 15.4] : type === 'park' ? [3, 9, 15] : type === 'court' ? [3.0, 15.0] : [3.2, 14.8];
         for (const t of treeTs) {
           if (rng.chance(residential ? 0.9 : 0.8)) {
             const [x, y] = at(t, 0.35);
+            if (W.canopies.some((c) => Math.hypot(c.x - x, c.y - y) < 1.1)) continue;
             C.addTree(x, y, residential ? rng.pick(['plane', 'locust', 'plane', 'oak']) : 'plane', true);
+            used.push([t, 0.5]); // tree pit
           }
         }
         // hydrant
         {
-          const [x, y] = at(rng.range(8.2, 9.6), 0.0);
+          const t = rng.range(8.2, 9.6);
+          const [x, y] = at(t, 0.0);
           hydrant(C, x, y);
         }
         // trash baskets near corners
@@ -725,16 +771,27 @@ function streetFurniture(C) {
         if (rng.chance(0.35)) {
           const [x, y] = at(17.0, 0.1);
           mailbox(C, x, y);
+          used.push([17.0, 0.4]);
         } else if (rng.chance(0.35)) {
           const [x, y] = at(16.6, 0.1);
           newsBoxes(C, x, y, s.ax);
+          used.push([17.0, 0.7]);
         }
         if (!residential && rng.chance(0.5)) {
           const [x, y] = at(11.2, 0.0);
           kiosk(C, x, y);
         }
+        // a steaming vent grate in the pavement on some sides
+        if (rng.chance(0.42)) sidewalkGrate(C, s, at, used, rng);
       }
     }
+  // sandwich boards outside some of the shopping streets' stores
+  for (const sh of W.shops) {
+    const bx = Math.floor((sh.x - 9) / PERIOD + 0.5), by = Math.floor((sh.y - 9) / PERIOD + 0.5);
+    const near = [[bx, by], [bx - 1, by], [bx, by - 1], [bx - 1, by - 1]].some(([i, j]) => i >= 0 && j >= 0 && i < NB && j < NB && BLOCK_TYPES[j][i] === 'shops' && Math.abs(sh.x - (lotStart(i) + 9)) < 11.5 && Math.abs(sh.y - (lotStart(j) + 9)) < 11.5);
+    if (!near || !SHOPPING.includes(sh.kind) || !rng.chance(0.45) || !sh.n) continue;
+    sandwichBoard(C, sh.x - sh.n[0] * 0.15, sh.y - sh.n[1] * 0.15, sh.n[0], sh.n[1], rng);
+  }
   // the sidewalks round the park
   const PR = parkRect();
   const pcx = (PR.x0 + PR.x1) / 2, pcy = (PR.y0 + PR.y1) / 2;
@@ -747,22 +804,77 @@ function streetFurniture(C) {
   W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4.0, kind: 'pretzel', axis: 'y' });
   W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: 'hotdog', axis: 'x' });
   parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4.0], [pcx - 4.2, PR.y1 + 1]]);
-  // steam stacks (in parking lanes)
-  const stacks = [
-    { x: roadCenter(1) - 1.85, y: PR.y0 + 13 },
-    { x: roadCenter(3) + 1.85, y: lotStart(1) + 6 },
-    { x: lotStart(2) + 12, y: roadCenter(4) + 1.85 },
-  ];
-  for (const st of stacks) steamStack(C, st.x, st.y);
-  W.stacksBlock = stacks;
-  subwayEntrance(C, lotStart(0) + 14, lotEnd(3) + 1.0, 'x');
+  // more subway stations round the outer ring
+  subwayEntrance(C, lotStart(1) + 14, lotEnd(4) + 1.0, 'x');
+  subwayEntrance(C, lotStart(0) - 1.0, lotStart(2) + 9, 'y');
+  subwayEntrance(C, lotEnd(5) + 1.0, lotStart(3) + 4, 'y');
+  subwayEntrance(C, lotStart(3) + 4, lotEnd(5) + 1.0, 'x');
   // food carts
-  W.carts.push({ x: lotStart(1) + 14, y: lotEnd(0) + 1.3, kind: 'halal', axis: 'x' });
+  W.carts.push({ x: lotStart(2) + 14, y: lotEnd(1) + 1.3, kind: 'halal', axis: 'x' });
   // food cart geometry
   for (const c of W.carts) buildCart(C, c);
   // manhole steam sources
   for (const m of W.groundInfo.manholes) if (rng.chance(0.35)) W.steam.push({ x: m.x, y: m.y, z: 0.02, kind: 'manhole', rate: 0.4 });
   void PERIOD; void MAP; void GRP; void smoothFill; void drawDoor; void signBoard;
+}
+
+// A pair of vertical banners hanging from a lamp post, the district's colour
+function lampBanner(C, x, y, nx, ny, k) {
+  const cols = [0x8a2a8a, 0x1f8a8a, 0xd8302c, 0x2a5fb8, 0xe88a1a];
+  const col = cols[k % cols.length];
+  const tex = C.atlas.shared(`banner_${col}`, 12, 30, (p) => {
+    p.rect(0, 0, 12, 30, col); p.rect(0, 0, 12, 2, 0x2a2a2e); p.vline(0, 2, 28, shade(col, 1.2)); p.vline(11, 2, 28, shade(col, 0.75));
+    // a shopping bag motif
+    p.rect(3, 12, 6, 7, 0xf2efe6); p.frame(4, 9, 4, 4, 0xf2efe6); p.rect(3, 22, 6, 2, 0xf2c230);
+    for (let yy = 26; yy < 30; yy++) p.set(yy % 2 ? 4 : 7, yy, 0xf2c230);
+  });
+  tex.cast = 'none';
+  // hang along the kerb, either side of the pole
+  const ux = ny, uy = -nx;
+  for (const sgn of [-1, 1]) {
+    const x0 = x + ux * 0.08 * sgn, y0 = y + uy * 0.08 * sgn;
+    C.mb.vquad(x0, y0, x0 + ux * 0.375 * sgn, y0 + uy * 0.375 * sgn, CURB + 2.55, CURB + 2.55 + 30 / T, tex, { mat: MAT.FLAT });
+  }
+}
+
+// Sandwich-board sign on the sidewalk in front of a shop
+function sandwichBoard(C, x, y, nx, ny, rng) {
+  const word = rng.pick(['SALE', 'OPEN', 'NEW', '50% OFF', 'HELLO']);
+  const tex = C.atlas.shared(`board_${word}`, 16, 20, (p) => {
+    p.rect(0, 0, 16, 20, 0x2a2a2e); p.rect(1, 1, 14, 18, 0x1e3a2a);
+    const w = Math.min(14, word.length * 4);
+    p.text(Math.max(1, Math.floor((16 - w) / 2)), 4, word.slice(0, 3), 0xf2efe6);
+    if (word.length > 3) p.text(2, 11, word.slice(3).trim().slice(0, 3), 0xf2c230);
+    p.hline(2, 17, 12, 0xf2c230);
+  });
+  tex.cast = 'none';
+  const ux = ny, uy = -nx, h = 20 / T, w = 16 / T, lean = 0.12;
+  const ax = x - ux * w / 2, ay = y - uy * w / 2, bx = x + ux * w / 2, by = y + uy * w / 2;
+  // two leaning panels meeting at the top
+  C.mb.quad([ax, ay, CURB + h], [bx, by, CURB + h], [bx + nx * lean, by + ny * lean, CURB], [ax + nx * lean, ay + ny * lean, CURB],
+    [[0, 0], [16, 0], [16, 20], [0, 20]], tex, [nx, ny, 0.3], 0);
+  C.mb.quad([bx, by, CURB + h], [ax, ay, CURB + h], [ax - nx * lean, ay - ny * lean, CURB], [bx - nx * lean, by - ny * lean, CURB],
+    [[0, 0], [16, 0], [16, 20], [0, 20]], tex, [-nx, -ny, 0.3], 0);
+}
+
+// Try to fit a vent grate on a sidewalk side, clear of the furniture along it and of shelters,
+// subway stairs, carts and benches. The grate sits under the walking line, ~1 unit from the kerb.
+function sidewalkGrate(C, s, at, used, rng, tMax = 18) {
+  const W = C.world;
+  const len = rng.range(1.5, 2.1), half = len / 2;
+  const others = [...W.busStops.map((b) => [b.x, b.y, 2.0]), ...W.subways.map((b) => [b.x, b.y, 2.2]), ...W.carts.map((c) => [c.x, c.y, 1.4]), ...W.benches.map((b) => [b.x, b.y, 1.2]), ...W.grates.map((g) => [g.x, g.y, 2.5])];
+  const t0 = rng.range(1.6, tMax - 1.6);
+  for (let k = 0; k < (tMax - 3) * 2; k++) {
+    const t = 1.5 + ((t0 - 1.5 + k * 0.5) % (tMax - 3));
+    if (t - half < 0.6 || t + half > tMax - 0.6) continue;
+    if (used.some(([u, r]) => Math.abs(u - t) < half + r + 0.12)) continue;
+    const [x, y] = at(t, 0.65);
+    if (others.some(([ox, oy, r]) => Math.hypot(ox - x, oy - y) < r + half)) continue;
+    steamGrate(C, x, y, s.ax, len);
+    used.push([t, half]);
+    return true;
+  }
+  return false;
 }
 
 // Furniture on the sidewalks round the park: lamps and trees at the curb, benches along the wall
@@ -784,7 +896,13 @@ function parkSidewalks(C, PR, avoid) {
       const [x, y] = at(t, 0.35);
       C.addTree(x, y, rng.pick(['plane', 'plane', 'locust', 'oak']), true);
     }
-    { const [x, y] = at(rng.pick([11.2, 33.8])); hydrant(C, x, y); }
+    const ht = rng.pick([11.2, 33.8]);
+    { const [x, y] = at(ht); hydrant(C, x, y); }
+    {
+      // tree pits and the wall-side benches along this side
+      const used = [...[1.8, 9.0, 18.0, 22.5, 31.2, 36.0, 43.2].map((t) => [t, 0.5]), ...[6.6, 15.6, 29.4, 38.4].map((t) => [t, 0.8])];
+      for (let k = 0; k < 2; k++) sidewalkGrate(C, s, at, used, rng, len);
+    }
     for (const t of [0.8, 44.2]) { const [x, y] = at(t, -0.05); if (rng.chance(0.8)) trashBasket(C, x, y); }
     // benches against the wall facing the street, Fifth Avenue style
     for (const t of [6.6, 15.6, 29.4, 38.4]) {
