@@ -1,8 +1,12 @@
-// Ground texture (world-space, T texels / unit) + the raised sidewalk plinths and diorama base.
+// The ground: a raster of what every unit of the map is (water, road, sidewalk, the other
+// boroughs), the ground texture painted at T texels per unit into tiles at GT texels per unit
+// (only where there's land: the renderer fills in the water), the raised sidewalks, the quays, and
+// the diorama slab with its subway cut-away.
 
-import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, isParkIntersection, MERGES, mergePlinth, WATER_Z, LAND, WATERS, inWater } from './layout.js';
+import { T, GT, MAPX, MAPY, NBX, NBY, PERIOD, SIDEWALK, ROAD, STREET, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, interExists, legOpen, WATER_Z, BOROUGHS, ISLANDS, GROUND_EXTRA, SHORE, isManhattan } from './layout.js';
 import { MAT } from './mesh.js';
-import { RNG, hash2i, shade, mixc } from '../core/math.js';
+import { hash2i, shade, mixc } from '../core/math.js';
+import { TiledPainter } from '../core/painter.js';
 
 export const GC = {
   ASPHALT: 1, PARKING: 2, PAINT_W: 3, PAINT_Y: 4, CROSSWALK: 5, SIDEWALK: 6, CURB: 7, GRASS: 8,
@@ -25,109 +29,227 @@ export const COL = {
   metal: 0x5b5a58,
 };
 
-// x-intervals that are raised (not road): returns [[a,b], ...]
-export function raisedIntervals() {
-  const out = [];
-  let x = 0;
-  for (let k = 0; k <= NB; k++) {
-    const rs = roadStart(k), re = roadEnd(k);
-    if (rs > x) out.push([x, rs]);
-    x = re;
+// ---- the land raster: one cell per unit -------------------------------------------------------
+export const CL = { WATER: 0, ROAD: 1, RAISED: 2, BORO: 3 };
+let RASTER = null;
+export function landRaster() {
+  if (RASTER) return RASTER;
+  const W = MAPX, H = MAPY, cls = new Uint8Array(W * H);
+  const fill = (x0, y0, x1, y1, v, only = -1) => {
+    x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+    x1 = Math.min(W, Math.ceil(x1)); y1 = Math.min(H, Math.ceil(y1));
+    for (let y = y0; y < y1; y++) for (let x = x0, i = y * W + x0; x < x1; x++, i++) if (only < 0 || cls[i] === only) cls[i] = v;
+  };
+  const P = PERIOD;
+  // Manhattan: every block with the streets round it, raised to the kerb...
+  for (let by = 0; by < NBY; by++) for (let bx = 0; bx < NBX; bx++) if (isManhattan(bx, by)) fill(bx * P, by * P, bx * P + P + STREET, by * P + P + STREET, CL.RAISED);
+  // ...but for the roadways: the intersections and the stretches of road between them
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
+      if (!interExists(i, j)) continue;
+      fill(roadStart(i), roadStart(j), roadEnd(i), roadEnd(j), CL.ROAD);
+      if (legOpen(i, j, 1, 0)) fill(roadEnd(i), roadStart(j), roadStart(i + 1), roadEnd(j), CL.ROAD);
+      if (legOpen(i, j, 0, 1)) fill(roadStart(i), roadEnd(j), roadEnd(i), roadStart(j + 1), CL.ROAD);
+    }
+  for (const r of ISLANDS) fill(r.x0, r.y0, r.x1, r.y1, CL.RAISED, CL.WATER);
+  // the other boroughs fill their regions, keeping a river's width from Manhattan and the islands
+  const near = dilate(cls, W, H, SHORE);
+  for (const b of BOROUGHS) {
+    const x0 = Math.max(0, b.x0), x1 = Math.min(W, b.x1), y0 = Math.max(0, b.y0), y1 = Math.min(H, b.y1);
+    const v = b.ground ? CL.RAISED : CL.BORO;
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = y * W + x; if (cls[i] === CL.WATER && !near[i]) cls[i] = v; }
   }
-  if (x < MAP) out.push([x, MAP]);
-  return out;
+  RASTER = { W, H, cls };
+  return RASTER;
 }
-
-// Raised plinths [x0, y0, x1, y1]: one per Manhattan block (with its sidewalks), each merged region
-// (park, Times Square) as one, and Brooklyn's shore as one strip; nothing out over the water.
-export function plinthRects() {
-  const iv = raisedIntervals();
-  const M = LAND[0], B = LAND[1];
-  const xs = iv.filter(([a, b]) => b > M.x0 && a < M.x1).map(([a, b]) => [Math.max(a, M.x0), Math.min(b, M.x1)]);
-  const ys = iv.filter(([a, b]) => b > 0 && a < M.y1).map(([a, b]) => [Math.max(a, 0), Math.min(b, M.y1)]);
-  const Ps = MERGES.map(mergePlinth);
-  const out = [];
-  for (const [ax, bx] of xs)
-    for (const [ay, by] of ys) if (!Ps.some((P) => ax >= P.x0 && bx <= P.x1 && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
-  for (const P of Ps) out.push([P.x0, P.y0, P.x1, P.y1]);
-  out.push([B.x0, 0, MAP, B.y1]);
-  return out;
-}
-// no road here: water (or within m of it), Brooklyn's shore, or a merged region's plinth
-export const inParkPlinth = (x, y, m = 0) => inWater(x, y, m) || x > LAND[1].x0 - m || MERGES.some((M) => {
-  const P = mergePlinth(M);
-  return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
-});
-
-export function paintGround(region, rng) {
-  const p = region.p;
-  const N = MAP * T;
-  const d = region.page.data;
-  // 1. asphalt everywhere (direct writes on the half-resolution page, sampled at even T-texels)
-  const cells = Math.ceil(N / 64);
-  const big = new Float32Array(cells * cells);
-  for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cells, (i / cells) | 0, 12) - 0.5;
-  const ar = (COL.asphalt >> 16) & 255, ag = (COL.asphalt >> 8) & 255, ab = COL.asphalt & 255;
-  const PW = region.page.w;
-  for (let Y = 0; Y < PW; Y++) {
-    const y = Y * 2;
-    const row = (y >> 6) * cells;
-    let i = Y * PW * 4;
-    for (let X = 0; X < PW; X++, i += 4) {
-      const x = X * 2;
-      let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11) | 0;
-      h = Math.imul(h ^ (h >>> 13), 1274126177);
-      h ^= h >>> 16;
-      const r = (h >>> 0) / 4294967296;
-      let f = 0.93 + r * 0.11 + big[row + (x >> 6)] * 0.06;
-      if (r > 0.992) f += 0.16; // light aggregate
-      else if (r < 0.006) f -= 0.12;
-      d[i] = Math.min(255, ar * f); d[i + 1] = Math.min(255, ag * f); d[i + 2] = Math.min(255, ab * f); d[i + 3] = GC.ASPHALT;
+// cells within r (in either axis) of land
+function dilate(cls, W, H, r) {
+  const a = new Uint8Array(W * H), b = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    let n = 0;
+    for (let x = -r; x < W; x++) {
+      if (x + r < W && cls[y * W + x + r]) n++;
+      if (x - r - 1 >= 0 && cls[y * W + x - r - 1]) n--;
+      if (x >= 0) a[y * W + x] = n > 0 ? 1 : 0;
     }
   }
-  // repaving patches (slightly darker, with a seam outline) & cracks
-  for (let i = 0; i < 170; i++) {
-    const w = rng.int(24, 140), h = rng.int(20, 80);
-    const x = rng.int(0, N - w), y = rng.int(0, N - h);
-    for (let yy = 0; yy < h; yy++)
-      for (let xx = 0; xx < w; xx++) {
+  for (let x = 0; x < W; x++) {
+    let n = 0;
+    for (let y = -r; y < H; y++) {
+      if (y + r < H && a[(y + r) * W + x]) n++;
+      if (y - r - 1 >= 0 && a[(y - r - 1) * W + x]) n--;
+      if (y >= 0) b[y * W + x] = n > 0 ? 1 : 0;
+    }
+  }
+  return b;
+}
+export function clsAt(x, y) {
+  const R = landRaster();
+  x = Math.floor(x); y = Math.floor(y);
+  if (x < 0 || y < 0 || x >= R.W || y >= R.H) return CL.WATER;
+  return R.cls[y * R.W + x];
+}
+// height of the ground's top in each class
+export const clsZ = (c) => (c === CL.WATER ? WATER_Z : c === CL.ROAD ? 0 : CURB);
+// no road here: water, the other boroughs, or a sidewalk (within m of one)
+export const inParkPlinth = (x, y, m = 0) => {
+  for (const [dx, dy] of [[0, 0], [m, 0], [-m, 0], [0, m], [0, -m]]) if (clsAt(x + dx, y + dy) !== CL.ROAD) return true;
+  return false;
+};
+// The cells of the classes pred accepts, as rectangles [x0, y0, x1, y1] (runs along each row,
+// merged down the rows while they keep the same ends)
+export function rectsOf(pred) {
+  const { W, H, cls } = landRaster();
+  const out = [];
+  let open = new Map();
+  for (let y = 0; y <= H; y++) {
+    const next = new Map();
+    if (y < H) {
+      let x = 0;
+      while (x < W) {
+        if (!pred(cls[y * W + x])) { x++; continue; }
+        const a = x;
+        while (x < W && pred(cls[y * W + x])) x++;
+        const k = a * 65536 + x;
+        if (open.has(k)) { next.set(k, open.get(k)); open.delete(k); } else next.set(k, y);
+      }
+    }
+    for (const [k, y0] of open) out.push([Math.floor(k / 65536), y0, k % 65536, y]);
+    open = next;
+  }
+  return out;
+}
+// Where the class changes: [x0, y0, x1, y1, a, b] with a the class on the low side (-x or -y) and
+// b on the high side, runs merged along each line
+export function boundaries() {
+  const { W, H, cls } = landRaster();
+  const out = [];
+  for (let x = 1; x < W; x++) {
+    let y = 0;
+    while (y < H) {
+      const a = cls[y * W + x - 1], b = cls[y * W + x];
+      if (a === b) { y++; continue; }
+      const y0 = y;
+      while (y < H && cls[y * W + x - 1] === a && cls[y * W + x] === b) y++;
+      out.push([x, y0, x, y, a, b]);
+    }
+  }
+  for (let y = 1; y < H; y++) {
+    let x = 0;
+    while (x < W) {
+      const a = cls[(y - 1) * W + x], b = cls[y * W + x];
+      if (a === b) { x++; continue; }
+      const x0 = x;
+      while (x < W && cls[(y - 1) * W + x] === a && cls[y * W + x] === b) x++;
+      out.push([x0, y, x, y, a, b]);
+    }
+  }
+  return out;
+}
+// (for the collision grid's kerbs and for anything else that wants the raised areas as boxes)
+export const plinthRects = () => rectsOf((c) => c === CL.RAISED || c === CL.BORO);
+
+// ---- the ground texture's tiles -----------------------------------------------------------------
+export const GTILE = 32; // units per tile
+export function makeGroundTiles() {
+  const { W, H, cls } = landRaster();
+  const ntx = Math.ceil(MAPX / GTILE), nty = Math.ceil(MAPY / GTILE), size = GTILE * GT;
+  const slots = new Int32Array(ntx * nty).fill(-1), data = [];
+  for (let ty = 0; ty < nty; ty++)
+    for (let tx = 0; tx < ntx; tx++) {
+      const x0 = tx * GTILE, y0 = ty * GTILE, x1 = Math.min(W, x0 + GTILE), y1 = Math.min(H, y0 + GTILE);
+      let need = GROUND_EXTRA.some((r) => r.x1 > x0 && r.x0 < x1 && r.y1 > y0 && r.y0 < y1);
+      for (let y = y0; y < y1 && !need; y++) for (let x = x0; x < x1; x++) { const c = cls[y * W + x]; if (c === CL.ROAD || c === CL.RAISED) { need = true; break; } }
+      if (!need) continue;
+      slots[ty * ntx + tx] = data.length;
+      data.push(new Uint8Array(size * size * 4));
+    }
+  return { ntx, nty, size, slots, data };
+}
+export function makeGroundPainter(tiles) { return new TiledPainter(tiles, MAPX * T, MAPY * T); }
+
+// ---- painting -----------------------------------------------------------------------------------
+export function paintGround(region, rng) {
+  const p = region.p, tiles = region.tiles;
+  const _t = [performance.now()], _m = (n) => { _t.push(performance.now()); _t.push(n); };
+  const NX = MAPX * T, NY = MAPY * T;
+  const { W, cls } = landRaster();
+  const at = (x, y) => cls[Math.floor(y) * W + Math.floor(x)];
+  // 1. asphalt everywhere there are texels (written straight into the tiles: one texel = two art texels)
+  const cellsX = Math.ceil(NX / 64), cellsY = Math.ceil(NY / 64);
+  const big = new Float32Array(cellsX * cellsY);
+  for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cellsX, (i / cellsX) | 0, 12) - 0.5;
+  const ar = (COL.asphalt >> 16) & 255, ag = (COL.asphalt >> 8) & 255, ab = COL.asphalt & 255;
+  const S = tiles.size;
+  for (let ty = 0; ty < tiles.nty; ty++)
+    for (let tx = 0; tx < tiles.ntx; tx++) {
+      const slot = tiles.slots[ty * tiles.ntx + tx];
+      if (slot < 0) continue;
+      const d = tiles.data[slot];
+      for (let Y = 0; Y < S; Y++) {
+        const y = (ty * S + Y) * 2, row = (y >> 6) * cellsX;
+        let i = Y * S * 4;
+        for (let X = 0; X < S; X++, i += 4) {
+          const x = (tx * S + X) * 2;
+          let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11) | 0;
+          h = Math.imul(h ^ (h >>> 13), 1274126177);
+          h ^= h >>> 16;
+          const r = (h >>> 0) / 4294967296;
+          let f = 0.93 + r * 0.11 + big[row + (x >> 6)] * 0.06;
+          if (r > 0.992) f += 0.16; // light aggregate
+          else if (r < 0.006) f -= 0.12;
+          d[i] = Math.min(255, ar * f); d[i + 1] = Math.min(255, ag * f); d[i + 2] = Math.min(255, ab * f); d[i + 3] = GC.ASPHALT;
+        }
+      }
+    }
+  // repaving patches, cracks and oil stains, on the roads
+  const roadPick = () => {
+    for (let k = 0; k < 30; k++) { const x = rng.range(0, MAPX), y = rng.range(0, MAPY); if (at(x, y) === CL.ROAD) return [x * T, y * T]; }
+    return null;
+  };
+  for (let i = 0; i < 420; i++) {
+    const q = roadPick(); if (!q) continue;
+    const w = rng.int(24, 140), h = rng.int(20, 80), x = Math.round(q[0]), y = Math.round(q[1]);
+    for (let yy = 0; yy < h; yy += 2)
+      for (let xx = 0; xx < w; xx += 2) {
         if (p.getA(x + xx, y + yy) !== GC.ASPHALT) continue;
-        const edge = xx === 0 || yy === 0 || xx === w - 1 || yy === h - 1;
-        const hh = hash2i(x + xx, y + yy, 19);
-        p.set(x + xx, y + yy, edge ? 0x2f3138 : shade(COL.asphaltPatch, 0.95 + hh * 0.1), GC.ASPHALT);
+        const edge = xx < 2 || yy < 2 || xx >= w - 2 || yy >= h - 2;
+        p.set(x + xx, y + yy, edge ? 0x2f3138 : shade(COL.asphaltPatch, 0.95 + hash2i(x + xx, y + yy, 19) * 0.1), GC.ASPHALT);
       }
   }
-  for (let i = 0; i < 420; i++) {
-    let x = rng.int(0, N), y = rng.int(0, N);
+  for (let i = 0; i < 1000; i++) {
+    const q = roadPick(); if (!q) continue;
+    let [x, y] = q.map(Math.round);
     const len = rng.int(10, 60);
-    let dx = rng.int(-1, 1), dy = rng.chance(0.5) ? 1 : -1;
+    let dx = rng.int(-1, 1);
+    const dy = rng.chance(0.5) ? 1 : -1;
     for (let k = 0; k < len; k++) {
-      p.set(x, y, 0x30323a, GC.ASPHALT);
+      if (p.getA(x, y) === GC.ASPHALT) p.set(x, y, 0x30323a, GC.ASPHALT);
       if (rng.chance(0.3)) dx = rng.int(-1, 1);
       x += dx; y += dy;
-      if (rng.chance(0.06)) { // branch
-        let bx = x, by = y;
-        for (let j = 0; j < 6; j++) { bx += rng.int(-1, 1); by += 1; p.set(bx, by, 0x34363d, GC.ASPHALT); }
-      }
     }
   }
-  // oil stains in lanes
-  for (let i = 0; i < 260; i++) {
-    const x = rng.int(0, N), y = rng.int(0, N);
+  for (let i = 0; i < 640; i++) {
+    const q = roadPick(); if (!q) continue;
     const rx = rng.range(4, 10), ry = rng.range(3, 8);
-    p.ellipse(x, y, rx, ry, 0x41444d, GC.ASPHALT);
-    p.ellipse(x + 1, y, rx * 0.6, ry * 0.6, COL.asphaltDark, GC.ASPHALT);
+    p.ellipse(q[0], q[1], rx, ry, 0x41444d, GC.ASPHALT);
+    p.ellipse(q[0] + 1, q[1], rx * 0.6, ry * 0.6, COL.asphaltDark, GC.ASPHALT);
   }
 
-  // 2. parking lanes (slightly different tone) + markings
-  for (let k = 0; k <= NB; k++) {
-    const rs = roadStart(k) * T, re = roadEnd(k) * T;
-    const pw = Math.round(1.1 * T);
-    markBand(p, 0, rs, N, pw, GC.PARKING);
-    markBand(p, 0, re - pw, N, pw, GC.PARKING);
-    markBand(p, rs, 0, pw, N, GC.PARKING);
-    markBand(p, re - pw, 0, pw, N, GC.PARKING);
-  }
+  _m('asphalt');
+  // 2. parking lanes along every stretch of road
+  const pw = Math.round(1.1 * T);
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
+      if (legOpen(i, j, 1, 0)) {
+        const a = roadEnd(i) * T, b = roadStart(i + 1) * T, rs = roadStart(j) * T, re = roadEnd(j) * T;
+        markBand(p, a, rs, b - a, pw, GC.PARKING); markBand(p, a, re - pw, b - a, pw, GC.PARKING);
+      }
+      if (legOpen(i, j, 0, 1)) {
+        const a = roadEnd(j) * T, b = roadStart(j + 1) * T, rs = roadStart(i) * T, re = roadEnd(i) * T;
+        markBand(p, rs, a, pw, b - a, GC.PARKING); markBand(p, re - pw, a, pw, b - a, GC.PARKING);
+      }
+    }
   // centre double-yellow lines between intersections (3px lines, 4px gap)
   const paintLine = (x, y, w, h, c, code) => {
     for (let yy = y; yy < y + h; yy++)
@@ -136,60 +258,70 @@ export function paintGround(region, rng) {
         p.set(xx, yy, worn ? mixc(c, 0x55565c, 0.55) : shade(c, 0.94 + hash2i(xx, yy, 78) * 0.1), code);
       }
   };
-  for (let k = 0; k <= NB; k++) {
-    const rc = Math.round(roadCenter(k) * T);
-    for (let i = 0; i < NB; i++) {
-      const a = (i * PERIOD + SIDEWALK + ROAD + SIDEWALK) * T + 16;
-      const b = ((i + 1) * PERIOD) * T - 16;
-      paintLine(a, rc - 5, b - a, 3, COL.yellow, GC.PAINT_Y);
-      paintLine(a, rc + 2, b - a, 3, COL.yellow, GC.PAINT_Y);
-      paintLine(rc - 5, a, 3, b - a, COL.yellow, GC.PAINT_Y);
-      paintLine(rc + 2, a, 3, b - a, COL.yellow, GC.PAINT_Y);
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
+      if (legOpen(i, j, 1, 0)) {
+        const rc = Math.round(roadCenter(j) * T), a = (i * PERIOD + STREET) * T + 16, b = (i + 1) * PERIOD * T - 16;
+        paintLine(a, rc - 5, b - a, 3, COL.yellow, GC.PAINT_Y); paintLine(a, rc + 2, b - a, 3, COL.yellow, GC.PAINT_Y);
+      }
+      if (legOpen(i, j, 0, 1)) {
+        const rc = Math.round(roadCenter(i) * T), a = (j * PERIOD + STREET) * T + 16, b = (j + 1) * PERIOD * T - 16;
+        paintLine(rc - 5, a, 3, b - a, COL.yellow, GC.PAINT_Y); paintLine(rc + 2, a, 3, b - a, COL.yellow, GC.PAINT_Y);
+      }
     }
-  }
-  // stop lines & crosswalks at every intersection
-  for (let i = 0; i <= NB; i++) {
-    for (let j = 0; j <= NB; j++) {
+  // stop lines & crosswalks wherever a road leaves an intersection
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
+      if (!interExists(i, j)) continue;
       const x0 = roadStart(i) * T, x1 = roadEnd(i) * T;
       const y0 = roadStart(j) * T, y1 = roadEnd(j) * T;
       const sx0 = (i * PERIOD) * T, sx1 = (i * PERIOD + 2 * SIDEWALK + ROAD) * T;
       const sy0 = (j * PERIOD) * T, sy1 = (j * PERIOD + 2 * SIDEWALK + ROAD) * T;
-      zebra(p, x0, sy0 + 6, x1 - x0, y0 - sy0 - 12, 'v');
-      zebra(p, x0, y1 + 6, x1 - x0, sy1 - y1 - 12, 'v');
-      zebra(p, sx0 + 6, y0, x0 - sx0 - 12, y1 - y0, 'h');
-      zebra(p, x1 + 6, y0, sx1 - x1 - 12, y1 - y0, 'h');
       const rcx = roadCenter(i) * T, rcy = roadCenter(j) * T;
-      if (j > 0) paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W);
-      if (j < NB) paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W);
-      if (i > 0) paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W);
-      if (i < NB) paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W);
+      if (legOpen(i, j, 0, -1)) { zebra(p, x0, sy0 + 6, x1 - x0, y0 - sy0 - 12, 'v'); paintLine(x0 + 4, sy0 - 9, rcx - x0 - 8, 6, COL.white, GC.PAINT_W); }
+      if (legOpen(i, j, 0, 1)) { zebra(p, x0, y1 + 6, x1 - x0, sy1 - y1 - 12, 'v'); paintLine(rcx + 4, sy1 + 3, x1 - rcx - 8, 6, COL.white, GC.PAINT_W); }
+      if (legOpen(i, j, -1, 0)) { zebra(p, sx0 + 6, y0, x0 - sx0 - 12, y1 - y0, 'h'); paintLine(sx0 - 9, rcy + 4, 6, y1 - rcy - 8, COL.white, GC.PAINT_W); }
+      if (legOpen(i, j, 1, 0)) { zebra(p, x1 + 6, y0, sx1 - x1 - 12, y1 - y0, 'h'); paintLine(sx1 + 3, y0 + 4, 6, rcy - y0 - 8, COL.white, GC.PAINT_W); }
+    }
+
+  _m('markings');
+  // 3. sidewalks over everything raised, then the kerbs along the roads and the coping along the quays
+  for (const [ax, ay, bx, by] of rectsOf((c) => c === CL.RAISED)) paintSidewalkRect(p, ax * T, ay * T, (bx - ax) * T, (by - ay) * T, rng);
+  for (const [x0, y0, x1, y1, a, b] of boundaries()) {
+    const lo = a === CL.RAISED ? 'a' : b === CL.RAISED ? 'b' : null;
+    if (!lo || (a !== CL.ROAD && b !== CL.ROAD && a !== CL.WATER && b !== CL.WATER)) continue;
+    if (x0 === x1) {
+      const X = x0 * T, w = (y1 - y0) * T;
+      if (lo === 'a') { p.rect(X - 2, y0 * T, 2, w, COL.curb, GC.CURB); p.rect(X - 3, y0 * T, 1, w, 0xb4b1a9, GC.CURB); }
+      else { p.rect(X, y0 * T, 2, w, COL.curb, GC.CURB); p.rect(X + 2, y0 * T, 1, w, 0xb4b1a9, GC.CURB); }
+    } else {
+      const Y = y0 * T, w = (x1 - x0) * T;
+      if (lo === 'a') { p.rect(x0 * T, Y - 2, w, 2, COL.curb, GC.CURB); p.rect(x0 * T, Y - 3, w, 1, 0xb4b1a9, GC.CURB); }
+      else { p.rect(x0 * T, Y, w, 2, COL.curb, GC.CURB); p.rect(x0 * T, Y + 2, w, 1, 0xb4b1a9, GC.CURB); }
     }
   }
 
-  // 3. sidewalks (raised areas; the park plinth paves over the streets it swallowed)
-  for (const [ax, ay, bx, by] of plinthRects()) paintSidewalkRect(p, ax * T, ay * T, (bx - ax) * T, (by - ay) * T, rng);
-
-  // 4. manholes + storm drains on roads
+  _m('sidewalks');
+  // 4. manholes in the roads, storm drains along the kerbs by the corners
   const manholes = [];
-  for (let k = 0; k <= NB; k++) {
-    for (let s = 0; s < NB; s++) {
-      const along = (s * PERIOD + 9 + rng.range(3, 15));
-      const off = roadCenter(k) + rng.pick([-0.7, 0.7, 0]);
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
       for (const axis of ['x', 'y']) {
-        const wx = axis === 'x' ? along : off;
-        const wy = axis === 'x' ? off : along;
+        const open = axis === 'x' ? legOpen(i, j, 1, 0) : legOpen(i, j, 0, 1);
+        if (!open) continue;
+        const along = (axis === 'x' ? i : j) * PERIOD + 9 + rng.range(3, 15);
+        const off = roadCenter(axis === 'x' ? j : i) + rng.pick([-0.7, 0.7, 0]);
+        const wx = axis === 'x' ? along : off, wy = axis === 'x' ? off : along;
         if (inParkPlinth(wx, wy, 0.5)) continue;
         manhole(p, wx * T, wy * T, rng);
         manholes.push({ x: wx, y: wy, axis });
       }
     }
-  }
-  // storm drain grates along curbs near intersections
-  for (let i = 0; i <= NB; i++)
-    for (let j = 0; j <= NB; j++) {
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
+      if (!interExists(i, j)) continue;
       const rcx = roadCenter(i) * T, rcy = roadCenter(j) * T;
       const h = (ROAD / 2) * T;
-      if (isParkIntersection(i, j)) continue;
       for (const [gx, gy, vert] of [[rcx - h + 2, rcy - h - 70, true], [rcx + h - 14, rcy + h + 58, true], [rcx - h - 70, rcy + h - 14, false], [rcx + h + 58, rcy - h + 2, false]]) {
         if (inParkPlinth((gx + 6) / T, (gy + 6) / T, 0.2)) continue;
         const w = vert ? 12 : 22, hh = vert ? 22 : 12;
@@ -200,9 +332,20 @@ export function paintGround(region, rng) {
         }
       }
     }
-  // 5. the rivers and the harbour (the shader animates them; they never freeze)
-  for (const w of WATERS) p.rect(Math.round(w.x0 * T), Math.round(w.y0 * T), Math.round((w.x1 - w.x0) * T), Math.round((w.y1 - w.y0) * T), 0x2a5a70, GC.RIVER);
-  return { manholes };
+  // 5. the water in tiles that also hold land (the shader animates it; the rivers never freeze)
+  for (let ty = 0; ty < tiles.nty; ty++)
+    for (let tx = 0; tx < tiles.ntx; tx++) {
+      if (tiles.slots[ty * tiles.ntx + tx] < 0) continue;
+      for (let y = ty * GTILE; y < Math.min(MAPY, (ty + 1) * GTILE); y++)
+        for (let x = tx * GTILE; x < Math.min(MAPX, (tx + 1) * GTILE); x++) {
+          const c = cls[y * W + x];
+          if (c === CL.WATER || c === CL.BORO) p.rect(x * T, y * T, T, T, 0x2a5a70, GC.RIVER);
+        }
+    }
+  _m('water');
+  const prof = []; for (let k = 1; k < _t.length; k += 2) prof.push(`${_t[k + 1]} ${Math.round(_t[k] - _t[k - 1 > 0 ? k - 2 : 0])}`);
+  void NY;
+  return { manholes, prof: prof.join(', ') };
 }
 
 function markBand(p, x, y, w, h, code) {
@@ -227,10 +370,45 @@ function zebra(p, x, y, w, h, dir) {
   }
 }
 
+const SWP = 768;
+let SWT = null;
+function sidewalkPatch() {
+  if (SWT) return SWT;
+  SWT = new Int32Array(SWP * SWP);
+  for (let y = 0; y < SWP; y++) for (let x = 0; x < SWP; x++) SWT[y * SWP + x] = sidewalkTexel(x * 2, y * 2);
+  return SWT;
+}
+function sidewalkTexel(gx, gy) {
+  const S = 24; // slab size (0.75 units)
+  const hh = hash2i(gx, gy, 31);
+  const slab = hash2i(Math.floor(gx / S), Math.floor(gy / S), 33);
+  let c = shade(COL.sidewalk, 0.955 + hh * 0.07);
+  if (slab < 0.12) c = shade(c, 0.93);
+  else if (slab > 0.94) c = mixc(c, 0xd9d2c0, 0.4);
+  else if (slab > 0.9) c = mixc(c, 0xb8b4aa, 0.35);
+  const lx = gx % S, ly = gy % S;
+  if (lx < 2 || ly < 2) c = lx === 0 || ly === 0 ? COL.sidewalkDark : shade(c, 1.05);
+  else if (lx >= S - 2 || ly >= S - 2) c = shade(c, 0.95);
+  if (hh > 0.995) c = shade(c, 0.85); // grit
+  return c;
+}
 function paintSidewalkRect(p, x, y, w, h, rng) {
   const S = 24; // slab size (0.75 units)
   const st = p.half ? 2 : 1;
-  for (let yy = 0; yy < h; yy += st)
+  if (p.tiles) {
+    // straight into the tiles (one ground texel per two art texels), from a precomputed patch of
+    // paving 48 units square
+    const t = p.tiles, sh = p.shift, m = p.mask, SW = sidewalkPatch(), PP = SWP;
+    for (let GY = Math.max(0, y >> 1); GY < (y + h) >> 1; GY++) {
+      const row = (GY >> sh) * t.ntx, base = (GY & m) << sh;
+      for (let GX = Math.max(0, x >> 1); GX < (x + w) >> 1; GX++) {
+        const slot = t.slots[row + (GX >> sh)];
+        if (slot < 0) continue;
+        const d = t.data[slot], i = (base + (GX & m)) * 4, c = SW[(GY % PP) * PP + (GX % PP)];
+        d[i] = (c >> 16) & 255; d[i + 1] = (c >> 8) & 255; d[i + 2] = c & 255; d[i + 3] = GC.SIDEWALK;
+      }
+    }
+  } else for (let yy = 0; yy < h; yy += st)
     for (let xx = 0; xx < w; xx += st) {
       const gx = x + xx, gy = y + yy;
       const hh = hash2i(gx, gy, 31);
@@ -240,9 +418,8 @@ function paintSidewalkRect(p, x, y, w, h, rng) {
       else if (slab > 0.94) c = mixc(c, 0xd9d2c0, 0.4);
       else if (slab > 0.9) c = mixc(c, 0xb8b4aa, 0.35);
       const lx = gx % S, ly = gy % S;
-      if (lx === 0 || ly === 0) c = COL.sidewalkDark;
-      else if (lx === 1 || ly === 1) c = shade(c, 1.05); // bevelled slab edge
-      else if (lx === S - 1 || ly === S - 1) c = shade(c, 0.95);
+      if (lx < 2 || ly < 2) c = lx === 0 || ly === 0 ? COL.sidewalkDark : shade(c, 1.05);
+      else if (lx >= S - 2 || ly >= S - 2) c = shade(c, 0.95);
       if (hh > 0.995) c = shade(c, 0.85); // grit
       p.set(gx, gy, c, GC.SIDEWALK);
     }
@@ -255,16 +432,11 @@ function paintSidewalkRect(p, x, y, w, h, rng) {
       cx += rng.int(-1, 1); cy += rng.chance(0.5) ? 1 : 0;
     }
   }
-  // curb: bright top edge + darker inner line
-  for (const [rx, ry, rw, rh] of [[x, y, w, 2], [x, y + h - 2, w, 2], [x, y, 2, h], [x + w - 2, y, 2, h]]) p.rect(rx, ry, rw, rh, COL.curb, GC.CURB);
-  for (const [rx, ry, rw, rh] of [[x + 2, y + 2, w - 4, 1], [x + 2, y + h - 3, w - 4, 1], [x + 2, y + 2, 1, h - 4], [x + w - 3, y + 2, 1, h - 4]]) p.rect(rx, ry, rw, rh, 0xb4b1a9, GC.CURB);
   // gum spots
   const n = Math.floor((w * h) / 900);
   for (let i = 0; i < n; i++) {
     const gx = x + rng.int(4, w - 6), gy = y + rng.int(4, h - 6);
-    const c = rng.chance(0.5) ? 0x9a978f : 0x8c8982;
-    p.rect(gx, gy, 2, 2, c, GC.SIDEWALK);
-    if (rng.chance(0.4)) p.set(gx + 2, gy + 1, c, GC.SIDEWALK);
+    p.rect(gx, gy, 2, 2, rng.chance(0.5) ? 0x9a978f : 0x8c8982, GC.SIDEWALK);
   }
 }
 
@@ -293,48 +465,48 @@ export function paintLot(p, x0, y0, x1, y1, fn) {
     }
 }
 
-// Geometry for ground, plinths and the diorama base
-export function buildGroundGeometry(mb, ground, tex, quay) {
-  // road surface over the land, the water a little lower behind stone quays
-  const g = { t: ground, world: true, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-  const clampR = (r) => [Math.max(0, r.x0), Math.max(0, r.y0), Math.min(MAP, r.x1), Math.min(MAP, r.y1)];
-  for (const L of LAND) { const [x0, y0, x1, y1] = clampR(L); mb.box(x0, y0, -BASE_DEPTH, x1, y1, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET }); }
-  for (const w of WATERS) mb.box(w.x0, w.y0, -BASE_DEPTH, w.x1, w.y1, WATER_Z, { pz: { t: ground, world: true, mat: MAT.GROUND } }, { topMat: MAT.GROUND });
-  // the quays: every edge of the land that meets the water
-  const dz = -WATER_Z * T;
-  for (const [ax, ay, bx, by, n] of quayEdges()) {
-    const len = Math.hypot(bx - ax, by - ay) * T;
-    mb.quad([ax, ay, 0], [bx, by, 0], [bx, by, WATER_Z], [ax, ay, WATER_Z], [[0, 0], [len, 0], [len, dz], [0, dz]], quay, [n[0], n[1], 0], 0);
-  }
-  for (const [ax, ay, bx, by] of plinthRects()) {
-    mb.box(ax, ay, 0, bx, by, CURB, {
-      pz: { t: ground, u0: ax * T, v0: ay * T, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
-      px: tex.curb, nx: tex.curb, py: tex.curb, ny: tex.curb,
-    });
+// Geometry for the ground: the roads at 0, the sidewalks and the other boroughs raised to the kerb,
+// the water a little below, and between them the kerbs and the granite quays
+export function buildGroundGeometry(mb, ground, tex, quay, boroTex) {
+  const gm = MAT.GROUND | MAT.SNOW | MAT.WET;
+  for (const [x0, y0, x1, y1] of rectsOf((c) => c === CL.ROAD)) mb.box(x0, y0, -BASE_DEPTH, x1, y1, 0, { pz: { t: ground, world: true, mat: gm } });
+  for (const [x0, y0, x1, y1] of rectsOf((c) => c === CL.RAISED)) mb.box(x0, y0, -BASE_DEPTH, x1, y1, CURB, { pz: { t: ground, world: true, mat: gm } });
+  for (const [x0, y0, x1, y1] of rectsOf((c) => c === CL.BORO)) mb.box(x0, y0, -BASE_DEPTH, x1, y1, CURB, { pz: { t: boroTex, world: true, mat: MAT.SNOW | MAT.WET } });
+  for (const [x0, y0, x1, y1] of rectsOf((c) => c === CL.WATER)) mb.box(x0, y0, -BASE_DEPTH, x1, y1, WATER_Z, { pz: { t: ground, world: true, mat: MAT.GROUND } });
+  for (const [x0, y0, x1, y1, a, b] of boundaries()) {
+    const za = clsZ(a), zb = clsZ(b);
+    if (za === zb) continue;
+    const hi = Math.max(za, zb), lo = Math.min(za, zb), H = (hi - lo) * T, L = (x1 - x0 + y1 - y0) * T;
+    const t = lo === WATER_Z ? quay : tex.curb;
+    const uv = [[0, 0], [L, 0], [L, H], [0, H]];
+    if (x0 === x1) {
+      if (za > zb) mb.quad([x0, y1, hi], [x0, y0, hi], [x0, y0, lo], [x0, y1, lo], uv, t, [1, 0, 0], 0); // facing +x
+      else mb.quad([x0, y0, hi], [x0, y1, hi], [x0, y1, lo], [x0, y0, lo], uv, t, [-1, 0, 0], 0);
+    } else if (za > zb) mb.quad([x0, y0, hi], [x1, y0, hi], [x1, y0, lo], [x0, y0, lo], uv, t, [0, 1, 0], 0); // facing +y
+    else mb.quad([x1, y0, hi], [x0, y0, hi], [x0, y0, lo], [x1, y0, lo], uv, t, [0, -1, 0], 0);
   }
 }
-
-// The land's edges that face the water, as [ax, ay, bx, by, normal] with the points ordered so the
-// quad faces out over the water
+// The edges of the land that face the water, as [ax, ay, bx, by, normal] (the normal points out
+// over the water), for the railings along the quays
 export function quayEdges() {
   const out = [];
-  for (const L of LAND) {
-    const [x0, y0, x1, y1] = [Math.max(0, L.x0), Math.max(0, L.y0), Math.min(MAP, L.x1), Math.min(MAP, L.y1)];
-    if (L.x0 > 0) out.push([x0, y0, x0, y1, [-1, 0]]);
-    if (L.x1 < MAP) out.push([x1, y1, x1, y0, [1, 0]]);
-    if (L.y1 < MAP) out.push([x0, y1, x1, y1, [0, 1]]);
-    if (L.y0 > 0) out.push([x1, y0, x0, y0, [0, -1]]);
+  for (const [x0, y0, x1, y1, a, b] of boundaries()) {
+    const wa = a === CL.WATER, wb = b === CL.WATER;
+    if (wa === wb) continue;
+    if (!(a === CL.RAISED || b === CL.RAISED || a === CL.BORO || b === CL.BORO)) continue;
+    const boro = a === CL.BORO || b === CL.BORO;
+    out.push(x0 === x1 ? [x0, y0, x1, y1, [wb ? 1 : -1, 0], boro] : [x0, y0, x1, y1, [0, wb ? 1 : -1], boro]);
   }
   return out;
 }
 
 // ---------------------------------------------------------------------------
 // Diorama sides with a subway tunnel cut-away running around the perimeter
-export const TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, a1: MAP - 3, station: [14, 34] };
+export const TUNNEL = { z0: -4.4, z1: -0.75, depth: 2.4, a0: 3, station: [14, 34] };
 
 export function buildSlabSides(mb, atlas, tex) {
   const T16 = T;
-  const { z0: tz0, z1: tz1, depth: TD, a0, a1 } = TUNNEL;
+  const { z0: tz0, z1: tz1, depth: TD, a0 } = TUNNEL;
   const WH = Math.round((tz1 - tz0) * T16);
   const wall = atlas.shared('tunnel_wall', 128, WH, (p) => {
     const H = p.h;
@@ -394,10 +566,10 @@ export function buildSlabSides(mb, atlas, tex) {
   const soil = tex.soil;
   const sides = [
     // [normal, point(a,d)->[x,y]]  a runs left->right as seen from outside; d goes into the slab
-    { key: 'py', n: [0, 1], pt: (a, d) => [a, MAP - d] },
-    { key: 'ny', n: [0, -1], pt: (a, d) => [MAP - a, d] },
-    { key: 'px', n: [1, 0], pt: (a, d) => [MAP - d, MAP - a] },
-    { key: 'nx', n: [-1, 0], pt: (a, d) => [d, a] },
+    { key: 'py', n: [0, 1], len: MAPX, pt: (a, d) => [a, MAPY - d] },
+    { key: 'ny', n: [0, -1], len: MAPX, pt: (a, d) => [MAPX - a, d] },
+    { key: 'px', n: [1, 0], len: MAPY, pt: (a, d) => [MAPX - d, MAPY - a] },
+    { key: 'nx', n: [-1, 0], len: MAPY, pt: (a, d) => [d, a] },
   ];
   const quadSide = (S, aa0, aa1, d, zz0, zz1, texr, mat = 0) => {
     const p0 = S.pt(aa0, d), p1 = S.pt(aa1, d);
@@ -405,31 +577,17 @@ export function buildSlabSides(mb, atlas, tex) {
     mb.quad([p0[0], p0[1], zz1], [p1[0], p1[1], zz1], [p1[0], p1[1], zz0], [p0[0], p0[1], zz0],
       [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], texr, [S.n[0], S.n[1], 0], mat);
   };
-  // the stretches of each side that run under the water (in that side's own a-coordinate)
-  const waterSpans = (S) => {
-    const sp = [];
-    for (const w of WATERS) {
-      let iv = null;
-      if (S.key === 'py' && w.y1 >= MAP) iv = [w.x0, w.x1];
-      else if (S.key === 'ny' && w.y0 <= 0) iv = [MAP - w.x1, MAP - w.x0];
-      else if (S.key === 'px' && w.x1 >= MAP) iv = [MAP - w.y1, MAP - w.y0];
-      else if (S.key === 'nx' && w.x0 <= 0) iv = [w.y0, w.y1];
-      if (iv) sp.push(iv);
-    }
-    sp.sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const iv of sp) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1] + 1e-6) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv]); }
-    return merged;
-  };
   for (const S of sides) {
-    // soil face around the opening (stopping at the water where a river or the harbour meets the edge)
+    const MAP = S.len, a1 = MAP - 3;
+    // soil face above the tunnel, up to whatever meets the edge: the water, a road, a sidewalk
     let a = 0;
-    for (const [w0, w1] of waterSpans(S)) {
-      if (w0 > a) quadSide(S, a, w0, 0, tz1, 0, soil);
-      quadSide(S, w0, w1, 0, tz1, WATER_Z, soil);
-      a = w1;
+    while (a < MAP) {
+      const [x, y] = S.pt(a + 0.5, 0.5), z = clsZ(clsAt(x, y));
+      let b = a + 1;
+      while (b < MAP) { const [x2, y2] = S.pt(b + 0.5, 0.5); if (clsZ(clsAt(x2, y2)) !== z) break; b++; }
+      quadSide(S, a, b, 0, tz1, z, soil);
+      a = b;
     }
-    if (a < MAP) quadSide(S, a, MAP, 0, tz1, 0, soil);
     quadSide(S, 0, MAP, 0, -BASE_DEPTH, tz0, soil);
     quadSide(S, 0, a0, 0, tz0, tz1, soil);
     quadSide(S, a1, MAP, 0, tz0, tz1, soil);

@@ -1,4 +1,4 @@
-import { LIGHT_EXT } from '../world/layout.js';
+import { LIGHT_EXT_X, LIGHT_EXT_Y } from '../world/layout.js';
 // GLSL sources.
 
 const HEAD = `#version 300 es
@@ -65,7 +65,7 @@ float cloudAt(vec3 wp) {
 }
 vec3 lampAt(vec3 wp) {
   if (wp.z < -0.5) return vec3(0.0);
-  vec3 l = texture(uLightMap, wp.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
+  vec3 l = texture(uLightMap, wp.xy / vec2(${LIGHT_EXT_X.toFixed(1)}, ${LIGHT_EXT_Y.toFixed(1)})).rgb;
   float hf = clamp(1.0 - (wp.z - 0.3) / 8.0, 0.0, 1.0);
   return l * (hf * hf);
 }
@@ -108,7 +108,24 @@ flat in vec3 vNrm;
 flat in uvec4 vInfo;
 uniform sampler2DArray uAtlas;
 uniform highp sampler2D uGround;
+uniform highp sampler2D uGroundIdx;
+uniform int uGroundTile;
+uniform int uGroundPer;
 uniform float uGroundScale;
+// the ground texel under art-texel coordinate uv: find the tile holding that patch of the map
+// (none: open water)
+vec4 groundTexel(vec2 uv) {
+  ivec2 g = ivec2(floor(uv * uGroundScale));
+  ivec2 t = g / uGroundTile;
+  ivec2 isz = textureSize(uGroundIdx, 0);
+  vec4 water = vec4(42.0, 90.0, 112.0, 25.0) / 255.0;
+  if (g.x < 0 || g.y < 0 || t.x >= isz.x || t.y >= isz.y) return water;
+  vec4 s = texelFetch(uGroundIdx, t, 0);
+  int slot = int(s.r * 255.0 + 0.5) + int(s.g * 255.0 + 0.5) * 256 - 1;
+  if (slot < 0) return water;
+  ivec2 base = ivec2(slot % uGroundPer, slot / uGroundPer) * uGroundTile;
+  return texelFetch(uGround, base + (g - t * uGroundTile), 0);
+}
 uniform float uResLit;
 uniform float uOffLit;
 uniform float uLeaves;
@@ -136,7 +153,7 @@ void main() {
   uint mat = vInfo.y;
   bool ground = (mat & 4u) != 0u;
   vec4 tex;
-  if (ground) tex = texelFetch(uGround, ivec2(floor(vUV * uGroundScale)), 0);
+  if (ground) tex = groundTexel(vUV);
   else {
     vec2 rs = vec2(vRect.zw), uvi = floor(vUV), off = vec2(0.0);
     if ((mat & 32u) != 0u) {

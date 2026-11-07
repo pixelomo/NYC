@@ -4,7 +4,7 @@
 import { createProgram, makeBuffer } from '../core/gl.js';
 import { MeshBuilder, MAT } from '../world/mesh.js';
 import { RNG } from '../core/math.js';
-import { T, LIGHT_EXT } from '../world/layout.js';
+import { T, LIGHT_EXT_X, LIGHT_EXT_Y } from '../world/layout.js';
 
 const CAR_CAP = 768; // instances per vehicle type per frame
 const IS = 16; // floats per instance: position+heading, palette/alpha/snow/lift, crumple, burn/dents/seed
@@ -239,7 +239,7 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / vec2(${LIGHT_EXT_X.toFixed(1)}, ${LIGHT_EXT_Y.toFixed(1)})).rgb;
   vec3 light = uAmb * faceShade(n) + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.6 + 0.4 * max(n.z, 0.0)) + vec3(uFlash);
   if (vWorld.z < -0.5) light = light * 0.5 + vec3(0.16, 0.15, 0.13);
   vec3 col = albedo * light;

@@ -7,7 +7,7 @@
 // arch and fountain, Chinatown, the Brooklyn Bridge over the East River to Brooklyn's shore, and the
 // Statue of Liberty on her island in the harbour.
 
-import { T, CURB, WATER_Z, MAP, EAST_X, BROOKLYN_X, HARBOR_Y, HUDSON_X, NB, BLOCK_TYPES, blockRect } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, MAPY, BROOKLYN_X, NBX, NBY, BLOCK_TYPES, blockRect, BOROUGHS, LIBERTY, STREET } from './layout.js';
 import { MAT } from './mesh.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { shade, mixc, hash2i, RNG } from '../core/math.js';
@@ -268,10 +268,9 @@ export function rockefeller(C, L) {
 // ---------------------------------------------------------------------------------------------
 // helpers for odd shapes
 export function fillHeight(W, inside, x0, y0, x1, y1, h) {
-  const MAPN = Math.sqrt(W.heights.length) | 0;
-  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(MAPN, Math.ceil(y1)); y++)
-    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(MAPN, Math.ceil(x1)); x++)
-      if (inside(x + 0.5, y + 0.5)) W.heights[y * MAPN + x] = Math.max(W.heights[y * MAPN + x], h);
+  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(MAPY, Math.ceil(y1)); y++)
+    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(MAPX, Math.ceil(x1)); x++)
+      if (inside(x + 0.5, y + 0.5)) W.heights[y * MAPX + x] = Math.max(W.heights[y * MAPX + x], h);
 }
 // a vertical wall between two points with a tiled texture (u along the wall)
 export function wall(C, a, b, z0, z1, tex, mat, seed = 0) {
@@ -635,7 +634,7 @@ export function chinatownExtras(C, L, gate) {
 // of the raised wooden promenade, which people walk across (stairs at both ends).
 export const BRIDGE = { ZD: 7.0 };
 const bridgeBlock = () => {
-  for (let by = 0; by < NB; by++) for (let bx = 0; bx < NB; bx++) if (BLOCK_TYPES[by][bx] === 'bridge') return blockRect(bx, by);
+  for (let by = 0; by < NBY; by++) for (let bx = 0; bx < NBX; bx++) if (BLOCK_TYPES[by][bx] === 'bridge') return blockRect(bx, by);
   return null;
 };
 export function brooklynBridge(C) {
@@ -643,7 +642,8 @@ export function brooklynBridge(C) {
   if (!L) return;
   const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);
   const yb = (L.y0 + L.y1) / 2, ZD = BRIDGE.ZD, ZT = ZD + 13;
-  const xa = L.x1 - 7.6, x1 = MAP;
+  const xa = L.x1 - 7.6, x1 = MAPX;
+  const EAST_X = L.x1 + STREET;
   const xm = EAST_X + 6.5, xbk = BROOKLYN_X - 6.5, xmid = (xm + xbk) / 2;
   const granite = C.atlas.shared('bb_granite', 64, 64, (p) => {
     for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
@@ -786,18 +786,21 @@ export function brooklynBridge(C) {
 // north of the bridge, brownstones south of it; a subway station for the walk home
 export function brooklynShore(C) {
   const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);
-  const x0 = BROOKLYN_X, x1 = MAP, y1 = HARBOR_Y;
+  const BK = BOROUGHS.find((b) => b.name === 'brooklyn');
+  const x0 = BROOKLYN_X, x1 = MAPX, y0b = BK.y0, y1 = BK.y1;
   const L = bridgeBlock(), yb = L ? (L.y0 + L.y1) / 2 : -100;
   const rng = C.rng;
   C.paintGround(x0, 0, x1, y1, 'grass');
   C.paintGround(x0 + 2.6, 0, x0 + 6.6, y1, 'lawn');
   C.paintGround(x0, 0, x0 + 2.6, y1, 'plaza');
   C.paintGround(x0 + 6.6, 0, x1, y1, 'patio');
-  // the buildings along the back of the strip, facing the river
+  // the buildings along the back of the strip, facing the river (gaps where the bridges come in)
+  const gaps = [yb, ...(W.bridges || []).filter((b) => b.y > y0b && b.y < y1 && b.x1 >= x1 - 1).map((b) => b.y)];
   const fr = new Frame(x0 + 7.0, 0, -1, 0);
-  let a = 1.0;
+  let a = y0b + 1.0;
   while (a < y1 - 4) {
-    if (a + 4 > yb - 6.2 && a < yb + 6.2) { a = yb + 6.2; continue; }
+    const gap = gaps.find((g) => a + 4 > g - 6.2 && a < g + 6.2);
+    if (gap != null) { a = gap + 6.2; continue; }
     const w = a < yb ? rng.pick([6, 7, 8]) : rng.pick([4, 4.5, 5]);
     if (a + w > y1 - 0.5) break;
     if (a < yb) loft(C, fr, a, w, x1 - x0 - 7.2, { floors: rng.int(5, 8) });
@@ -805,12 +808,12 @@ export function brooklynShore(C) {
     a += w + (a < yb ? 0.3 : 0);
   }
   // trees on the lawn, benches and lamps along the promenade
-  for (let y = 2.4; y < y1 - 2; y += 2.6) {
-    if (Math.abs(y - yb) < 6.5) continue;
+  for (let y = y0b + 2.4; y < y1 - 2; y += 2.6) {
+    if (gaps.some((g) => Math.abs(y - g) < 6.5)) continue;
     if (hash2i(Math.round(y * 3), 7, 171) > 0.12) C.addTree(x0 + 4.6 + (hash2i(Math.round(y), 3, 172) - 0.5) * 1.6, y, rng.pick(['plane', 'locust', 'oak', 'cherry']), false);
   }
-  for (let y = 4; y < y1 - 3; y += 6.5) {
-    if (Math.abs(y - yb) < 7) continue;
+  for (let y = y0b + 4; y < y1 - 3; y += 6.5) {
+    if (gaps.some((g) => Math.abs(y - g) < 7)) continue;
     C.addBench(x0 + 1.75, y, 'y', -1);
     parkLamp(C, x0 + 2.3, y + 3.2);
   }
@@ -828,10 +831,10 @@ export function brooklynShore(C) {
   }
   // the promenade's own walking net, joined to the bridge stairs, with the subway at the bridge
   const nodes = [], edges = [];
-  for (let y = 1.4; y < y1 - 1; y += 2.5) { nodes.push({ x: x0 + 1.15, y }); if (nodes.length > 1) edges.push([nodes.length - 2, nodes.length - 1]); }
+  for (let y = y0b + 1.4; y < y1 - 1; y += 2.5) { nodes.push({ x: x0 + 1.15, y }); if (nodes.length > 1) edges.push([nodes.length - 2, nodes.length - 1]); }
   const promenade = nodes.length;
   const near = (y) => { let b = 0; for (let i = 1; i < promenade; i++) if (Math.abs(nodes[i].y - y) < Math.abs(nodes[b].y - y)) b = i; return b; };
-  const net = { name: 'brooklyn', rect: { x0, y0: 0, x1, y1 }, nodes, edges, gates: [], subways: [], sights: [] };
+  const net = { name: 'brooklyn', rect: { x0, y0: y0b, x1, y1 }, nodes, edges, gates: [], subways: [], sights: [] };
   if (W.bridgeWalk && L) {
     const B = W.bridgeWalk, base = nodes.length;
     for (const n of B.nodes) nodes.push(n);
@@ -862,7 +865,7 @@ export function brooklynShore(C) {
 // floodlit at night. A ferry waits at the pier.
 export function statueOfLiberty(C) {
   const S = sharedTex(C), mb = C.mb, W = C.world, gt = W.ground, P = propTex(C);
-  const ix = HUDSON_X - 3, iy = HARBOR_Y + 14, RX = 9.6, RY = 6.6, zi = CURB;
+  const ix = LIBERTY.x, iy = LIBERTY.y, RX = LIBERTY.rx, RY = LIBERTY.ry, zi = CURB;
   const granite = C.atlas.shared('bb_granite', 64, 64, () => {});
   const inIsle = (x, y, m = 0) => ((x - ix) / (RX - m)) ** 2 + ((y - iy) / (RY - m)) ** 2 < 1;
   // the island: lawn, a paved ring path, the pier plaza

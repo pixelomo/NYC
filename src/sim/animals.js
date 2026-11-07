@@ -3,7 +3,7 @@
 import { paintPigeon, paintDog, paintCat, paintSquirrel, paintDuck, paintRat, DOG_BREEDS, dogFrameSize, selOut, S } from '../render/sprites.js';
 import { SF } from '../render/spriteLayer.js';
 import { RNG, clamp, dist, dist2 } from '../core/math.js';
-import { CURB, MAP } from '../world/layout.js';
+import { CURB, MAPX, MAPY } from '../world/layout.js';
 
 export class Animals {
   constructor(city) {
@@ -330,8 +330,8 @@ export class Animals {
     this.gooseTimer -= dt;
     if (!this.geese && env.season === 2 && this.gooseTimer <= 0 && env.darkness < 0.5) {
       this.gooseTimer = this.rng.range(60, 140);
-      const y0 = this.rng.range(10, MAP - 10);
-      this.geese = { x: MAP + 25, y: y0, z: 42, vx: -3.2, vy: this.rng.range(-0.5, 0.5), t: 0 };
+      const y0 = this.rng.range(10, MAPY - 10);
+      this.geese = { x: MAPX + 25, y: y0, z: 42, vx: -3.2, vy: this.rng.range(-0.5, 0.5), t: 0 };
       this.city.audio?.event('geese', this.geese);
     }
     if (this.geese) {
@@ -344,12 +344,12 @@ export class Animals {
     if (this.planeTimer <= 0 && this.planes.length < 2) {
       this.planeTimer = this.rng.range(25, 70);
       const fromW = this.rng.chance(0.5);
-      this.planes.push({ x: fromW ? -40 : MAP + 40, y: this.rng.range(0, MAP), z: this.rng.range(70, 90), vx: fromW ? 7 : -7, vy: this.rng.range(-1.5, 1.5), t: 0 });
+      this.planes.push({ x: fromW ? -40 : MAPX + 40, y: this.rng.range(0, MAPY), z: this.rng.range(70, 90), vx: fromW ? 7 : -7, vy: this.rng.range(-1.5, 1.5), t: 0 });
     }
     for (let i = this.planes.length - 1; i >= 0; i--) {
       const p = this.planes[i];
       p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt;
-      if (p.x < -60 || p.x > MAP + 60) this.planes.splice(i, 1);
+      if (p.x < -60 || p.x > MAPX + 60) this.planes.splice(i, 1);
     }
   }
   update(dt) {

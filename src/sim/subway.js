@@ -1,6 +1,6 @@
 // Subway trains looping through the tunnel cut-away around the diorama, with a station platform.
 
-import { MAP } from '../world/layout.js';
+import { MAPX, MAPY } from '../world/layout.js';
 import { TUNNEL } from '../world/ground.js';
 import { personTemplate, S } from '../render/sprites.js';
 import { SF } from '../render/spriteLayer.js';
@@ -14,12 +14,12 @@ export class Subway {
     this.city = city;
     this.rng = new RNG(23);
     // clockwise loop (map view): north side eastward, east side southward, south side westward, west side northward
-    const c = OFF, r = 0.9, M = MAP;
+    const c = OFF, r = 0.9, MX = MAPX, M = MAPY;
     const pts = [];
     const arc = (cx, cy, a0, a1) => { for (let k = 0; k <= 6; k++) { const a = a0 + ((a1 - a0) * k) / 6; pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]); } };
     arc(c + r, c + r, Math.PI, Math.PI * 1.5);
-    arc(M - c - r, c + r, -Math.PI / 2, 0);
-    arc(M - c - r, M - c - r, 0, Math.PI / 2);
+    arc(MX - c - r, c + r, -Math.PI / 2, 0);
+    arc(MX - c - r, M - c - r, 0, Math.PI / 2);
     arc(c + r, M - c - r, Math.PI / 2, Math.PI);
     pts.push(pts[0]);
     this.pts = pts;
@@ -123,7 +123,7 @@ export class Subway {
     const P = this.city.people;
     const role = this.rng.pick(['resident', 'worker', 'tourist', 'resident']);
     const p = P.create(role);
-    p.x = x; p.y = MAP - TUNNEL.depth + 0.42; p.z = TUNNEL.z0 + 0.5;
+    p.x = x; p.y = MAPY - TUNNEL.depth + 0.42; p.z = TUNNEL.z0 + 0.5;
     p.alpha = alpha; p.t = this.rng.range(0, 3); p.front = true; p.flip = this.rng.chance(0.5);
     return p;
   }

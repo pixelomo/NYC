@@ -1,6 +1,6 @@
 // Block-by-block city generation + street furniture.
 
-import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, roadEnd, WATER_Z, WATERS } from './layout.js';
+import { T, PERIOD, CURB, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, roadEnd, WATER_Z, NBX, NBY, MAPX, MAPY, legOpen, isManhattan } from './layout.js';
 import { quayEdges } from './ground.js';
 import { RNG } from '../core/math.js';
 import { GC, COL } from './ground.js';
@@ -15,6 +15,9 @@ import {
 import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard, SHOPPING, CHINATOWN } from './facades.js';
 import * as LM from './landmarks.js';
 import * as MH from './manhattan.js';
+import { buildBridges } from './bridges.js';
+import { greaterNewYork } from './greater.js';
+import * as UP from './uptown.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { centralPark } from './centralpark.js';
 import { billboardsBlock, timesSquareBlock, timesSquareDistrict } from './timessq.js';
@@ -289,9 +292,9 @@ export function buildBlocks(C) {
   const prof = {};
   const time = (name, fn) => { const t = performance.now(); fn(); prof[name] = (prof[name] || 0) + performance.now() - t; };
   const rng0 = C.rng;
-  for (let by = 0; by < NB; by++)
-    for (let bx = 0; bx < NB; bx++) {
-      if (blockInPark(bx, by)) continue;
+  for (let by = 0; by < NBY; by++)
+    for (let bx = 0; bx < NBX; bx++) {
+      if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const fn = BLOCKS[type];
@@ -317,9 +320,9 @@ export function buildBlocks(C) {
 function waterfront(C) {
   const W = C.world, mb = C.mb;
   const P = propTex(C);
-  for (const w of WATERS) W.solids.push([w.x0 - 0.2, w.y0 - 0.2, w.x1 + 0.2, w.y1 + 0.2]);
   const iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
   for (const [ax, ay, bx, by, n] of quayEdges()) {
+    if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) continue;
     // (just inside the land, along the edge)
     const ox = -n[0] * 0.12, oy = -n[1] * 0.12;
     const x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
@@ -331,10 +334,12 @@ function waterfront(C) {
       mb.box(x0 + 0.3, y0 - 0.05, CURB + 0.5, x1 - 0.3, y0 + 0.05, CURB + 0.58, iron);
     }
   }
+  buildBridges(C);
   LM.brooklynBridge(C);
   LM.brooklynShore(C);
+  greaterNewYork(C);
   LM.statueOfLiberty(C);
-  void WATER_Z; void roadEnd; void MAP;
+  void WATER_Z; void roadEnd;
 }
 
 const BLOCKS = {
@@ -390,6 +395,18 @@ const BLOCKS = {
   memorial: (C, L) => MH.memorial(C, L),
   battery: (C, L) => MH.batteryPark(C, L),
   bridge: (C, L) => MH.bridgeApproach(C, L),
+  // uptown and the rest (the bridges' approaches are built with the bridges)
+  riverside: (C, L) => UP.riverside(C, L),
+  grantstomb: (C, L) => UP.riverside(C, L, 'grantstomb'),
+  soldiers: (C, L) => UP.riverside(C, L, 'soldiers'),
+  inwoodhill: (C, L) => UP.inwoodHill(C, L),
+  cloisters: (C, L) => UP.cloisters(C, L),
+  highbridge: (C, L) => UP.highbridgePark(C, L),
+  columbia: (C, L) => UP.columbia(C, L),
+  apollo: (C, L) => walkupBlock(C, L, { shops: 1, theater: 'APOLLO', fireEscape: true, widths: [[4.5, 9, 4.5]] }),
+  unionsq: (C, L) => UP.unionSquare(C, L),
+  cityhall: (C, L) => UP.cityHall(C, L),
+  gwb: () => {}, tbridge: () => {}, qbridge: () => {}, wbridge: () => {}, mbridge: () => {},
 };
 
 // ---------------------------------------------------------------------------
@@ -464,7 +481,7 @@ function walkupBlock(C, L, o) {
       if (o.firehouse && side === 'S' && k === 1) {
         firehouse(C, fr, a, w, 7);
       } else if (o.theater && side === 'S' && w >= 8) {
-        theater(C, fr, a, w, 7);
+        theater(C, fr, a, w, 7, typeof o.theater === 'string' ? o.theater : 'RIALTO');
       } else {
         const sh = corner && !o.residential ? shop ?? pickShop() : shop;
         walkup(C, fr, a, w, 7, {
@@ -521,7 +538,7 @@ function firehouse(C, fr, a0, W, D) {
   C.world.lamps.push({ x: bay[0], y: bay[1], z: 2.5, r: 2.4, color: [1, 0.9, 0.7], k: 0.6, kind: 'shop' });
 }
 
-function theater(C, fr, a0, W, D) {
+function theater(C, fr, a0, W, D, name = 'RIALTO') {
   const { mb, rng } = C;
   const S = sharedTex(C);
   const H = 7.5;
@@ -561,7 +578,7 @@ function theater(C, fr, a0, W, D) {
   q.rect(0, 0, mw, 3, 0x2a2a2e); q.rect(0, MH - 3, mw, 3, 0x2a2a2e);
   const bulb = winCode(0.0, true);
   for (let x = 1; x < mw; x += 3) { q.set(x, 1, 0xffe27a, bulb); q.set(x, MH - 2, 0xffe27a, bulb); }
-  const l1 = 'NOW SHOWING', l2 = 'PIXEL CITY 3';
+  const [l1, l2] = name === 'APOLLO' ? ['AMATEUR NIGHT', 'WEDNESDAYS'] : ['NOW SHOWING', 'PIXEL CITY 3'];
   q.text7(Math.floor((mw - textWidth(l1, 1, true)) / 2), 5, l1, 0x1b1b1b, bulb);
   q.text7(Math.floor((mw - textWidth(l2, 1, true)) / 2), 15, l2, 0xc8302c, bulb);
   fr.box(mb, a0 + 0.5, a0 + W - 0.5, -1.4, 0, CURB + 2.2, CURB + 3.1, { front: marq, left: S.darkMetal, right: S.darkMetal, top: { t: S.darkMetal } });
@@ -570,13 +587,13 @@ function theater(C, fr, a0, W, D) {
   vt.p.rect(0, 0, 32, 144, 0xc8302c);
   for (let y = 0; y < 144; y += 3) { vt.p.set(1, y, 0xffe27a, winCode(0.0, true)); vt.p.set(30, y, 0xffe27a, winCode(0.0, true)); }
   vt.p.frame(3, 3, 26, 138, 0x8a1a18);
-  'RIALTO'.split('').forEach((ch, i) => vt.p.text7(9, 6 + i * 23, ch, 0xffffff, winCode(0.0, true), 3));
+  name.split('').forEach((ch, i) => vt.p.text7(9, 6 + i * 23, ch, name === 'APOLLO' ? 0xffe27a : 0xffffff, winCode(0.0, true), 3));
   fr.sideQuad(mb, a0 + 1, -0.15, -1.15, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
   fr.sideQuad(mb, a0 + 1.01, -1.15, -0.15, CURB + 3.4, CURB + 3.4 + 4.5, vt, { mat: MAT.NOSHADOW });
   const lp = fr.pt(a0 + W / 2, -1.5);
   C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 3.4, color: [1, 0.85, 0.5], k: 0.9, kind: 'marquee' });
   C.world.marquees.push({ x: lp[0], y: lp[1] });
-  C.world.shops.push({ kind: 'theater', name: 'RIALTO', x: lp[0], y: lp[1], n: fr.n });
+  C.world.shops.push({ kind: 'theater', name, x: lp[0], y: lp[1], n: fr.n });
 }
 
 function loftBlock(C, L) {
@@ -813,24 +830,24 @@ function ringWall(C, cx, cy, r, w, h) {
 }
 
 // ---------------------------------------------------------------------------
+const NOSUBWAY = new Set(['riverside', 'grantstomb', 'soldiers', 'inwoodhill', 'cloisters', 'gwb', 'highbridge', 'bridge', 'qbridge', 'wbridge', 'mbridge', 'tbridge', 'battery', 'memorial']);
 // Street furniture along every sidewalk + signals at every intersection
 function streetFurniture(C) {
   const { rng } = C;
   const W = C.world;
   // signals (none inside the park; T-junctions at its edge lose the heads facing the park)
-  for (let i = 0; i <= NB; i++)
-    for (let j = 0; j <= NB; j++) {
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
       if (isParkIntersection(i, j)) continue;
       const rx = roadCenter(i), ry = roadCenter(j);
       for (const sx of [-1, 1])
-        for (const sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: isParkIntersection(i + sx, j), closedY: isParkIntersection(i, j + sy) });
+        for (const sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: !legOpen(i, j, sx, 0), closedY: !legOpen(i, j, 0, sy) });
     }
   // per block-side furniture
-  for (let by = 0; by < NB; by++)
-    for (let bx = 0; bx < NB; bx++) {
-      if (blockInPark(bx, by)) continue;
+  for (let by = 0; by < NBY; by++)
+    for (let bx = 0; bx < NBX; bx++) {
+      if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
-      if (type === 'river') continue;
       const L = blockRect(bx, by);
       const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts', 'redbrick', 'shops'].includes(type);
       // sides: [x0,y0,x1,y1 of the curb line], normal toward road
@@ -890,7 +907,7 @@ function streetFurniture(C) {
   // sandwich boards outside some of the shopping streets' stores
   for (const sh of W.shops) {
     const bx = Math.floor((sh.x - 9) / PERIOD + 0.5), by = Math.floor((sh.y - 9) / PERIOD + 0.5);
-    const near = [[bx, by], [bx - 1, by], [bx, by - 1], [bx - 1, by - 1]].some(([i, j]) => i >= 0 && j >= 0 && i < NB && j < NB && BLOCK_TYPES[j][i] === 'shops' && Math.abs(sh.x - (lotStart(i) + 9)) < 11.5 && Math.abs(sh.y - (lotStart(j) + 9)) < 11.5);
+    const near = [[bx, by], [bx - 1, by], [bx, by - 1], [bx - 1, by - 1]].some(([i, j]) => i >= 0 && j >= 0 && i < NBX && j < NBY && BLOCK_TYPES[j][i] === 'shops' && Math.abs(sh.x - (lotStart(i) + 9)) < 11.5 && Math.abs(sh.y - (lotStart(j) + 9)) < 11.5);
     if (!near || !SHOPPING.includes(sh.kind) || !rng.chance(0.45) || !sh.n) continue;
     sandwichBoard(C, sh.x - sh.n[0] * 0.15, sh.y - sh.n[1] * 0.15, sh.n[0], sh.n[1], rng);
   }
@@ -907,9 +924,9 @@ function streetFurniture(C) {
   W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: 'hotdog', axis: 'x' });
   parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4.0], [pcx - 4.2, PR.y1 + 1]]);
   // subway stations every couple of blocks (on a sidewalk of an ordinary block)
-  const plain = (bx, by) => bx >= 0 && by >= 0 && bx < NB && by < NB && !blockInPark(bx, by) && BLOCK_TYPES[by][bx] !== 'river';
-  for (let by = 0; by < NB; by += 2)
-    for (let bx = (by / 2) % 2; bx < NB - 1; bx += 2) {
+  const plain = (bx, by) => isManhattan(bx, by) && !blockInPark(bx, by) && !NOSUBWAY.has(BLOCK_TYPES[by][bx]);
+  for (let by = 0; by < NBY; by += 2)
+    for (let bx = (by / 2) % 2; bx < NBX - 1; bx += 2) {
       if (!plain(bx, by)) continue;
       if ((bx + by) % 4 === 0) subwayEntrance(C, lotStart(bx) + 13, lotEnd(by) + 1.0, 'x');
       else subwayEntrance(C, lotEnd(bx) + 1.0, lotStart(by) + 5, 'y');
@@ -917,13 +934,13 @@ function streetFurniture(C) {
   // food carts on busy corners
   const kinds = ['halal', 'hotdog', 'pretzel', 'halal', 'hotdog'];
   let ck = 0;
-  for (let by = 1; by < NB; by += 3)
-    for (let bx = 1; bx < NB - 1; bx += 3) if (plain(bx, by)) W.carts.push({ x: lotStart(bx) + 14, y: lotEnd(by) + 1.3, kind: kinds[ck++ % kinds.length], axis: 'x' });
+  for (let by = 1; by < NBY; by += 3)
+    for (let bx = 1; bx < NBX - 1; bx += 3) if (plain(bx, by)) W.carts.push({ x: lotStart(bx) + 14, y: lotEnd(by) + 1.3, kind: kinds[ck++ % kinds.length], axis: 'x' });
   // food cart geometry
   for (const c of W.carts) buildCart(C, c);
   // manhole steam sources
   for (const m of W.groundInfo.manholes) if (rng.chance(0.35)) W.steam.push({ x: m.x, y: m.y, z: 0.02, kind: 'manhole', rate: 0.4 });
-  void PERIOD; void MAP; void GRP; void smoothFill; void drawDoor; void signBoard;
+  void PERIOD; void MAPX; void MAPY; void GRP; void smoothFill; void drawDoor; void signBoard;
 }
 
 // A pair of vertical banners hanging from a lamp post, the district's colour

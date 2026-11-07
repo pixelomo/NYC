@@ -7,7 +7,7 @@
 // and stop to let officers out to chase you on foot. Get grabbed or boxed in and you're busted;
 // stay out of sight long enough and they lose you.
 
-import { MAP, MERGES, mergePlinth } from '../world/layout.js';
+import { MAPX, MAPY, MERGES, mergePlinth } from '../world/layout.js';
 import { clamp, dist, dist2, RNG } from '../core/math.js';
 import { personPose } from '../render/sprites.js';
 
@@ -604,18 +604,18 @@ export class Player {
   // per-cell travel cost for pursuit: 0 = blocked, 1 = road, 3 = sidewalk / plaza / park
   buildCells() {
     const C = this.coll;
-    this.cells = new Uint8Array(MAP * MAP);
-    for (let y = 0; y < MAP; y++)
-      for (let x = 0; x < MAP; x++) {
+    this.cells = new Uint8Array(MAPX * MAPY);
+    for (let y = 0; y < MAPY; y++)
+      for (let x = 0; x < MAPX; x++) {
         let solid = false;
         for (const [ox, oy] of [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]]) if (C.isSolid(x + ox, y + oy)) { solid = true; break; }
-        this.cells[y * MAP + x] = solid ? 0 : C.onRoad(x + 0.5, y + 0.5) ? 1 : 3;
+        this.cells[y * MAPX + x] = solid ? 0 : C.onRoad(x + 0.5, y + 0.5) ? 1 : 3;
       }
-    this.flow = new Float32Array(MAP * MAP);
+    this.flow = new Float32Array(MAPX * MAPY);
   }
   // distance field (Dial's algorithm, 4-neighbour, integer costs) from the player's cell
   buildFlow(tx, ty) {
-    const N = MAP, D = this.flow;
+    const N = MAPX, NY = MAPY, D = this.flow;
     // parked cars and burnt-out wrecks don't move: route round them (a gap between a parked car
     // and a lamp post is no way through)
     const cells = this.cellsNow || (this.cellsNow = new Uint8Array(this.cells.length));
@@ -625,14 +625,14 @@ export class Player {
       if (Math.abs(c.x - tx) > 70 || Math.abs(c.y - ty) > 70) continue;
       const ch = Math.cos(c.h), sh = Math.sin(c.h), hl = c.len / 2 + 0.3, hw = c.wid / 2 + 0.3;
       const ex = Math.abs(ch) * hl + Math.abs(sh) * hw, ey = Math.abs(sh) * hl + Math.abs(ch) * hw;
-      for (let y = Math.max(0, Math.floor(c.y - ey)); y <= Math.min(N - 1, Math.floor(c.y + ey)); y++)
+      for (let y = Math.max(0, Math.floor(c.y - ey)); y <= Math.min(NY - 1, Math.floor(c.y + ey)); y++)
         for (let x = Math.max(0, Math.floor(c.x - ex)); x <= Math.min(N - 1, Math.floor(c.x + ex)); x++) {
           const rx = x + 0.5 - c.x, ry = y + 0.5 - c.y;
           if (Math.abs(rx * ch + ry * sh) < hl && Math.abs(-rx * sh + ry * ch) < hw) cells[y * N + x] = 0;
         }
     }
     D.fill(1e9);
-    const s = clamp(Math.floor(ty), 0, N - 1) * N + clamp(Math.floor(tx), 0, N - 1);
+    const s = clamp(Math.floor(ty), 0, NY - 1) * N + clamp(Math.floor(tx), 0, N - 1);
     const buckets = [[s]];
     D[s] = 0;
     for (let d = 0; d < buckets.length; d++) {
@@ -642,7 +642,7 @@ export class Player {
         const i = b[k];
         if (D[i] < d) continue;
         const x = i % N, y = (i / N) | 0;
-        for (const j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < N - 1 ? i + N : -1]) {
+        for (const j of [x > 0 ? i - 1 : -1, x < N - 1 ? i + 1 : -1, y > 0 ? i - N : -1, y < NY - 1 ? i + N : -1]) {
           if (j < 0) continue;
           const cst = cells[j];
           if (!cst) continue;
@@ -654,8 +654,8 @@ export class Player {
   }
   flowAt(x, y) {
     const ix = Math.floor(x), iy = Math.floor(y);
-    if (ix < 0 || iy < 0 || ix >= MAP || iy >= MAP) return 1e9;
-    return this.flow[iy * MAP + ix];
+    if (ix < 0 || iy < 0 || ix >= MAPX || iy >= MAPY) return 1e9;
+    return this.flow[iy * MAPX + ix];
   }
   // which way the distance field falls fastest around (x, y) (never through a wall: a thin wall
   // can separate two cells whose distances differ by the whole way round)

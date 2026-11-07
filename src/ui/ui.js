@@ -24,8 +24,8 @@ export class UI {
   computeZoomLevels() {
     const dpr = window.devicePixelRatio || 1;
     // device pixels per art pixel; down to 1/16 CSS pixel per art pixel shows the whole diorama
-    const dev = [0.0625, 0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12];
-    return dev.filter((d) => d / dpr >= 0.062 && d / dpr <= 6.01);
+    const dev = [0.03125, 0.0625, 0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12];
+    return dev.filter((d) => d / dpr >= 0.031 && d / dpr <= 6.01);
   }
   h(tag, cls, html) {
     const e = document.createElement(tag);

@@ -1,6 +1,6 @@
 // Traffic: lanes, signals, cars (IDM following), parking, buses, taxis and special vehicles.
 
-import { NB, MAP, roadCenter, LANE_OFF, PARK_OFF, roadLegOpen, parkLoop } from '../world/layout.js';
+import { NBX, NBY, MAPX, MAPY, roadCenter, LANE_OFF, PARK_OFF, roadLegOpen, parkLoop } from '../world/layout.js';
 import { RNG, clamp, dist2 } from '../core/math.js';
 
 export const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]]; // E S W N
@@ -66,9 +66,9 @@ export class Traffic {
     this.inLinks = new Map(); // key -> link arriving at intersection (i,j) travelling d
     this.connectors = new Map();
     this.offsets = [];
-    for (let i = 0; i <= NB; i++) {
+    for (let i = 0; i <= NBX; i++) {
       this.offsets.push([]);
-      for (let j = 0; j <= NB; j++) this.offsets[i].push(((i * 7 + j * 3) % 5) * 4.3 + (i + j) * 2.1);
+      for (let j = 0; j <= NBY; j++) this.offsets[i].push(((i * 7 + j * 3) % 5) * 4.3 + (i + j) * 2.1);
     }
     this.exitLock = new Map();
     this.pedHold = new Map(); // crosswalk key -> time until which pedestrians let a waiting car turn
@@ -80,8 +80,8 @@ export class Traffic {
   }
   center(i, j) { return [roadCenter(i), roadCenter(j)]; }
   buildNetwork() {
-    for (let i = 0; i <= NB; i++)
-      for (let j = 0; j <= NB; j++) {
+    for (let i = 0; i <= NBX; i++)
+      for (let j = 0; j <= NBY; j++) {
         for (let d = 0; d < 4; d++) {
           const [dx, dy] = DIRS[d];
           const ni = i + dx, nj = j + dy;
@@ -131,7 +131,7 @@ export class Traffic {
       for (let s = 1.6; s < L.len - 1.4; s += 2.75) {
         const x = L.pts[0][0] + dx * s + px, y = L.pts[0][1] + dy * s + py;
         if (blockers.some(([bx, by, r]) => dist2(x, y, bx, by) < r * r)) continue;
-        if (x < 0.5 || y < 0.5 || x > MAP - 0.5 || y > MAP - 0.5) continue;
+        if (x < 0.5 || y < 0.5 || x > MAPX - 0.5 || y > MAPY - 0.5) continue;
         L.park.push({ s, x, y, car: null, link: L });
       }
     }
@@ -245,7 +245,7 @@ export class Traffic {
   }
   spawnMoving(anywhere = false) {
     // streets near the action (the big map only keeps traffic moving round the camera)
-    const f = this.city.focus ? this.city.focus() : { x: MAP / 2, y: MAP / 2 };
+    const f = this.city.focus ? this.city.focus() : { x: MAPX / 2, y: MAPY / 2 };
     let links = [...this.links.values()].filter((L) => (L.pts[0][0] - f.x) ** 2 + (L.pts[0][1] - f.y) ** 2 < 85 * 85);
     if (!links.length) links = [...this.links.values()];
     for (let tries = 0; tries < 20; tries++) {

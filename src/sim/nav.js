@@ -1,6 +1,6 @@
 // Pedestrian navigation graph: sidewalks, crosswalks (signal-controlled), park paths and POIs.
 
-import { NB, roadCenter, CURB, isParkIntersection } from '../world/layout.js';
+import { NBX, NBY, roadCenter, CURB, isParkIntersection, legOpen } from '../world/layout.js';
 import { dist } from '../core/math.js';
 
 const Q = 3.5; // sidewalk centreline offset from road centre
@@ -117,8 +117,8 @@ export function buildNav(world) {
   const corner = {};
   const key = (i, j, qx, qy) => `${i},${j},${qx},${qy}`;
   const park = (i, j) => isParkIntersection(i, j);
-  for (let i = 0; i <= NB; i++)
-    for (let j = 0; j <= NB; j++) {
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
       if (park(i, j)) continue;
       for (const qx of [-1, 1])
         for (const qy of [-1, 1]) {
@@ -129,32 +129,32 @@ export function buildNav(world) {
     }
   // crosswalks; a leg swallowed by the park is plain sidewalk now (a segment POIs can attach to)
   const walk = (a, b) => G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
-  for (let i = 0; i <= NB; i++)
-    for (let j = 0; j <= NB; j++) {
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j <= NBY; j++) {
       if (park(i, j)) continue;
       for (const qy of [-1, 1]) {
         const a = corner[key(i, j, -1, qy)], b = corner[key(i, j, 1, qy)];
-        if (park(i, j + qy)) walk(a, b);
+        if (!legOpen(i, j, 0, qy)) walk(a, b);
         else G.link(a, b, { i, j, axis: 'x', side: qy < 0 ? 3 : 1 });
       }
       for (const qx of [-1, 1]) {
         const a = corner[key(i, j, qx, -1)], b = corner[key(i, j, qx, 1)];
-        if (park(i + qx, j)) walk(a, b);
+        if (!legOpen(i, j, qx, 0)) walk(a, b);
         else G.link(a, b, { i, j, axis: 'y', side: qx < 0 ? 2 : 0 });
       }
     }
   // sidewalk segments
-  for (let j = 0; j <= NB; j++)
-    for (let i = 0; i < NB; i++)
+  for (let j = 0; j <= NBY; j++)
+    for (let i = 0; i < NBX; i++)
       for (const qy of [-1, 1]) {
-        if (park(i, j) || park(i + 1, j)) continue;
+        if (!legOpen(i, j, 1, 0)) continue;
         const a = corner[key(i, j, 1, qy)], b = corner[key(i + 1, j, -1, qy)];
         G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
       }
-  for (let i = 0; i <= NB; i++)
-    for (let j = 0; j < NB; j++)
+  for (let i = 0; i <= NBX; i++)
+    for (let j = 0; j < NBY; j++)
       for (const qx of [-1, 1]) {
-        if (park(i, j) || park(i, j + 1)) continue;
+        if (!legOpen(i, j, 0, 1)) continue;
         const a = corner[key(i, j, qx, 1)], b = corner[key(i, j + 1, qx, -1)];
         G.segments.push({ a, b, len: dist(a.x, a.y, b.x, b.y), stops: [] });
       }

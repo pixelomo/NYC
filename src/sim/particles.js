@@ -1,7 +1,7 @@
 // Particle systems: steam, rain, snow, leaves, petals, water spray, fountains, fireworks, fireflies.
 
 import { RNG, clamp, dist2 } from '../core/math.js';
-import { CURB, MAP, T } from '../world/layout.js';
+import { CURB, MAPX, MAPY, T } from '../world/layout.js';
 import { SF } from '../render/spriteLayer.js';
 import { S } from '../render/sprites.js';
 
@@ -185,8 +185,8 @@ export class Particles {
   groundZ(x, y) {
     const W = this.city.world;
     const ix = Math.floor(x), iy = Math.floor(y);
-    if (ix < 0 || iy < 0 || ix >= MAP || iy >= MAP) return -99;
-    return Math.max(W.heights[iy * MAP + ix], 0);
+    if (ix < 0 || iy < 0 || ix >= MAPX || iy >= MAPY) return -99;
+    return Math.max(W.heights[iy * MAPX + ix], 0);
   }
   update(dt) {
     const env = this.city.env, view = this.city.view, r = this.rng;
@@ -330,7 +330,7 @@ export class Particles {
     if ((fwNight || this.forceFireworks > 0) && this.fireworkTimer <= 0) {
       this.fireworkTimer = r.range(0.6, 2.4);
       if (this.forceFireworks > 0) this.forceFireworks--;
-      const c = (env.season === 3 && W.timesSquare) || W.parkCenter || { x: MAP / 2, y: MAP / 2 };
+      const c = (env.season === 3 && W.timesSquare) || W.parkCenter || { x: MAPX / 2, y: MAPY / 2 };
       this.add({ x: c.x + r.range(-4, 4), y: c.y + r.range(-4, 4), z: CURB + 1, vx: r.range(-0.4, 0.4), vy: r.range(-0.4, 0.4), vz: r.range(9.5, 12), g: 4, life: r.range(1.8, 2.4), max: 2, kind: 'rocket', f: this.fr.dot2, row: this.fwRows[5] });
       this.city.audio?.event('launch', c);
     }

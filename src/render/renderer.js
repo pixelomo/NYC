@@ -3,7 +3,7 @@
 import { createProgram, makeTexture, makeDepthTexture, makeFBO, makeBuffer, setFilter } from '../core/gl.js';
 import { STATIC_VS, STATIC_FS, SHADOW_VS, SHADOW_FS, FS_VS, SKY_FS, BLUR_FS, COMPOSITE_FS } from './shaders.js';
 import { normalize3, cross3, dot3, valueNoise } from '../core/math.js';
-import { MAP, BASE_DEPTH, T } from '../world/layout.js';
+import { MAPX, MAPY, BASE_DEPTH, T, LIGHT_EXT_X, LIGHT_EXT_Y } from '../world/layout.js';
 
 export class Renderer {
   constructor(gl) {
@@ -23,8 +23,9 @@ export class Renderer {
     this._makeStaticShadow();
     this.floatOK = !!gl.getExtension('EXT_color_buffer_float');
     gl.getExtension('OES_texture_float_linear');
-    this.lightSize = 1024;
-    this.lightTex = makeTexture(gl, this.lightSize, this.lightSize, this.floatOK
+    this.lightW = Math.round(LIGHT_EXT_X * 3);
+    this.lightH = Math.round(LIGHT_EXT_Y * 3);
+    this.lightTex = makeTexture(gl, this.lightW, this.lightH, this.floatOK
       ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR }
       : { filter: gl.LINEAR });
     this.lightFBO = makeFBO(gl, [this.lightTex], null);
@@ -85,26 +86,41 @@ export class Renderer {
     return t;
   }
 
-  setStatic(mesh, atlas, groundPage) {
+  setStatic(mesh, atlas, groundTiles) {
     const gl = this.gl;
     this.atlasTex = atlas.upload(gl);
-    // ground: one big texture (world-space, T texels per unit); halve it if the GPU can't hold it
+    // ground: tiles of the world-space ground texture packed into one texture, with an index
+    // texture saying which tile holds each patch of the map (none: water). Halved if the GPU can't
+    // hold it at full size.
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    let gp = groundPage, scale = groundPage.scale || 1;
-    if (gp.w > maxTex) {
-      const h = new Uint8Array((gp.w >> 1) * (gp.h >> 1) * 4);
-      for (let y = 0; y < gp.h >> 1; y++) for (let x = 0; x < gp.w >> 1; x++) {
-        const s = ((y * 2) * gp.w + x * 2) * 4, d = (y * (gp.w >> 1) + x) * 4;
-        h[d] = gp.data[s]; h[d + 1] = gp.data[s + 1]; h[d + 2] = gp.data[s + 2]; h[d + 3] = gp.data[s + 3];
+    const G = groundTiles, n = Math.max(1, G.data.length);
+    let size = G.size, scale = G.scale || 0.5;
+    const fit = (sz) => { const per = Math.max(1, Math.min(16, Math.floor(maxTex / sz))); return { per, rows: Math.ceil(n / per) }; };
+    let L = fit(size);
+    while (L.rows * size > maxTex && size > 64) { size >>= 1; scale *= 0.5; L = fit(size); }
+    const k = G.size / size;
+    this.groundTex = makeTexture(gl, L.per * size, L.rows * size);
+    gl.bindTexture(gl.TEXTURE_2D, this.groundTex);
+    G.data.forEach((d, i) => {
+      let px = d;
+      if (k > 1) {
+        px = new Uint8Array(size * size * 4);
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          const s0 = ((y * k) * G.size + x * k) * 4, d0 = (y * size + x) * 4;
+          px[d0] = d[s0]; px[d0 + 1] = d[s0 + 1]; px[d0 + 2] = d[s0 + 2]; px[d0 + 3] = d[s0 + 3];
+        }
       }
-      gp = { w: gp.w >> 1, h: gp.h >> 1, data: h };
-      scale *= 0.5;
-    }
-    this.groundTex = makeTexture(gl, gp.w, gp.h, { data: gp.data });
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, (i % L.per) * size, Math.floor(i / L.per) * size, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    });
+    const idx = new Uint8Array(G.ntx * G.nty * 4);
+    for (let i = 0; i < G.slots.length; i++) { const v = G.slots[i] + 1; idx[i * 4] = v & 255; idx[i * 4 + 1] = v >> 8; }
+    this.groundIdx = makeTexture(gl, G.ntx, G.nty, { data: idx });
     this.groundScale = scale;
+    this.groundTile = size;
+    this.groundPer = L.per;
     // free CPU copies of the static textures
     for (const pg of atlas.pages) pg.data = null;
-    groundPage.data = null;
+    G.data.length = 0;
     const vao = gl.createVertexArray();
     gl.bindVertexArray(vao);
     makeBuffer(gl, mesh.pos);
@@ -169,8 +185,8 @@ export class Renderer {
     const u = cross3(r, f);
     const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     const grow = (p, a, b, n) => { for (let i = 0; i < n; i++) { const v = i === 0 ? dot3(p, r) : i === 1 ? dot3(p, u) : dot3(p, f); a[i] = Math.min(a[i], v); b[i] = Math.max(b[i], v); } };
-    for (const x of [-3, MAP + 3])
-      for (const y of [-3, MAP + 3])
+    for (const x of [-3, MAPX + 3])
+      for (const y of [-3, MAPY + 3])
         for (const z of [-BASE_DEPTH, 120]) grow([x, y, z], mn, mx, 3);
     if (view) {
       const cam = view.camera, t = cam.project(cam.x, cam.y, 0);
@@ -294,7 +310,7 @@ export class Renderer {
 
     // 2. Light map (world-space XY additive light)
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.lightFBO);
-    gl.viewport(0, 0, this.lightSize, this.lightSize);
+    gl.viewport(0, 0, this.lightW, this.lightH);
     gl.disable(gl.DEPTH_TEST);
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -320,9 +336,13 @@ export class Renderer {
       gl.uniform3fv(p.u.uMoon, env.moon);
       {
         // project the map centre well below the slab to place the drop shadow
-        const c = camera.project(MAP / 2, MAP / 2, -BASE_DEPTH - 14);
+        const c = camera.project(MAPX / 2, MAPY / 2, -BASE_DEPTH - 14), MAP = (MAPX + MAPY) / 2;
         const sx = bw / 2 + (c[0] * k - tsx), sy = bh / 2 - (c[1] * k - tsy);
-        if (camera.bird) gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.58 * k, MAP * T * 0.58 * k);
+        if (camera.bird) {
+          // (the slab is a long rectangle: the blob follows it as the view turns)
+          const r = ((camera.rot % 2) + 2) % 2, ax = r ? MAPY : MAPX, ay = r ? MAPX : MAPY;
+          gl.uniform4f(p.u.uShadowBlob, sx, sy, ax * T * 0.6 * k, ay * T * 0.6 * k);
+        }
         else gl.uniform4f(p.u.uShadowBlob, sx, sy, MAP * T * 0.62 * k, MAP * (T / 2) * 0.62 * k);
       }
       gl.bindVertexArray(this.emptyVAO);
@@ -343,6 +363,11 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE4);
       gl.bindTexture(gl.TEXTURE_2D, this.groundTex);
       gl.uniform1i(u.uGround, 4);
+      gl.activeTexture(gl.TEXTURE6);
+      gl.bindTexture(gl.TEXTURE_2D, this.groundIdx);
+      gl.uniform1i(u.uGroundIdx, 6);
+      gl.uniform1i(u.uGroundTile, this.groundTile);
+      gl.uniform1i(u.uGroundPer, this.groundPer);
       gl.uniform1f(u.uGroundScale, this.groundScale);
       gl.uniform1f(u.uResLit, env.resLit);
       gl.uniform1f(u.uOffLit, env.offLit);

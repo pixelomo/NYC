@@ -84,5 +84,14 @@ export function makeBaseTextures(atlas) {
         p.set(x, y, c);
       }
   });
+  // the other boroughs' ground (seen from across the river): pale paving, a little worn
+  tex.boroPave = atlas.shared('boro_pave', 64, 64, (p) => {
+    for (let y = 0; y < 64; y++)
+      for (let x = 0; x < 64; x++) {
+        let c = shade(0xb8b4aa, 0.95 + hash2i(x, y, 91) * 0.08);
+        if (x % 32 === 0 || y % 32 === 0) c = 0x9e9a90;
+        p.set(x, y, c);
+      }
+  });
   return tex;
 }

@@ -3,15 +3,15 @@
 //  'bird' - bird's-eye oblique: the ground is drawn straight down at T px per unit (north up at
 //           rotation 0) and heights at half scale, so the camera-facing walls show "a little".
 
-import { MAP, T } from '../world/layout.js';
+import { MAPX, MAPY, T } from '../world/layout.js';
 
 const HX = T, HY = T / 2, HZ = T; // iso: screen px per world unit (x half-width, y, height)
 const BS = T, BZ = T / 2; // bird's-eye: px per unit on the ground, px per unit of height
 import { clamp, easeInOut } from '../core/math.js';
 
-const CX = MAP / 2, CY = MAP / 2;
+const CX = MAPX / 2, CY = MAPY / 2;
 // depth (world units either side of the map centre) mapped onto clip space: the whole diorama must fit
-export const DEPTH_RANGE = Math.max(200, MAP * 1.3);
+export const DEPTH_RANGE = Math.max(200, (MAPX + MAPY) * 0.72);
 
 export class Camera {
   constructor() {
@@ -93,8 +93,8 @@ export class Camera {
       if (Math.abs(this.vx) < 0.01) this.vx = 0;
       if (Math.abs(this.vy) < 0.01) this.vy = 0;
     }
-    this.x = clamp(this.x, -10, MAP + 10);
-    this.y = clamp(this.y, -10, MAP + 10);
+    this.x = clamp(this.x, -10, MAPX + 10);
+    this.y = clamp(this.y, -10, MAPY + 10);
     if (this.shakeA > 0.01) {
       const a = this.shakeA;
       this._sx = (Math.random() * 2 - 1) * a; this._sy = (Math.random() * 2 - 1) * a;

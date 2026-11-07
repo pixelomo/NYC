@@ -25,7 +25,7 @@ const home = (C, x, y, dx, dy, n) => C.world.doors.push({ x, y, dx, dy, kind: 'h
 const office = (C, x, y, dx, dy) => C.world.officeDoors.push({ x, y, dx, dy, kind: 'office' });
 
 // a one-storey, one-unit facade module: ashlar or brick with a pair of windows
-function module(C, key, o) {
+export function module(C, key, o) {
   return tex(C, key, 32, 48, (p) => {
     if (o.brick) brickFill(p, 0, 0, 32, 48, o.brick, o.seed ?? 3);
     else stoneFill(p, 0, 0, 32, 48, [o.wall], o.seed ?? 5, 12, { blocks: 32 });

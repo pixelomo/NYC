@@ -357,3 +357,60 @@ export class HalfPainter extends Painter {
     }
   }
 }
+
+// The ground, painted at T texels per unit into tiles at half that resolution, only where there's
+// land (the water has no texels: the renderer fills it in). tiles: { ntx, nty, size (texels per
+// tile side, a power of two), slots (tile -> index into data, or -1), data: [Uint8Array] }.
+export class TiledPainter extends Painter {
+  constructor(tiles, w, h) {
+    super({ w: 1, h: 1, data: null }, 0, 0, w, h);
+    this.tiles = tiles;
+    this.half = true;
+    this.shift = Math.log2(tiles.size);
+    this.mask = tiles.size - 1;
+  }
+  sub() { throw new Error('TiledPainter.sub is not supported'); }
+  idx() { throw new Error('TiledPainter.idx is not supported'); }
+  // [array, index] of the texel under T-space (x, y), or null over water
+  at(x, y) {
+    const t = this.tiles, gx = x >> 1, gy = y >> 1;
+    const s = t.slots[(gy >> this.shift) * t.ntx + (gx >> this.shift)];
+    if (s < 0) return null;
+    this._i = (((gy & this.mask) << this.shift) + (gx & this.mask)) * 4;
+    return t.data[s];
+  }
+  set(x, y, c, a = 255) {
+    x |= 0; y |= 0;
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
+    const d = this.at(x, y);
+    if (!d) return;
+    const i = this._i;
+    d[i] = (c >> 16) & 255; d[i + 1] = (c >> 8) & 255; d[i + 2] = c & 255; d[i + 3] = a;
+  }
+  get(x, y) {
+    x |= 0; y |= 0;
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 0;
+    const d = this.at(x, y);
+    if (!d) return 0x2a5a70;
+    const i = this._i;
+    return (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+  }
+  getA(x, y) {
+    x |= 0; y |= 0;
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return 0;
+    const d = this.at(x, y);
+    return d ? d[this._i + 3] : 25; // (the river's code)
+  }
+  setA(x, y, a) {
+    x |= 0; y |= 0;
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return;
+    const d = this.at(x, y);
+    if (d) d[this._i + 3] = a;
+  }
+  rect(x, y, w, h, c, a = 255) {
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+    const x0 = Math.max(0, x), y0 = Math.max(0, y);
+    const x1 = Math.min(this.w, x + w), y1 = Math.min(this.h, y + h);
+    for (let yy = y0 & ~1; yy < y1; yy += 2) for (let xx = x0 & ~1; xx < x1; xx += 2) this.set(xx, yy, c, a);
+  }
+}

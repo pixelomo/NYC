@@ -4,7 +4,7 @@
 // its palette slots from the centre outward.
 
 import { createProgram, makeBuffer } from '../core/gl.js';
-import { LIGHT_EXT } from '../world/layout.js';
+import { LIGHT_EXT_X, LIGHT_EXT_Y } from '../world/layout.js';
 import { RNG, clamp } from '../core/math.js';
 
 const CAP = 400;
@@ -76,7 +76,7 @@ void main() {
   } else if (ndl <= 0.0) sh = 0.0;
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
-  vec3 lm = texture(uLightMap, vWorld.xy / ${LIGHT_EXT.toFixed(1)}).rgb;
+  vec3 lm = texture(uLightMap, vWorld.xy / vec2(${LIGHT_EXT_X.toFixed(1)}, ${LIGHT_EXT_Y.toFixed(1)})).rgb;
   vec3 light = uAmb * uFace.x + uSunCol * max(ndl, 0.0) * sh * cl + lm + vec3(uFlash);
   oColor = vec4(albedo * light, 1.0);
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);

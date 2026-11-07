@@ -1,6 +1,6 @@
 // Low/mid-rise building generators: brownstones, walk-up tenements, lofts, firehouse + rooftop clutter.
 
-import { T, CURB, MAP } from './layout.js';
+import { T, CURB, MAPX, MAPY } from './layout.js';
 import { MAT, GRP } from './mesh.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { shade, mixc, hash2i } from '../core/math.js';
@@ -56,9 +56,9 @@ export class Frame {
 export function markHeight(world, x0, y0, x1, y1, h) {
   // also a solid for walking/driving collision (anything well above kerb height)
   if (world.solids && h > 0.7) world.solids.push([x0, y0, x1, y1, h]);
-  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(MAP, Math.ceil(y1)); y++)
-    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(MAP, Math.ceil(x1)); x++) {
-      const i = y * MAP + x;
+  for (let y = Math.max(0, Math.floor(y0)); y < Math.min(MAPY, Math.ceil(y1)); y++)
+    for (let x = Math.max(0, Math.floor(x0)); x < Math.min(MAPX, Math.ceil(x1)); x++) {
+      const i = y * MAPX + x;
       if (world.heights[i] < h) world.heights[i] = h;
     }
 }
