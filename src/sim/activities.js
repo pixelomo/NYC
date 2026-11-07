@@ -45,7 +45,7 @@ export class Activities {
     const day = h > 7.5 && h < 20.5;
     const mk = (role, kind, node, x, y, dur, z = CURB) => {
       const p = P.create(role);
-      p.home = P.pickHome();
+      p.home = P.pickHome(p.x, p.y);
       p.node = node;
       p.x = x; p.y = y; p.z = z;
       p.plan = [{ t: 'go', node: p.home, thought: 'Heading home' }, { t: 'enter' }];
@@ -53,6 +53,26 @@ export class Activities {
       if (kind && !this.join(p, kind, dur)) { p.state = 'idle'; p.timer = 0.1; }
       return p;
     };
+    // a crowd already sitting out on the red steps in Times Square
+    const steps = this.city.world.benches.filter((b) => b.steps);
+    if (steps.length && !env.raining && !(s === 3 && env.snowCover > 0.3) && h > 8.5 && h < 23.5) {
+      const n = Math.round(steps.length * 3 * (h > 18 ? 0.4 : 0.28));
+      for (let k = 0; k < n; k++) {
+        const b = r.pick(steps), i = b.used.findIndex((u) => !u);
+        if (i < 0) continue;
+        const seat = b.seats[i], entry = poi.benches.find((e) => e.bench === b);
+        const p = P.create(r.pick(['tourist', 'tourist', 'resident', 'worker', 'kid', 'elder']));
+        p.x = seat.x; p.y = seat.y; p.z = seat.z;
+        p.node = entry ? entry.node : P.nearestOf(P.nav.nodes, seat.x, seat.y);
+        p.home = P.pickHome(seat.x, seat.y);
+        p.plan = [{ t: 'go', node: P.nearestOf(poi.subways, seat.x, seat.y), thought: 'Seen enough lights for one day' }, { t: 'enter' }];
+        b.used[i] = p.id; p.seat = { b, k: i };
+        p.state = 'sit'; p.anim = 'sit'; p.timer = r.range(15, 120);
+        p.thought = r.pick(['People watching', 'So many screens!', 'Best seat in the city', 'Waiting for the show']);
+        P.faceSeat(p);
+        P.list.push(p);
+      }
+    }
     const C = this.court;
     if (C && day && !env.raining && !(s === 3 && env.snowCover > 0.3)) {
       const n = s === 1 ? r.int(5, 7) : r.int(3, 4);

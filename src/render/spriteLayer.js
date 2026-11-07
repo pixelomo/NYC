@@ -2,6 +2,7 @@
 
 import { createProgram } from '../core/gl.js';
 import { T, LIGHT_EXT } from '../world/layout.js';
+import { DEPTH_RANGE } from './camera.js';
 
 const TX = T.toFixed(1);
 
@@ -22,6 +23,7 @@ uniform vec2 uBuf;
 uniform vec2 uRight; // world xy per art pixel along the screen's horizontal axis
 uniform float uK;    // buffer pixels per art pixel (below 1 when zoomed far out)
 uniform float uSquash; // vertical scale of sprites on screen (bird's-eye shows heights at half size)
+uniform float uBiasK;  // depth biases are authored for a 200-unit depth range
 out vec2 vUV;
 flat out vec4 vInfo;
 out vec3 vWorld;   // on the vertical axis through the anchor
@@ -41,7 +43,7 @@ void main() {
   vInfo = vec4(iA.z, flags, iB.x, 0.0);
   vWorld = iPos + vec3(0.0, 0.0, (iA.y - aCorner.y * h) / ${TX});
   vWorldR = vWorld + vec3(uRight * (aCorner.x * w - ax), 0.0);
-  gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y, 1.0);
+  gl_Position = vec4(sp / uBuf * 2.0 - 1.0, c.z - iB.y * uBiasK, 1.0);
 }`;
 
 const FS = HEAD + `
@@ -230,6 +232,7 @@ export class SpriteLayer {
     gl.uniform2fv(u.uRight, ctx.right);
     gl.uniform1f(u.uK, ctx.k);
     gl.uniform1f(u.uSquash, ctx.squash ?? 1);
+    gl.uniform1f(u.uBiasK, 200 / DEPTH_RANGE);
     gl.uniform2fv(u.uDither, ctx.ditherOff);
     gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0);
     gl.uniform3fv(u.uSunDir, e.sunDir);

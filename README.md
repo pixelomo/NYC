@@ -22,13 +22,18 @@ npm run build
 
 ## What's in the city
 
-- **6×6 blocks** of Manhattan/Brooklyn-style city on a floating diorama slab: a big
-  **central park** fills the middle four blocks, twelve mixed blocks surround it, and an outer
-  ring of twenty more — mostly red-brick apartment houses, plus shopping streets and a mini
-  **Times Square**. Pick a place from the **GO TO** menu to glide there, or press **V** for a
-  bird's-eye view (top-down, tilted just enough to show the building fronts). The slab's
-  cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver
-  trains loop around the city and stop at a tiled station with passengers waiting on the platform.
+![The whole city from above: Midtown's towers and Times Square, Central Park, the Financial District, the East River, the Brooklyn Bridge and the Statue of Liberty](docs/city.png)
+
+- **12×12 blocks** of Manhattan-style city on a floating diorama slab, laid out roughly like the
+  real island: **Central Park** fills four blocks uptown between brownstone and walk-up streets,
+  Midtown packs in the towers, landmarks and a four-block **Times Square**, the Village, SoHo-style
+  lofts and **Chinatown** sit below it, and the Financial District fills the southern tip. The
+  **East River** runs down the east side past a granite quay, with the **Brooklyn Bridge** striding
+  out over it and the **Statue of Liberty** on her island at the harbour mouth. Pick a place from
+  the **GO TO** menu to glide there, or press **V** for a bird's-eye view (top-down, tilted just
+  enough to show the building fronts). The slab's cross-section reveals soil, schist and utility
+  pipes — and a **subway tunnel** where silver trains loop around the city and stop at a tiled
+  station with passengers waiting on the platform.
   - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
     colours, a blue glass curtain-wall tower, a dark bronze modernist tower with plaza fountains,
     a limestone office with a copper roof, and a hotel with a vertical neon sign and marquee
@@ -44,15 +49,44 @@ npm run build
     jewellery, bakery, records, sports…) with window displays, awnings, sandwich boards and
     district banners on the lamp posts, and a limestone **department store** with lit display
     windows, revolving doors and flags
-- A mini **Times Square**: a paved pedestrian square with red bleacher steps (people sit on
-  them), café tables under umbrellas, carts and floodlights, a tower covered in video screens
-  with a crystal ball on its mast (it drops at midnight on winter nights, then fireworks), and
-  sign towers either side whose facades are stacked with animated screens, lit billboards and a
-  scrolling news ticker. All the ads are made up; at night the screens wash the square in colour.
+- **Landmarks**, each built from the same pixel kit as the rest of the town (and each on the
+  GO TO menu):
+  - an **Empire State**-style art-deco tower with five setbacks, full-height aluminium piers, a
+    crown lit in seasonal colours and the mooring mast on top — the tallest thing in Midtown
+  - a **Chrysler**-style tower: white brick, steel eagles at the setback, a crown of stacked
+    stainless sunbursts with triangular windows, and the needle spire
+  - **One World Trade Center**, its square glass shaft twisting into eight triangular facets as
+    it rises to a parapet and a long spire
+  - **Rockefeller Center**: the limestone slab over the sunken plaza (fountains in summer, a rink
+    in winter) with the golden statue, a ring of flags, and the big tree at Christmas
+  - the **Flatiron** wedge on its triangular lot, prow pointing up the avenue, beside a plaza with
+    tables and a sidewalk clock
+  - **Grand Central**'s Beaux-Arts front (three great arched windows, the clock and sculpture on
+    top) with the office slab rising behind it
+  - the **Public Library**, a marble palace behind wide steps and two stone lions, with **Bryant
+    Park**'s lawn, gravel walks, plane trees, benches and fountain behind it
+  - an **arena**: a great drum of concrete fins on a glass podium wrapped in marquee screens
+  - the **Stock Exchange**'s temple front — six giant columns, a sculpted pediment and a huge flag
+  - **Washington Square**: lawns, paths, the round fountain and the white marble arch
+  - **Chinatown**: red-and-gold shopfronts (dumplings, tea, herbs, seafood, bakeries), red
+    lanterns strung along the street and a gate with a green-tiled roof
+  - the **Brooklyn Bridge**: a granite abutment at the quay, a deck with a raised boardwalk running
+    through the Gothic stone tower, and the main cables sweeping down with their suspenders and web
+    of diagonal stays
+  - the **Statue of Liberty** on a grassy island with the star-shaped fort and granite pedestal,
+    torch held high, floodlit at night
+- **Times Square** takes over four blocks: the streets inside are closed to traffic and paved
+  into one pedestrian plaza, ringed by towers whose facades are stacked with animated screens, lit
+  billboards and a scrolling news ticker. Its south-east corner is left open as a square of its
+  own, where red bleacher steps rise behind a ticket booth, crowded with people taking in the
+  lights, among café tables, planters, carts and floodlights. A bronze statue stands at the north
+  end and a tower with a crystal ball on its mast at the south end (the ball drops at midnight on
+  winter nights, then fireworks). The city opens on this view. All the ads are made up; at night
+  the screens wash the square in colour.
 - A **basketball court** with chain-link fence, hoops and floodlights, a playground with a swing
   set (kids pump the swings on their chains), a slide with a ladder, deck and roof, a sprinkler,
   and a handball wall with a mural.
-- The **park** (across the road from the court) takes over the streets between its four blocks:
+- **Central Park** takes over the streets between its four blocks:
   a stone wall with gate pillars, a loop drive for joggers, an elm-lined promenade leading to a
   tiered fountain on a paved terrace, a mown oval Great Lawn, a lake with an island, rocky
   shores, a boat dock and rowboats (an ice rink in winter), a statue garden with formal flower
@@ -124,8 +158,10 @@ nearest the middle of the screen; the camera switches to the bird's-eye view and
   off, from four they ram. Crimes the police don't see still get reported by witnesses a few
   seconds later. Cars pull up and officers jump out to chase you on foot, guns drawn; if they
   grab you (or their cars box you in) you're **BUSTED** and released across town with a clean
-  slate. Break line of sight and keep out of view; when the stars start blinking they're
-  searching, and if they don't find you, you've lost them.
+  slate. Break line of sight and keep out of view (a low wall or a bench won't hide you); when the
+  stars start blinking they're searching, and if they don't find you, you've lost them. Hide
+  somewhere a car can't reach — inside the park walls, up on a plaza — and the patrol car parks as
+  close as it can get while its crew comes in after you on foot.
 - **Esc** (or **P**) hands the person back to their day.
 
 ## Controls
@@ -137,7 +173,7 @@ nearest the middle of the screen; the camera switches to the bird's-eye view and
 | `Q` / `E` | Rotate the view 90° |
 | Click a person | Follow them (see their name and what they're thinking) |
 | `WASD` / arrows | Pan |
-| GO TO menu | Glide to the park, the lake, Times Square, the court… |
+| GO TO menu | Glide to the park, Times Square, the landmarks, the bridge, the statue… |
 | `V` | Bird's-eye / isometric view |
 | `P` | Play as someone (see Play mode) |
 | Click / `Space` / `R` (playing) | Shoot / shoot on foot or handbrake in a car / reload |
@@ -162,6 +198,11 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
+  `layout.js` is the 12×12 block map (with merged regions for Central Park and Times Square and
+  the river column), `landmarks.js` and `timessq.js` build the one-off places. To keep the big map
+  quick to build and light on memory, ordinary blocks come in a few seeded variants per type whose
+  atlas art is painted once and reused, and the ground is painted at half the art resolution with
+  the fine grain added back in the shader.
 - `src/render/sprites.js` – palette-indexed sprites: one person template covers every skin, hair
   and clothing colour (26×42-pixel figures with faces, hairstyles, hats, coats, bags and a shaded
   outline); trees swap palettes per season (leaves hide in winter, revealing branches).
@@ -175,7 +216,9 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/render/decalLayer.js` – flat marks on the ground (blood pools that spread, splatter, scorch
   marks) as instanced quads lying on the ground plane, lit like everything else.
 - `src/sim/` – environment (clock, sun, seasons, weather), traffic, pedestrians and navigation,
-  activities, animals and particles; `vehicles.js` is the car physics (boxes with momentum and
+  activities, animals and particles. The simulation keeps its detail around where you're looking
+  (or who you're playing): people and cars appear nearby and quietly retire far off-screen, so the
+  whole city stays alive without simulating every street at once. `vehicles.js` is the car physics (boxes with momentum and
   spin, tyre grip, wall contacts from the collision grid, separating-axis contacts with impulses
   between cars, damage, fire and explosions) and `player.js` the play mode (driving, the pistol,
   the wanted level, police in cars and on foot).

@@ -1071,6 +1071,7 @@ export function paintRat(sp, f) {
 
 // ---------------------------------------------------------------------------
 // PROPS (generic slot colours supplied by a shared palette row)
+const PI = Math.PI;
 export function buildPropSprites(atlas) {
   const A = atlas;
   A.add('dish', 16, 18, (sp) => {
@@ -1138,6 +1139,91 @@ export function buildPropSprites(atlas) {
       x += wdt + 2;
     }
   });
+  // ---- landmark statues ----
+  // The Statue of Liberty: copper-green gown in folds, the stola across the body, the tablet in her
+  // left arm, the torch held high in her right (its flame glows at night), the seven-rayed crown.
+  A.add('liberty', 64, 184, (sp) => {
+    const G = S.C1, D = S.C2, Lt = S.C3, F1 = S.C4, F2 = S.C5, Tb = S.C6;
+    const g = 183;
+    // gown from the bust to the hem, widening, with drapery folds; lit left edge, shadowed right
+    for (let y = 66; y <= g; y++) {
+      const t = (y - 66) / (g - 66);
+      const half = 10 + t * 7, cx = 33 + Math.sin(t * 2.2) * 1.2;
+      for (let x = Math.floor(cx - half); x <= Math.ceil(cx + half); x++) {
+        const u = (x - (cx - half)) / (2 * half);
+        const fold = Math.sin(u * 17 + t * 5 + Math.sin(t * 9) * 0.6);
+        let slot = G, sh = 126;
+        if (fold > 0.82) { slot = Lt; sh = 136; } else if (fold < -0.78) { slot = D; sh = 112; }
+        if (u < 0.1) { slot = Lt; sh = 132; } else if (u > 0.9) { slot = D; sh = 104; }
+        if (y > g - 3) { slot = D; sh = 110; }
+        sp.set(x, y, slot, sh);
+      }
+    }
+    // the stola, draped from the left shoulder across to the right hip
+    for (let k = 0; k < 46; k++) for (let w = 0; w < 6; w++) sp.set(Math.round(26 + k * 0.42 + w), 70 + k, w < 2 ? Lt : w > 4 ? D : G, w < 2 ? 140 : 120);
+    // shoulders, neck and head
+    for (let y = 58; y < 70; y++) for (let x = 22; x < 45; x++) if (((x + 0.5 - 33) / 11.5) ** 2 + ((y + 0.5 - 70) / 11) ** 2 <= 1) sp.set(x, y, x < 28 ? Lt : x > 39 ? D : G, 128);
+    for (let y = 52; y < 59; y++) for (let x = 30; x < 36; x++) sp.set(x, y, x < 32 ? Lt : G, 124);
+    for (let y = 40; y < 54; y++) for (let x = 27; x < 39; x++) if (((x + 0.5 - 33) / 5.6) ** 2 + ((y + 0.5 - 47) / 6.8) ** 2 <= 1) sp.set(x, y, x < 31 ? Lt : x > 36 ? D : G, x < 31 ? 136 : 122);
+    sp.set(31, 46, D, 100); sp.set(35, 46, D, 100); sp.set(33, 48, D, 110); sp.set(32, 51, D, 104); sp.set(33, 51, D, 104);
+    // the crown: a band and seven rays
+    for (let x = 27; x < 39; x++) { sp.set(x, 40, Lt, 140); sp.set(x, 41, G, 122); }
+    for (let k = 0; k < 7; k++) {
+      const a = PI * (1.12 + (k / 6) * 0.76);
+      for (let r = 0; r < 10; r++) sp.set(Math.round(33 + Math.cos(a) * (5 + r)), Math.round(41 + Math.sin(a) * (5 + r)), r < 6 ? G : Lt, 132);
+    }
+    // raised right arm (on our left) up to the torch
+    for (let y = 16; y < 64; y++) {
+      const t = (y - 16) / 48, x = 17 + t * 8;
+      for (let w = -3; w <= 2; w++) sp.set(Math.round(x + w), y, w < -1 ? Lt : w > 1 ? D : G, 126);
+    }
+    for (let y = 14; y < 19; y++) for (let x = 14; x < 21; x++) sp.set(x, y, x < 16 ? Lt : G, 130);
+    // the torch: a cup on a handle, and the flame
+    for (let y = 6; y < 14; y++) for (let x = 15; x < 21; x++) sp.set(x, y, y < 8 ? Lt : D, y < 8 ? 150 : 116);
+    for (let y = 0; y < 8; y++) for (let x = 12; x < 24; x++) {
+      const dx = (x + 0.5 - 18) / 4.2, dy = (y + 0.5 - 5) / 5;
+      const d = dx * dx + dy * dy;
+      if (d <= 1) sp.set(x, y, d < 0.35 ? F1 : F2, d < 0.35 ? 150 : 128);
+    }
+    // left arm bent, holding the tablet against the body (on our right)
+    for (let y = 70; y < 84; y++) for (let x = 41; x < 46; x++) sp.set(x, y, x > 44 ? D : G, 120);
+    for (let y = 72; y < 102; y++) for (let x = 0; x < 10; x++) {
+      const xx = Math.round(43 + x - (y - 72) * 0.12);
+      sp.set(xx, y, Tb, x === 0 ? 146 : x === 9 ? 104 : 124);
+    }
+    for (let x = 0; x < 9; x++) sp.set(Math.round(43 + x - 3), 98, D, 96);
+  }, 32, 183);
+  // a stone lion lying on its plinth, head up, as at the library steps
+  A.add('lion', 48, 32, (sp) => {
+    const G = S.C1, D = S.C2, Lt = S.C3;
+    for (let y = 16; y < 30; y++) for (let x = 4; x < 40; x++) if (((x + 0.5 - 22) / 18) ** 2 + ((y + 0.5 - 25) / 6.5) ** 2 <= 1) sp.set(x, y, y < 21 ? Lt : x > 32 ? D : G, 126);
+    for (let x = 30; x < 46; x++) for (let y = 27; y < 31; y++) sp.set(x, y, y === 27 ? Lt : G, 120);
+    for (let y = 4; y < 22; y++) for (let x = 28; x < 46; x++) if (((x + 0.5 - 37) / 8.5) ** 2 + ((y + 0.5 - 13) / 9) ** 2 <= 1) sp.set(x, y, (x + y) % 3 === 0 ? D : x < 33 ? Lt : G, 128);
+    for (let y = 9; y < 19; y++) for (let x = 38; x < 46; x++) if (((x + 0.5 - 42) / 4) ** 2 + ((y + 0.5 - 14) / 5) ** 2 <= 1) sp.set(x, y, x < 40 ? Lt : G, 136);
+    sp.set(41, 12, D, 90); sp.set(44, 15, D, 100); sp.set(43, 17, D, 100);
+    for (let x = 1; x < 6; x++) sp.set(x, 22 - (x >> 1), D, 110);
+    for (let x = 0; x < 48; x++) sp.set(x, 31, D, 96);
+  }, 24, 31);
+  // the golden statue over the sunken plaza: a figure flying with fire, before a ring
+  A.add('goldStatue', 48, 40, (sp) => {
+    const G = S.C1, D = S.C2, Lt = S.C3;
+    for (let k = 0; k < 120; k++) {
+      const a = PI * (0.85 + (k / 120) * 1.3), x = Math.round(24 + Math.cos(a) * 20), y = Math.round(30 + Math.sin(a) * 20);
+      sp.set(x, y, G, 120); sp.set(x, y + 1, D, 100);
+    }
+    for (let y = 18; y < 28; y++) for (let x = 8; x < 38; x++) if (((x + 0.5 - 23) / 14) ** 2 + ((y + 0.5 - 23) / 4) ** 2 <= 1) sp.set(x, y, y < 21 ? Lt : x > 30 ? D : G, 130);
+    for (let y = 14; y < 22; y++) for (let x = 34; x < 42; x++) if (((x + 0.5 - 38) / 3.6) ** 2 + ((y + 0.5 - 18) / 3.8) ** 2 <= 1) sp.set(x, y, x < 37 ? Lt : G, 134);
+    for (let k = 0; k < 10; k++) sp.set(12 - k * 0.3 | 0, 20 - k, G, 128);
+    for (let y = 4; y < 11; y++) for (let x = 7; x < 14; x++) if (((x + 0.5 - 10.5) / 3) ** 2 + ((y + 0.5 - 7) / 3.5) ** 2 <= 1) sp.set(x, y, S.C4, 150);
+    for (let x = 20; x < 30; x++) sp.set(x, 39, D, 110);
+  }, 24, 39);
+  // a red paper lantern with gold caps and a tassel
+  A.add('redLantern', 12, 18, (sp) => {
+    for (let y = 2; y < 13; y++) for (let x = 0; x < 12; x++) if (((x + 0.5 - 6) / 6) ** 2 + ((y + 0.5 - 7.5) / 5.5) ** 2 <= 1) sp.set(x, y, (x + 1) % 4 === 0 ? S.C2 : S.C1, x < 4 ? 146 : 124);
+    for (let x = 3; x < 9; x++) { sp.set(x, 1, S.C3, 140); sp.set(x, 13, S.C3, 120); }
+    sp.set(6, 0, S.C3, 110);
+    for (let y = 14; y < 18; y++) sp.set(6, y, S.C3, 120 - (y - 14) * 6);
+  }, 6, 0);
   A.add('statue', 32, 40, (sp) => {
     // equestrian bronze: prancing horse and rider pointing ahead, patina green with gilded trim
     const c = S.C9;

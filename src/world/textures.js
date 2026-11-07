@@ -72,5 +72,17 @@ export function makeBaseTextures(atlas) {
     // bottom edge
     p.rect(0, H - 2, W, 2, 0x2a2f35);
   });
+  // granite quay wall along the river: big dressed blocks, a dark tide line and a little moss
+  tex.quay = atlas.shared('quay', 128, 16, (p) => {
+    for (let y = 0; y < 16; y++)
+      for (let x = 0; x < 128; x++) {
+        const row = y >> 3, off = row % 2 ? 16 : 0;
+        const bx = Math.floor((x + off) / 32);
+        let c = shade(mixc(0x8a8478, 0x7a756a, hash2i(bx, row, 41)), 0.94 + hash2i(x, y, 42) * 0.1);
+        if (y % 8 === 0 || (x + off) % 32 === 0) c = 0x55524a;
+        if (y >= 12) c = mixc(c, y >= 14 ? 0x2a3a30 : 0x3e5a3a, 0.6);
+        p.set(x, y, c);
+      }
+  });
   return tex;
 }

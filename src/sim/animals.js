@@ -133,6 +133,7 @@ export class Animals {
   updatePigeons(dt) {
     const people = this.city.people?.list || [];
     const cars = this.city.traffic.cars;
+    const P = this.city.people, V = this.city.vehicles && this.city.vehicles.grid.size ? this.city.vehicles : null;
     const audio = this.city.audio;
     const env = this.city.env;
     for (const fl of this.flocks) {
@@ -213,8 +214,8 @@ export class Animals {
       if (pg.mode === 'peck') { pg.anim = 'peck'; pg.f = Math.floor(pg.t * 4 + pg.x) % 2; }
       // scare
       let scared = false;
-      for (const p of people) if (p.state === 'walk' && dist2(p.x, p.y, pg.x, pg.y) < 0.8) { scared = true; break; }
-      if (!scared) for (const c of cars) if (c.v > 1 && dist2(c.x, c.y, pg.x, pg.y) < 2.2) { scared = true; break; }
+      for (const p of P ? P.near(pg.x, pg.y, 0.9) : people) if (p.state === 'walk' && dist2(p.x, p.y, pg.x, pg.y) < 0.8) { scared = true; break; }
+      if (!scared) for (const c of V ? V.carsNear(pg.x, pg.y) : cars) if (Math.abs(c.v) > 1 && dist2(c.x, c.y, pg.x, pg.y) < 2.2) { scared = true; break; }
       if (scared) {
         audio?.event('flutter', pg);
         const perch = this.rng.chance(0.4) ? this.perchFor(pg) : null;
@@ -299,7 +300,7 @@ export class Animals {
     for (const s of this.squirrels) {
       s.t += dt;
       if (env.season === 3 && env.snowCover > 0.5) continue;
-      const near = people.some((p) => dist2(p.x, p.y, s.x, s.y) < 1.2);
+      const near = this.city.people ? this.city.people.near(s.x, s.y, 1.1).length > 0 : people.some((p) => dist2(p.x, p.y, s.x, s.y) < 1.2);
       if (s.state === 'stand') {
         if (near || this.rng.chance(dt * 0.4)) {
           s.state = 'run';

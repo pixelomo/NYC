@@ -209,6 +209,16 @@ export class Vehicles {
       l.push(c);
     }
   }
+  // cars in the grid cells around (x, y) (the grid is rebuilt every frame by contacts())
+  carsNear(x, y) {
+    const out = [], cx = Math.floor(x / 4), cy = Math.floor(y / 4);
+    for (let gx = cx - 1; gx <= cx + 1; gx++)
+      for (let gy = cy - 1; gy <= cy + 1; gy++) {
+        const l = this.grid.get((gx << 16) | gy);
+        if (l) for (const c of l) out.push(c);
+      }
+    return out;
+  }
   contacts() {
     this.buildGrid();
     const done = new Set();

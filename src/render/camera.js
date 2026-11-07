@@ -10,7 +10,8 @@ const BS = T, BZ = T / 2; // bird's-eye: px per unit on the ground, px per unit 
 import { clamp, easeInOut } from '../core/math.js';
 
 const CX = MAP / 2, CY = MAP / 2;
-export const DEPTH_RANGE = 200;
+// depth (world units either side of the map centre) mapped onto clip space: the whole diorama must fit
+export const DEPTH_RANGE = Math.max(200, MAP * 1.3);
 
 export class Camera {
   constructor() {

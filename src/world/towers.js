@@ -7,7 +7,7 @@ import { shade, mixc, hash2i } from '../core/math.js';
 import { PAL, stoneFill, brickFill, smoothFill, drawWindow, drawDoor, corniceBand, signBoard, drawShopfront, drawGate, glassDay } from './facades.js';
 import { sharedTex, markHeight, waterTower, fireEscape, roofClutter, Frame, hvac, bladeSign } from './buildings.js';
 
-function region(C, w, h, paint) {
+export function region(C, w, h, paint) {
   const r = C.atlas.alloc(w, h);
   paint(r.p, r);
   return r;
@@ -15,7 +15,7 @@ function region(C, w, h, paint) {
 
 let seedCounter = 1;
 // A tiled tower section: all four sides share a floor module texture
-function section(C, x0, y0, x1, y1, z0, z1, side, top, opt = {}) {
+export function section(C, x0, y0, x1, y1, z0, z1, side, top, opt = {}) {
   const seed = opt.seed ?? (seedCounter++ % 250) + 1;
   const mat = opt.mat ?? MAT.OFFICE;
   const f = { t: side, mat, seed };
@@ -27,7 +27,7 @@ function section(C, x0, y0, x1, y1, z0, z1, side, top, opt = {}) {
 }
 
 // Unique band around a box (lobby, crown) painted per face by fn(p, w, h, faceIndex)
-function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
+export function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
   const h = Math.round((z1 - z0) * T);
   const wx = Math.round((x1 - x0) * T), wy = Math.round((y1 - y0) * T);
   const faces = {};
@@ -41,7 +41,7 @@ function band(C, x0, y0, x1, y1, z0, z1, fn, top, opt = {}) {
   markHeight(C.world, x0, y0, x1, y1, z1);
 }
 
-function beacon(C, x, y, z) {
+export function beacon(C, x, y, z) {
   C.world.beacons.push({ x, y, z });
 }
 
@@ -145,7 +145,7 @@ export function decoTower(C, L) {
   plaza(C, L, { x0: cx - 8, y0: cy - 8, x1: cx + 8, y1: cy + 8 });
 }
 
-function lobbyDoors(cx, cy, rx, ry) {
+export function lobbyDoors(cx, cy, rx, ry) {
   return [
     { x: cx, y: cy + ry + 0.9, dx: cx, dy: cy + ry - 0.2, kind: 'office' },
     { x: cx + rx + 0.9, y: cy, dx: cx + rx - 0.2, dy: cy, kind: 'office' },
@@ -424,7 +424,7 @@ export function loft(C, fr, a0, W, D, o = {}) {
 
 // ---------------------------------------------------------------------------
 // Plaza dressing around a tower footprint
-function plaza(C, L, tower, o = {}) {
+export function plaza(C, L, tower, o = {}) {
   const { rng } = C;
   C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
   // benches + planters + trees on the plaza edge (south and east sides are the most visible)

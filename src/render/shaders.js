@@ -167,12 +167,18 @@ void main() {
 
   if (ground) {
     int g = int(code);
+    // the ground texture has half the art's resolution: put back the fine grain, per art texel
+    if (uGroundScale < 0.99) {
+      float fg = hash12(floor(vWorld.xy * 32.0) + 17.0);
+      if (g == 1 || g == 2 || g == 6 || g == 7 || g == 9 || g == 11 || g == 16 || g == 17 || g == 21 || g == 22) albedo *= 0.965 + fg * 0.07;
+      else if (g == 8) albedo *= 0.93 + fg * 0.14;
+    }
     float n1 = nz(tp * 0.11);
     float n2 = hash12(floor(vWorld.xy * 16.0));
     float n3 = nz(tp * 0.035 + 0.3);
-    // water
-    if (g == 15) {
-      if (uIce > 0.5) {
+    // water (15: ponds and fountains, which freeze; 25: the river, which never does)
+    if (g == 15 || g == 25) {
+      if (uIce > 0.5 && g == 15) {
         albedo = mix(vec3(0.78, 0.88, 0.95), vec3(0.92, 0.96, 1.0), step(0.6, n1));
         if (hash12(floor(vWorld.xy * 32.0)) < 0.04) albedo *= 0.85;
       } else {
@@ -230,6 +236,8 @@ void main() {
         cover = uSnow * (0.35 + 0.6 * n3);
       } else if (g == 15) {
         cover = uIce > 0.5 ? uSnow * 0.3 : 0.0;
+      } else if (g == 25) {
+        cover = 0.0;
       } else {
         cover = uSnow * 1.25;
       }

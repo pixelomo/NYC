@@ -331,3 +331,29 @@ export class ShelfPacker {
     return r;
   }
 }
+
+// A painter addressed at twice its page's resolution: callers paint as if the page were full size
+// and every call lands on the matching texel of the half-size page (one-texel details survive as a
+// single texel). Lets the 32-texels-per-unit ground code paint a 16-texels-per-unit ground, which
+// is what keeps the big city's ground texture inside GPU limits.
+export class HalfPainter extends Painter {
+  constructor(page) {
+    super(page, 0, 0, page.w * 2, page.h * 2);
+    this.half = true;
+  }
+  sub() { throw new Error('HalfPainter.sub is not supported'); }
+  idx(x, y) {
+    return ((y >> 1) * this.page.w + (x >> 1)) * 4;
+  }
+  rect(x, y, w, h, c, a = 255) {
+    x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
+    const x0 = Math.max(0, x), y0 = Math.max(0, y);
+    const x1 = Math.min(this.w, x + w), y1 = Math.min(this.h, y + h);
+    if (x1 <= x0 || y1 <= y0) return;
+    const d = this.page.data, r = (c >> 16) & 255, g = (c >> 8) & 255, b = c & 255, W = this.page.w;
+    for (let Y = y0 >> 1; Y < (y1 + 1) >> 1; Y++) {
+      let i = (Y * W + (x0 >> 1)) * 4;
+      for (let X = x0 >> 1; X < (x1 + 1) >> 1; X++, i += 4) { d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = a; }
+    }
+  }
+}

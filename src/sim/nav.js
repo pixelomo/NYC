@@ -262,6 +262,9 @@ export function buildNav(world) {
       }
     }
   }
+  // landmarks tourists come to photograph
+  poi.landmarks = [];
+  for (const l of world.landmarks || []) { const sw = G.attach(l.x, l.y, 5); if (sw) poi.landmarks.push(sw); }
   // other benches (plazas, bus shelters): attach to sidewalk
   for (const b of world.benches) {
     if (poi.benches.some((p) => p.bench === b)) continue;

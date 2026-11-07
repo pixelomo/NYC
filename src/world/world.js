@@ -2,19 +2,21 @@
 
 import { Atlas } from './atlas.js';
 import { MeshBuilder } from './mesh.js';
-import { MAP, T, NB, BLOCK_TYPES } from './layout.js';
+import { MAP, T, GT, NB, BLOCK_TYPES } from './layout.js';
 import { paintGround, buildGroundGeometry, buildSlabSides } from './ground.js';
 import { makeBaseTextures } from './textures.js';
 import { makeContext, buildBlocks } from './blocks.js';
 import { RNG } from '../core/math.js';
-import { Page, Painter } from '../core/painter.js';
+import { Page, HalfPainter } from '../core/painter.js';
 
 export function buildWorld(seed = 1977, progress = () => {}) {
   const rng = new RNG(seed);
   const atlas = new Atlas(2048);
-  // the ground gets its own texture (MAP*T texels square)
-  const groundPage = new Page(MAP * T, MAP * T);
-  const groundReg = { layer: 0, x: 0, y: 0, w: MAP * T, h: MAP * T, p: new Painter(groundPage, 0, 0, MAP * T, MAP * T), page: groundPage };
+  // the ground gets its own texture, at GT texels per unit; it is painted at T texels per unit
+  // through a half-resolution painter
+  const groundPage = new Page(MAP * GT, MAP * GT);
+  groundPage.scale = GT / T;
+  const groundReg = { layer: 0, x: 0, y: 0, w: MAP * T, h: MAP * T, p: new HalfPainter(groundPage), page: groundPage, scale: GT / T };
   const prof = [], tick = (name) => prof.push([name, performance.now()]);
   tick('start');
   progress('Paving streets');
@@ -22,7 +24,7 @@ export function buildWorld(seed = 1977, progress = () => {}) {
   tick('ground');
   const tex = makeBaseTextures(atlas);
   const mb = new MeshBuilder();
-  buildGroundGeometry(mb, groundReg, tex);
+  buildGroundGeometry(mb, groundReg, tex, tex.quay);
   buildSlabSides(mb, atlas, tex);
 
   const world = {

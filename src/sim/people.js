@@ -133,7 +133,25 @@ export class People {
   }
   // ---- planning ---------------------------------------------------------------
   poi() { return this.nav.poi; }
-  pickHome() { return this.rng.pick(this.poi().homes); }
+  // a random pick from list (nodes, or {node} entries) within r of (x, y); the nearest if none is
+  // that close. On the big map this keeps trips (and path searches) local.
+  pickNear(list, x, y, r = 50) {
+    if (!list || !list.length) return null;
+    const at = (n) => n.node || n.door || n;
+    const near = [];
+    for (const n of list) { const q = at(n); if ((q.x - x) ** 2 + (q.y - y) ** 2 < r * r) near.push(n); }
+    if (near.length) return this.rng.pick(near);
+    let best = list[0], bd = Infinity;
+    for (const n of list) { const q = at(n); const d = (q.x - x) ** 2 + (q.y - y) ** 2; if (d < bd) { bd = d; best = n; } }
+    return best;
+  }
+  pickHome(x, y, r = 50) {
+    if (x == null) { const f = this.city.focus(); x = f.x; y = f.y; }
+    return this.pickNear(this.poi().homes, x, y, r);
+  }
+  // is the park (or court) close enough to walk to from here?
+  parkNear(x, y) { const pc = this.city.world.parkCenter; return pc && dist2(pc.x, pc.y, x, y) < 75 * 75; }
+  courtNear(x, y) { const c = this.poi().court.gate; return c && dist2(c.x, c.y, x, y) < 75 * 75; }
   nearestOf(list, x, y) {
     let b = null, bd = Infinity;
     for (const n of list) { const d = dist2(n.x, n.y, x, y); if (d < bd) { bd = d; b = n; } }
@@ -141,12 +159,18 @@ export class People {
   }
   plan(p, kind) {
     const P = this.poi(), r = this.rng, env = this.env();
-    const shop = () => r.pick(P.shops);
-    const subway = () => r.pick(P.subways);
-    const office = () => r.pick(P.offices);
-    const home = p.home || this.pickHome();
+    const shop = () => this.pickNear(P.shops, p.x, p.y, 45);
+    const subway = () => this.pickNear(P.subways, p.x, p.y, 55);
+    const office = () => this.pickNear(P.offices, p.x, p.y, 55);
+    const home = p.home || this.pickHome(p.x, p.y);
     p.home = home;
     const go = (node, thought) => ({ t: 'go', node, thought });
+    // the park is a long way off on the big map: walk round the neighbourhood instead
+    if ((kind === 'park' || kind === 'dogwalk' || kind === 'jog' || kind === 'skate') && !this.parkNear(p.x, p.y)) {
+      const a = shop(), b = shop();
+      p.run = kind === 'jog';
+      return [go(a.sw || a, kind === 'dogwalk' ? `Walking ${p.dogName}` : kind === 'jog' ? 'Morning run' : 'Stretching my legs'), go(b.sw || b, 'Nice day for it'), go(home, 'Home'), { t: 'enter' }];
+    }
     switch (kind) {
       case 'commute': return [go(subway(), 'Running for the train'), { t: 'enter' }];
       case 'toWork': return [go(office(), 'Late for a meeting'), { t: 'enter' }];
@@ -160,17 +184,17 @@ export class People {
         return [go(s, 'Need coffee. Now.'), { t: 'shop', node: s, dur: r.range(5, 9) }, go(subway(), 'Off to work'), { t: 'enter' }];
       }
       case 'lunch': {
-        const c = r.pick(P.carts);
+        const c = this.pickNear(P.carts, p.x, p.y, 50);
         const steps = [];
         if (c) steps.push(go(c.node, `Lunch from the ${c.cart.kind} cart`), { t: 'idle', dur: r.range(4, 8), face: c.cart, thought: 'Chicken over rice, extra white sauce' });
-        const b = this.freeBench();
+        const b = this.freeBench(false, p.x, p.y);
         if (b) steps.push(go(b.node, 'Finding a bench'), { t: 'sit', bench: b, dur: r.range(18, 40), thought: 'Lunch in the sun' });
         steps.push(go(office(), 'Back to the grind'), { t: 'enter' });
         return steps;
       }
       case 'park': {
         const steps = [go(r.pick(P.park.paths || [home]), 'Walk in the park')];
-        const b = this.freeBench(true);
+        const b = this.freeBench(true, p.x, p.y);
         if (b && r.chance(0.65)) steps.push(go(b.node, 'Resting my feet'), { t: 'sit', bench: b, dur: r.range(20, 60), thought: p.elder ? 'Feeding the pigeons' : 'People watching', feed: p.elder });
         else if (env.season === 1 && P.park.lawnNodes?.length && env.hour > 10 && env.hour < 18 && !env.raining) steps.push(go(r.pick(P.park.lawnNodes), 'Sunbathing'), { t: 'activity', kind: 'lawn', dur: r.range(30, 70) });
         else steps.push(go(r.pick(P.park.paths), 'Strolling'), go(r.pick(P.park.paths), 'Strolling'));
@@ -194,27 +218,36 @@ export class People {
       case 'tourist': {
         const steps = [];
         const tsq = (P.squares && P.squares.tsq) || [];
-        const spots = [...(P.offices.slice(0, 4)), ...(P.park.ring || []), ...tsq, ...tsq];
-        for (let k = 0; k < 3; k++) steps.push(go(r.pick(spots).sw || r.pick(spots), 'Is that the famous one?'), { t: 'idle', dur: r.range(3, 6), anim: 'phone', thought: 'Taking a photo' });
+        const spots = [...(P.landmarks || []), ...(P.park.ring || []), ...tsq, ...tsq, ...P.offices];
+        for (let k = 0; k < 3; k++) {
+          const sp = this.pickNear(spots, p.x, p.y, 60);
+          steps.push(go(sp.sw || sp, 'Is that the famous one?'), { t: 'idle', dur: r.range(3, 6), anim: 'phone', thought: 'Taking a photo' });
+          // in Times Square: a sit on the red steps to take in the lights
+          if (tsq.includes(sp) && r.chance(0.55)) {
+            const free = P.benches.filter((e) => e.bench.steps && e.bench.used.some((u) => !u));
+            const e = free.length ? r.pick(free) : null;
+            if (e) steps.push(go(e.node, 'Up the red steps'), { t: 'sit', bench: e, dur: r.range(25, 75), thought: r.pick(['So many screens!', 'Best seat in the city', 'People watching']) });
+          }
+        }
         steps.push(go(subway(), 'Next stop: Times Square?'), { t: 'enter' });
         return steps;
       }
       case 'kidplay': return this.kidPlan(p);
       case 'stoop': {
-        const s = this.freeStoop();
+        const s = this.freeStoop(p.x, p.y);
         if (!s) return [go(home, 'Home'), { t: 'enter' }];
         return [go(s.door.sw || s.door, 'Hanging out on the stoop'), { t: 'stoop', seat: s, dur: r.range(40, 90) }, { t: 'enter' }];
       }
       case 'bus': {
-        const b = r.pick(P.busStops);
-        if (!b) return [go(subway()), { t: 'enter' }];
+        const b = this.pickNear(P.busStops, p.x, p.y, 50);
+        if (!b || dist2(b.node.x, b.node.y, p.x, p.y) > 60 * 60) return [go(subway()), { t: 'enter' }];
         return [go(b.node, 'Waiting for the bus'), { t: 'bus', stop: b.stop, dur: 120 }];
       }
       case 'night': return [go(r.chance(0.5) ? subway() : home, r.pick(['Long shift', 'One more slice', 'The city never sleeps'])), { t: 'enter' }];
       case 'trick': {
         const steps = [];
         for (let k = 0; k < 4; k++) {
-          const s = r.pick(P.stoops);
+          const s = this.pickNear(P.stoops, p.x, p.y, 40);
           if (s) steps.push(go(s.door.sw || s.door, 'Trick or treat!'), { t: 'idle', dur: 3, anim: 'wave', thought: 'Trick or treat!' });
         }
         steps.push(go(home, 'Counting candy'), { t: 'enter' });
@@ -223,7 +256,7 @@ export class People {
       case 'skate': return [go(P.park.pond || home, 'Ice skating!'), { t: 'activity', kind: 'skate', dur: r.range(40, 90) }, go(home, 'Hot chocolate time'), { t: 'enter' }];
       case 'wander':
       default:
-        return [go(r.pick(P.shops).sw || home, 'Just walking'), go(home, 'Home'), { t: 'enter' }];
+        return [go(shop().sw || home, 'Just walking'), go(home, 'Home'), { t: 'enter' }];
     }
   }
   kidPlan(p) {
@@ -231,6 +264,12 @@ export class People {
     const steps = [];
     const s = env.season;
     const A = this.activities;
+    if (!this.courtNear(p.x, p.y) && !this.parkNear(p.x, p.y)) {
+      const st = this.freeStoop(p.x, p.y);
+      if (st) return [{ t: 'go', node: st.door.sw || st.door, thought: 'Hanging out' }, { t: 'stoop', seat: st, dur: r.range(30, 70) }, { t: 'enter' }];
+      const sh = this.pickNear(P.shops, p.x, p.y, 40);
+      return [{ t: 'go', node: sh.sw || sh, thought: 'Candy run!' }, { t: 'go', node: p.home || this.pickHome(p.x, p.y), thought: 'Mom said be home by dark' }, { t: 'enter' }];
+    }
     if (s === 1 && A && env.hour > 12 && env.hour < 19.5 && A.hydrantOpen && r.chance(0.45)) {
       steps.push({ t: 'go', node: A.hydrantOpen.node, thought: 'Hydrant is open!!' }, { t: 'activity', kind: 'hydrant', dur: r.range(30, 60) });
     } else if (s === 3 && env.snowCover > 0.3) {
@@ -244,12 +283,14 @@ export class People {
     steps.push({ t: 'go', node: p.home || this.pickHome(), thought: 'Mom said be home by dark' }, { t: 'enter' });
     return steps;
   }
-  freeBench(parkOnly = false) {
-    const list = this.poi().benches.filter((b) => (!parkOnly || b.park) && b.bench.used.some((u) => !u));
+  freeBench(parkOnly = false, x, y) {
+    if (x == null) { const f = this.city.focus(); x = f.x; y = f.y; }
+    const list = this.poi().benches.filter((b) => (!parkOnly || b.park) && b.bench.used.some((u) => !u) && dist2(b.node.x, b.node.y, x, y) < 60 * 60);
     return list.length ? this.rng.pick(list) : null;
   }
-  freeStoop() {
-    const list = this.poi().stoops.filter((s) => !s.seat.used);
+  freeStoop(x, y) {
+    if (x == null) { const f = this.city.focus(); x = f.x; y = f.y; }
+    const list = this.poi().stoops.filter((s) => !s.seat.used && dist2(s.door.x, s.door.y, x, y) < 50 * 50);
     return list.length ? this.rng.pick(list) : null;
   }
   chooseKind(role) {
@@ -287,11 +328,19 @@ export class People {
     const P = this.poi(), r = this.rng;
     const h = this.env().hour;
     // pick a source node consistent with the plan
+    // (near where the action is: the crowd follows the camera round the big map)
+    const f = this.city.focus();
     let src;
-    if (role === 'worker' && (kind === 'lunch' || kind === 'commute')) src = r.pick(P.offices);
-    else if (role === 'worker' || role === 'tourist' || kind === 'goHome' || (kind === 'night' && r.chance(0.5))) src = r.pick(P.subways);
-    else src = this.pickHome();
-    if (kind === 'goHome') p.home = this.pickHome();
+    if (role === 'worker' && (kind === 'lunch' || kind === 'commute')) src = this.pickNear(P.offices, f.x, f.y, 60);
+    else if (role === 'worker' || role === 'tourist' || kind === 'goHome' || (kind === 'night' && r.chance(0.5))) src = this.pickNear(P.subways, f.x, f.y, 60);
+    else src = this.pickHome(f.x, f.y, 60);
+    if (anywhere) {
+      // start partway along the route
+      const ns = this.nav.nodes.filter((nn) => (nn.kind === 'walk' || nn.kind === 'corner' || nn.kind === 'park' || nn.kind === 'plaza') && dist2(nn.x, nn.y, f.x, f.y) < 75 * 75);
+      if (ns.length) src = r.pick(ns);
+    }
+    p.x = src.x; p.y = src.y; p.z = src.z;
+    if (kind === 'goHome') p.home = this.pickHome(src.x, src.y);
     else if (src.kind === 'door' && src.data?.kind === 'home') p.home = src;
     if (role === 'dogwalker') {
       p.dogName = r.pick(DOG_NAMES);
@@ -299,14 +348,9 @@ export class People {
     }
     p.plan = this.plan(p, kind);
     p.node = src;
-    p.x = src.x; p.y = src.y; p.z = src.z;
     p.state = 'appear';
     p.alpha = 0;
-    if (anywhere) {
-      // start partway along the route
-      const n = r.pick(this.nav.nodes.filter((nn) => nn.kind === 'walk' || nn.kind === 'corner' || nn.kind === 'park' || nn.kind === 'plaza'));
-      p.node = n; p.x = n.x; p.y = n.y; p.z = n.z; p.alpha = 1; p.state = 'idle'; p.timer = r.range(0, 0.5);
-    }
+    if (anywhere) { p.alpha = 1; p.state = 'idle'; p.timer = r.range(0, 0.5); }
     if (p.dog) { p.dog.x = p.x; p.dog.y = p.y; }
     this.list.push(p);
     return p;
@@ -400,8 +444,20 @@ export class People {
     // population
     const target = popTarget(env.hour) * this.weatherK();
     if (this.list.length < target) {
-      this.spawnAcc += dt * Math.min(6, (target - this.list.length) * 0.08 + 0.4);
+      this.spawnAcc += dt * Math.min(25, (target - this.list.length) * 0.15 + 0.4);
       while (this.spawnAcc > 1) { this.spawnAcc -= 1; this.spawn(false); }
+    }
+    // people far from the action and out of sight quietly go indoors (they are spawned near it)
+    this.lodT = (this.lodT || 0) - dt;
+    if (this.lodT <= 0) {
+      this.lodT = 0.5;
+      const f = this.city.focus(), view = this.city.view;
+      for (const p of this.list) {
+        if (p.dead || p.state === 'player' || p.state === 'cop' || p.state === 'vanish') continue;
+        if (dist2(p.x, p.y, f.x, f.y) < 100 * 100 || view.visible(p.x, p.y, p.z, 4)) continue;
+        this.detachPerson(p);
+        p.dead = true;
+      }
     }
     // spatial hash
     this.grid.clear();
@@ -632,7 +688,7 @@ export class People {
           p.anim = 'idle'; p.animFrame = null;
           if (p.wasCop) { p.state = 'cop'; p.wasCop = false; break; }
           p.node = this.nearestOf(this.nav.nodes, p.x, p.y); p.state = 'idle'; p.timer = 0.6;
-          if (!p.plan.length) p.plan = [{ t: 'go', node: p.home || this.pickHome(), thought: 'What a city...' }, { t: 'enter' }];
+          if (!p.plan.length) p.plan = [{ t: 'go', node: p.home || this.pickHome(p.x, p.y), thought: 'What a city...' }, { t: 'enter' }];
         }
         break;
       case 'dead': {

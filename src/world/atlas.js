@@ -2,6 +2,14 @@
 
 import { Page, Painter } from '../core/painter.js';
 
+// A painter over a region that is already painted: reads work, writes are dropped. Handed out
+// when a block variant replays the textures its first copy made.
+class ReplayPainter extends Painter {
+  set() {}
+  setA() {}
+  rect() {}
+}
+
 class BestFitShelves {
   constructor(w, h, pad = 1) {
     this.w = w;
@@ -43,11 +51,34 @@ export class Atlas {
     this.packers.push(new BestFitShelves(this.size, this.size, 1));
     return this.pages.length - 1;
   }
+  // Texture reuse between copies of the same block variant: the first copy records the regions it
+  // allocates (in order); a later copy built from the same seed asks for the same sizes in the same
+  // order and gets those regions back, already painted. Any mismatch ends the replay for that copy.
+  beginReplay(key) {
+    if (!this.records) this.records = new Map();
+    const rec = this.records.get(key);
+    if (rec) { this.replaying = rec; this.replayAt = 0; this.recording = null; this.replayed = (this.replayed || 0); }
+    else { this.recording = []; this.records.set(key, this.recording); this.replaying = null; }
+  }
+  endReplay() { this.recording = null; this.replaying = null; }
   // Allocate a w*h region. Returns { layer, x, y, w, h, p: Painter }
   alloc(w, h) {
     w = Math.max(1, Math.round(w));
     h = Math.max(1, Math.round(h));
     if (w > this.size || h > this.size) throw new Error(`atlas alloc too big ${w}x${h}`);
+    if (this.replaying) {
+      const r = this.replaying[this.replayAt++];
+      if (r && r.w === w && r.h === h) {
+        this.replayed++;
+        return { layer: r.layer, x: r.x, y: r.y, w, h, p: new ReplayPainter(this.pages[r.layer], r.x, r.y, w, h) };
+      }
+      this.replaying = null;
+    }
+    const out = this._alloc(w, h);
+    if (this.recording) this.recording.push({ layer: out.layer, x: out.x, y: out.y, w, h });
+    return out;
+  }
+  _alloc(w, h) {
     for (let i = 1; i < this.pages.length; i++) {
       const r = this.packers[i].alloc(w, h);
       if (r) return this._region(i, r);
@@ -69,7 +100,8 @@ export class Atlas {
   shared(key, w, h, paint) {
     let r = this.cache.get(key);
     if (!r) {
-      r = this.alloc(w, h);
+      // (shared regions sit outside block replays: a later copy finds them in the cache)
+      r = this._alloc(Math.max(1, Math.round(w)), Math.max(1, Math.round(h)));
       paint(r.p, r);
       this.cache.set(key, r);
     }

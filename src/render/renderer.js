@@ -90,7 +90,7 @@ export class Renderer {
     this.atlasTex = atlas.upload(gl);
     // ground: one big texture (world-space, T texels per unit); halve it if the GPU can't hold it
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    let gp = groundPage, scale = 1;
+    let gp = groundPage, scale = groundPage.scale || 1;
     if (gp.w > maxTex) {
       const h = new Uint8Array((gp.w >> 1) * (gp.h >> 1) * 4);
       for (let y = 0; y < gp.h >> 1; y++) for (let x = 0; x < gp.w >> 1; x++) {
@@ -98,7 +98,7 @@ export class Renderer {
         h[d] = gp.data[s]; h[d + 1] = gp.data[s + 1]; h[d + 2] = gp.data[s + 2]; h[d + 3] = gp.data[s + 3];
       }
       gp = { w: gp.w >> 1, h: gp.h >> 1, data: h };
-      scale = 0.5;
+      scale *= 0.5;
     }
     this.groundTex = makeTexture(gl, gp.w, gp.h, { data: gp.data });
     this.groundScale = scale;
@@ -171,14 +171,14 @@ export class Renderer {
     const grow = (p, a, b, n) => { for (let i = 0; i < n; i++) { const v = i === 0 ? dot3(p, r) : i === 1 ? dot3(p, u) : dot3(p, f); a[i] = Math.min(a[i], v); b[i] = Math.max(b[i], v); } };
     for (const x of [-3, MAP + 3])
       for (const y of [-3, MAP + 3])
-        for (const z of [-BASE_DEPTH, 75]) grow([x, y, z], mn, mx, 3);
+        for (const z of [-BASE_DEPTH, 120]) grow([x, y, z], mn, mx, 3);
     if (view) {
       const cam = view.camera, t = cam.project(cam.x, cam.y, 0);
       const vmn = [1e9, 1e9], vmx = [-1e9, -1e9];
       const mx2 = view.w / 2 + 24, my2 = view.h / 2 + 24;
       for (const sx of [t[0] - mx2, t[0] + mx2])
         for (const sy of [t[1] - my2, t[1] + my2])
-          for (const z of [-BASE_DEPTH, 75]) { const [x, y] = cam.artToWorld(sx, sy, z); grow([x, y, z], vmn, vmx, 2); }
+          for (const z of [-BASE_DEPTH, 120]) { const [x, y] = cam.artToWorld(sx, sy, z); grow([x, y, z], vmn, vmx, 2); }
       for (let i = 0; i < 2; i++) {
         const a = Math.max(mn[i], vmn[i] - 2), b = Math.min(mx[i], vmx[i] + 2);
         if (b > a + 1) { mn[i] = a; mx[i] = b; }

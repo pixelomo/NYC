@@ -824,12 +824,23 @@ export class CarLayer {
       case 'subway': body = 0xc4c8ce; P[CS.ACCENT] = 0x2a6ad8; P[CS.INTERIOR] = 0xf8f0d0; P[CS.LED] = 0xff9a30; break;
     }
     P[CS.BODY] = body;
-    car.palRow = this.pal.alloc(P);
     car.palBase = P;
     car.palState = '';
+    // parked cars share one row per look (a big city has thousands); a car gets its own row the
+    // moment something about it changes (see updatePalette)
+    if (car.state === 'parked') {
+      const key = `${car.type}:${Object.values(P).join(',')}`;
+      if (!this.shared) this.shared = new Map();
+      let row = this.shared.get(key);
+      if (row == null) { row = this.pal.alloc(P); this.shared.set(key, row); }
+      car.palRow = row; car.palShared = true;
+      return;
+    }
+    car.palRow = this.pal.alloc(P);
+    car.palShared = false;
   }
   releasePalette(car) {
-    if (car.palRow >= 0) this.pal.release(car.palRow);
+    if (car.palRow >= 0 && !car.palShared) this.pal.release(car.palRow);
     car.palRow = -1;
   }
   updatePalette(car, time) {
@@ -839,6 +850,11 @@ export class CarLayer {
     const busLit = car.type === 'bus' || car.type === 'icecream' || car.type === 'subway';
     const key = `${lights ? 1 : 0}${car.brake ? 1 : 0}${car.siren ? (siren ? 2 : 1) : 0}${beacon ? 1 : 0}${car.type === 'taxi' ? (car.taxiFree ? 1 : 0) : 0}`;
     if (key === car.palState) return;
+    if (car.palShared) {
+      // first look at a shared parked car: fine while it still looks parked; otherwise a row of its own
+      if (car.palState === '' && key === '00000') { car.palState = key; return; }
+      car.palRow = this.pal.alloc(car.palBase); car.palShared = false;
+    }
     car.palState = key;
     const P = car.palBase, row = car.palRow, pal = this.pal;
     pal.set(row, CS.HEAD, lights ? 0xfff6d8 : P[CS.HEAD], lights ? 128 : 255);

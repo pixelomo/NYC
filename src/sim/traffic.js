@@ -244,7 +244,10 @@ export class Traffic {
     return Math.round(base);
   }
   spawnMoving(anywhere = false) {
-    const links = [...this.links.values()];
+    // streets near the action (the big map only keeps traffic moving round the camera)
+    const f = this.city.focus ? this.city.focus() : { x: MAP / 2, y: MAP / 2 };
+    let links = [...this.links.values()].filter((L) => (L.pts[0][0] - f.x) ** 2 + (L.pts[0][1] - f.y) ** 2 < 85 * 85);
+    if (!links.length) links = [...this.links.values()];
     for (let tries = 0; tries < 20; tries++) {
       const L = this.rng.pick(links);
       if (anywhere) {
@@ -420,6 +423,17 @@ export class Traffic {
     const target = this.targetCount(env);
     if (moving < target && this.rng.chance(dt * 1.2)) this.spawnMoving(false) || (this.rng.chance(0.2) && this.spawnMoving(true));
     this.updateSpecials(dt, env);
+    // moving cars far from the action and out of sight leave the map (new ones pull out near it)
+    this.lodT = (this.lodT || 0) - dt;
+    if (this.lodT <= 0) {
+      this.lodT = 0.5;
+      const f = this.city.focus ? this.city.focus() : null, view = this.city.view;
+      if (f) for (const car of [...this.cars]) {
+        if (car.free || car.state === 'parked' || car.special || car.type === 'bus' || car.siren) continue;
+        if ((car.x - f.x) ** 2 + (car.y - f.y) ** 2 < 125 * 125 || view.visible(car.x, car.y, 1, 4)) continue;
+        this.removeCar(car);
+      }
+    }
     for (const car of [...this.cars]) {
       if (car.state === 'parked' || car.free) continue; // free cars are moved by the player system
       this.stepCar(car, dt, moving > target + 3);

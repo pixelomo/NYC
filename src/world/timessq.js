@@ -156,17 +156,30 @@ function paintAd(p, x, y, w, h, kind, rng, a) {
 }
 
 // An animated screen texture: K frames stacked vertically, cycled by the static shader
+// (screens of the same size come in a few variants, shared between towers, to save texture space)
 function screenTex(C, w, h, rng, K = 4) {
+  const pool = C.screenPool || (C.screenPool = new Map());
+  const key = `s${w}x${h}x${K}`;
+  let list = pool.get(key);
+  if (!list) pool.set(key, (list = []));
+  if (list.length >= 5) return rng.pick(list);
   const kinds = [];
   while (kinds.length < K) { const k = rng.pick(AD_KINDS); if (!kinds.includes(k) || kinds.length >= AD_KINDS.length) kinds.push(k); }
   const r = C.atlas.alloc(w, h * K);
   for (let f = 0; f < K; f++) paintAd(r.p, 0, f * h, w, h, kinds[f], rng, 255);
   r.cast = 'none';
+  list.push(r);
   return r;
 }
 // A static billboard (lit by floodlights at night)
 function billboardTex(C, w, h, rng) {
+  const pool = C.screenPool || (C.screenPool = new Map());
+  const key = `b${w}x${h}`;
+  let list = pool.get(key);
+  if (!list) pool.set(key, (list = []));
+  if (list.length >= 6) return rng.pick(list);
   const r = C.atlas.alloc(w, h);
+  list.push(r);
   if (rng.chance(0.35)) billboardArt(r.p, w, h, rng.pick(['cola', 'bagel', 'jazz', 'show', 'taxi', 'sun', 'gin']), rng);
   else paintAd(r.p, 0, 0, w, h, rng.pick(AD_KINDS), rng, winCode(0.0, true));
   r.cast = 'none';
@@ -282,7 +295,7 @@ function signTower(C, fr, a0, W, D, floors, rng, o = {}) {
   coverFace(C, fr, a0, a0 + W, z0 + gH + 1.0, z0 + H - 0.5, rng, o);
   for (const side of o.sides ?? []) {
     const sf = side === 'left' ? new Frame(...fr.pt(a0, D), -fr.ux, -fr.uy) : new Frame(...fr.pt(a0 + W, 0), fr.ux, fr.uy);
-    const top = z0 + gH + 1.0 + Math.min(H - gH - 2, rng.range(8, 14));
+    const top = o.wrapFull ? z0 + H - 0.5 : z0 + gH + 1.0 + Math.min(H - gH - 2, rng.range(8, 14));
     coverFace(C, sf, 0, D, z0 + gH + 1.0, Math.min(z0 + H - 0.5, top), rng, { ...o, split: 0.2 });
   }
   // shop light on the sidewalk
@@ -371,8 +384,14 @@ export function timesSquareBlock(C, L, seed) {
   sign.p.text7(Math.floor((64 - textWidth('TICKETS', 1, true)) / 2), 2, 'TICKETS', 0xffd84f, winCode(0.0, true));
   // two-sided sign on the booth roof, readable from both ways
   const yb = sy0 - 0.75;
-  mb.vquad(cx + 1.0, yb - 0.02, cx - 1.0, yb - 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
-  mb.vquad(cx - 1.0, yb + 0.02, cx + 1.0, yb + 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+  mb.vquad(scx + 1.0, yb - 0.02, scx - 1.0, yb - 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+  mb.vquad(scx - 1.0, yb + 0.02, scx + 1.0, yb + 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+  // the bronze at the north end of the square, where the arm meets the avenue
+  const stx = cx, sty = ey0 + 2 + 5.5;
+  mb.box(stx - 0.7, sty - 0.7, CURB, stx + 0.7, sty + 0.7, CURB + 0.25, { px: S.greystone, nx: S.greystone, py: S.greystone, ny: S.greystone, pz: { t: S.limeTop } });
+  mb.box(stx - 0.55, sty - 0.55, CURB + 0.25, stx + 0.55, sty + 0.55, CURB + 1.4, { px: S.greystone, nx: S.greystone, py: S.greystone, ny: S.greystone, pz: { t: S.limeTop } });
+  C.addSprite('statue', stx, sty, CURB + 1.4);
+  W.solids.push([stx - 0.7, sty - 0.7, stx + 0.7, sty + 0.7, 1.4]);
   // café tables with umbrellas in the middle of the square
   const tables = [];
   for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) {
@@ -422,4 +441,171 @@ export function timesSquareBlock(C, L, seed) {
   W.extraNets.push({ name: 'tsq', rect: { ...L }, nodes, edges, gates });
   W.timesSquare = { x: cx, y: (L.y0 + L.y1) / 2, x0: L.x0, y0: L.y0, x1: L.x1, y1: L.y1 };
   void GRP; void shade; void PI; void chainFence;
+}
+
+// ---- the big Times Square: four blocks of sign towers round a plaza made of the old streets -------
+// M: the merged region (2x2 blocks); the plaza is the cross of swallowed streets between them.
+export function timesSquareDistrict(C, M, blockRect, lotEnd, lotStart) {
+  const { mb } = C;
+  const W = C.world;
+  const S = sharedTex(C), P = propTex(C);
+  const rng = new RNG(4242);
+  // the cross: vertical arm between the two columns of blocks, horizontal arm between the rows
+  const vx0 = lotEnd(M.bx0), vx1 = lotStart(M.bx1), hy0 = lotEnd(M.by0), hy1 = lotStart(M.by1);
+  const R0 = blockRect(M.bx0, M.by0), R1 = blockRect(M.bx1, M.by1);
+  const ex0 = R0.x0 - 2, ex1 = R1.x1 + 2, ey0 = R0.y0 - 2, ey1 = R1.y1 + 2; // out to the outer sidewalks
+  const cx = (vx0 + vx1) / 2, cy = (hy0 + hy1) / 2;
+  C.paintGround(vx0, ey0 + 2, vx1, ey1 - 2, 'tsq');
+  C.paintGround(ex0 + 2, hy0, ex1 - 2, hy1, 'tsq');
+  // ---- sign towers: a quadrant each; the inner corners tallest and screened all the way up ----
+  for (let by = M.by0; by <= M.by1; by++)
+    for (let bx = M.bx0; bx <= M.bx1; bx++) {
+      const L = blockRect(bx, by);
+      // the south-east block stands between the default camera and the square: leave it open (the
+      // red steps go there) so the square, and the screens across it, can be seen
+      if (bx === M.bx1 && by === M.by1) { C.paintGround(L.x0, L.y0, L.x1, L.y1, 'tsq'); continue; }
+      const sx = bx === M.bx0 ? 1 : -1, sy = by === M.by0 ? 1 : -1; // which way the plaza lies
+      const F = {
+        E: new Frame(L.x1, L.y1, 1, 0), Wf: new Frame(L.x0, L.y0, -1, 0),
+        N: new Frame(L.x1, L.y0, 0, -1), S: new Frame(L.x0, L.y1, 0, 1),
+      };
+      C.paintGround(L.x0, L.y0, L.x1, L.y1, 'patio');
+      const vert = sx > 0 ? F.E : F.Wf; // faces the vertical arm
+      const horz = sy > 0 ? F.S : F.N; // faces the horizontal arm
+      const outY = sy > 0 ? F.N : F.S; // faces the street to the north / south
+      // a-ranges along each frame for the half nearer the plaza's other arm
+      const half = (fr, nearInner) => (nearInner ? 0 : 9);
+      // which half of the vertical-arm face is next to the horizontal arm?
+      const vNear = (fr) => (fr === F.E ? (sy > 0 ? 0 : 9) : (sy > 0 ? 9 : 0)); // E: a runs north from y1; W: a runs south from y0
+      const hNear = (fr) => (fr === F.S ? (sx > 0 ? 9 : 0) : (sx > 0 ? 0 : 9)); // S: a runs east from x0; N: a runs west from x1
+      void half;
+      const va = vNear(vert), ha = hNear(horz);
+      const sideAt = (a0, cornerAtStart) => (cornerAtStart ? 'left' : 'right');
+      // inner corner: the showpiece, both plaza faces covered to the top
+      signTower(C, vert, va, 9, 9, rng.int(21, 26), rng, { sides: [sideAt(va, va === 0)], wrapFull: true, screens: 0.9, heights: [3, 3.5, 4, 5], split: 0.3 });
+      // along the vertical arm, the other half, wrapping onto the outer street
+      const va2 = 9 - va;
+      signTower(C, vert, va2, 9, 9, rng.int(14, 18), rng, { sides: [sideAt(va2, va2 === 0)], screens: 0.75 });
+      // along the horizontal arm, the other half
+      const ha2 = 9 - ha;
+      signTower(C, horz, ha2, 9, 9, rng.int(12, 16), rng, { sides: [sideAt(ha2, ha2 === 0)], screens: 0.7 });
+      // the outer corner: lower, plainer, facing the street
+      const oa = outY === F.N ? (sx > 0 ? 9 : 0) : (sx > 0 ? 0 : 9);
+      signTower(C, outY, oa, 9, 9, rng.int(8, 11), rng, { sides: [sideAt(oa, oa === 0)], screens: 0.35, heights: [2.5, 3], split: 0.6 });
+    }
+  // ---- the ball tower at the south end of the square, screens on every face ----
+  const tx0 = cx - 2.5, tx1 = cx + 2.5, ty0 = ey1 - 2 - 9.5, ty1 = ey1 - 2 - 2.0;
+  const faces = [new Frame(tx1, ty0, 0, -1), new Frame(tx1, ty1, 1, 0), new Frame(tx0, ty1, 0, 1), new Frame(tx0, ty0, -1, 0)];
+  const res = signTower(C, faces[0], 0, tx1 - tx0, ty1 - ty0, 24, rng, { heights: [3, 3.5, 4], split: 0.2, screens: 0.85 });
+  const top = res.H;
+  coverFace(C, faces[1], 0, ty1 - ty0, CURB + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 });
+  coverFace(C, faces[3], 0, ty1 - ty0, CURB + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 });
+  coverFace(C, faces[2], 0, tx1 - tx0, CURB + 3.6, top - 0.6, rng, { heights: [3, 4], split: 0.3, screens: 0.5 });
+  mb.box(tx0 + 0.6, ty0 + 0.6, top, tx1 - 0.6, ty1 - 0.6, top + 1.2, { px: S.darkMetal, nx: S.darkMetal, py: S.darkMetal, ny: S.darkMetal, pz: { t: S.darkMetal } });
+  mb.box(cx - 0.08, (ty0 + ty1) / 2 - 0.08, top + 1.2, cx + 0.08, (ty0 + ty1) / 2 + 0.08, top + 4.6, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver });
+  W.ball = { x: cx, y: (ty0 + ty1) / 2, z0: top + 1.3, z1: top + 4.4 };
+  W.beacons.push({ x: cx, y: (ty0 + ty1) / 2, z: top + 4.7 });
+  // ---- the open south-east block: red steps rising to the north over a ticket booth, facing down
+  // the avenue, with the screens of the square behind them ----
+  const F = blockRect(M.bx1, M.by1), fcx = (F.x0 + F.x1) / 2, fcy = (F.y0 + F.y1) / 2;
+  const sx0 = fcx - 4.0, sx1 = fcx + 4.0, steps = 7, sd = 0.5, rise = 0.32;
+  const sy1 = fcy + 2.5, sy0 = sy1 - steps * sd; // front edge sy1 (south), rising to the north
+  const scx = (sx0 + sx1) / 2;
+  const red = C.atlas.shared('red_step', 32, 10, (p) => {
+    p.rect(0, 0, 32, 10, 0xc81e2a, winCode(0.0, true));
+    p.rect(0, 0, 32, 2, 0xff6a6a, winCode(0.0, true));
+    p.rect(0, 8, 32, 2, 0x8a1018, winCode(0.0, true));
+  });
+  const redTop = C.atlas.shared('red_step_t', 32, 16, (p) => { p.rect(0, 0, 32, 16, 0xb81a26, winCode(0.0, true)); for (let x = 0; x < 32; x += 8) p.vline(x, 0, 16, 0xd83040, winCode(0.0, true)); });
+  for (let k = 0; k < steps; k++) {
+    mb.box(sx0, sy0, CURB, sx1, sy1 - k * sd, CURB + (k + 1) * rise, { ny: S.darkMetal, py: red, px: S.darkMetal, nx: S.darkMetal, pz: { t: redTop } }, { mat: MAT.NOSHADOW });
+    for (let s2 = 0; s2 < 4; s2++) {
+      const bx = sx0 + 0.9 + s2 * ((sx1 - sx0 - 1.8) / 3), by = sy1 - k * sd - sd * 0.55, bz = CURB + (k + 1) * rise;
+      const seats = [-0.45, 0, 0.45].map((t) => ({ x: bx + t, y: by, z: bz, face: [0, 1] }));
+      W.benches.push({ x: bx, y: by, axis: 'x', seats, used: [false, false, false], steps: true });
+    }
+  }
+  W.solids.push([sx0, sy0, sx1, sy1, steps * rise]);
+  {
+    // a screen on the back of the steps, facing up the avenue
+    const fb = new Frame(sx1, sy0, 0, -1);
+    const sw = Math.round((sx1 - sx0 - 0.6) * T), sh = Math.round((steps * rise - 0.5) * T);
+    fb.facadeQuad(mb, 0.3, 0.3 + sw / T, -0.02, CURB + 0.25, CURB + 0.25 + sh / T, screenTex(C, sw, sh, rng, 4), { mat: SCREEN, seed: 3 | (rng.int(0, 15) << 4) });
+  }
+  W.lamps.push({ x: scx, y: sy1 + 0.5, z: 0.6, r: 4.5, color: [1.0, 0.25, 0.25], k: 0.5, kind: 'neon' });
+  // ticket booth in front of the steps
+  mb.box(scx - 1.0, sy1 + 0.2, CURB, scx + 1.0, sy1 + 1.3, CURB + 1.6, { px: S.darkMetal, nx: S.darkMetal, ny: S.darkMetal, py: S.glassBlue, pz: { t: S.darkMetal } });
+  W.solids.push([scx - 1.0, sy1 + 0.2, scx + 1.0, sy1 + 1.3, 1.6]);
+  const sign = C.atlas.alloc(64, 12);
+  sign.p.rect(0, 0, 64, 12, 0x1b1b1b, 255);
+  sign.p.text7(Math.floor((64 - textWidth('TICKETS', 1, true)) / 2), 2, 'TICKETS', 0xffd84f, winCode(0.0, true));
+  const yb = sy1 + 0.75;
+  mb.vquad(scx + 1.0, yb - 0.02, scx - 1.0, yb - 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+  mb.vquad(scx - 1.0, yb + 0.02, scx + 1.0, yb + 0.02, CURB + 1.6, CURB + 1.6 + 12 / T, sign, { mat: MAT.FLAT | MAT.NOSHADOW });
+  // the bronze at the north end of the square, where the arm meets the avenue
+  const stx = cx, sty = ey0 + 2 + 5.5;
+  mb.box(stx - 0.7, sty - 0.7, CURB, stx + 0.7, sty + 0.7, CURB + 0.25, { px: S.greystone, nx: S.greystone, py: S.greystone, ny: S.greystone, pz: { t: S.limeTop } });
+  mb.box(stx - 0.55, sty - 0.55, CURB + 0.25, stx + 0.55, sty + 0.55, CURB + 1.4, { px: S.greystone, nx: S.greystone, py: S.greystone, ny: S.greystone, pz: { t: S.limeTop } });
+  C.addSprite('statue', stx, sty, CURB + 1.4);
+  W.solids.push([stx - 0.7, sty - 0.7, stx + 0.7, sty + 0.7, 1.4]);
+  // ---- café tables in the arms either side of the centre; planters, carts, floodlights ----
+  const tables = [];
+  const tableAt = [];
+  for (const side of [-1, 1]) for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) tableAt.push([cx + side * (7.5 + i * 3.6), cy + (j ? 1.9 : -1.9), i, j, side]);
+  for (let i = 0; i < 4; i++) tableAt.push([F.x0 + 3.0 + i * ((F.x1 - F.x0 - 6) / 3), F.y1 - 3.2, i, i, 1]);
+  for (const [x, y, i, j, side] of tableAt) {
+        tables.push([x, y]);
+        mb.cylinder(x, y, CURB, CURB + 0.7, 0.06, 6, S.darkMetal, null);
+        mb.cylinder(x, y, CURB + 0.7, CURB + 0.74, 0.4, 10, P.silver, P.silver);
+        mb.cylinder(x, y, CURB + 0.74, CURB + 1.75, 0.03, 4, P.silver, null);
+        for (const [dx, dy] of [[0.55, 0], [-0.55, 0], [0, 0.55]]) mb.box(x + dx - 0.15, y + dy - 0.15, CURB, x + dx + 0.15, y + dy + 0.15, CURB + 0.42, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.wood });
+        C.addSprite('cartUmbrella', x, y, CURB + 1.75, { cart: ['hotdog', 'halal', 'pretzel'][(i + j + (side > 0 ? 1 : 0)) % 3] });
+      }
+  const planters = [[vx0 + 0.8, cy - 8], [vx1 - 0.8, cy - 8], [vx0 + 0.8, cy + 8], [cx - 16, hy0 + 0.8], [cx - 16, hy1 - 0.8], [cx + 16, hy0 + 0.8],
+    [stx - 2.2, sty], [stx + 2.2, sty], [F.x1 - 1.2, F.y0 + 1.2], [F.x1 - 1.2, fcy], [F.x0 + 1.2, F.y1 - 1.2], [F.x1 - 1.2, F.y1 - 1.2]];
+  for (const [x, y] of planters) { C.addPlanter(x, y); W.solids.push([x - 0.5, y - 0.5, x + 0.5, y + 0.5, 0.6]); }
+  W.carts.push({ x: vx0 + 1.6, y: cy + 5.5, kind: 'pretzel', axis: 'y' });
+  W.carts.push({ x: vx1 - 1.6, y: cy - 5.5, kind: 'halal', axis: 'y' });
+  W.carts.push({ x: cx + 19, y: hy0 + 1.4, kind: 'hotdog', axis: 'x' });
+  subwayEntrance(C, cx - 19.5, hy1 - 1.0, 'x');
+  for (const [x, y] of [[vx0 + 0.5, ey0 + 2.5], [vx1 - 0.5, ey0 + 2.5], [vx0 + 0.5, ey1 - 2.5], [ex0 + 2.5, hy0 + 0.5], [ex0 + 2.5, hy1 - 0.5], [ex1 - 2.5, hy0 + 0.5], [F.x1 - 0.5, F.y1 - 0.5], [F.x0 + 0.5, F.y1 - 0.5]]) {
+    mb.box(x - 0.08, y - 0.08, CURB, x + 0.08, y + 0.08, CURB + 5.2, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver });
+    mb.box(x - 0.3, y - 0.3, CURB + 5.2, x + 0.3, y + 0.3, CURB + 5.45, { px: P.lampHead, nx: P.lampHead, py: P.lampHead, ny: P.lampHead, pz: P.silver });
+    W.lamps.push({ x: x + (cx - x) * 0.15, y: y + (cy - y) * 0.15, z: CURB + 5, r: 7, color: [0.95, 0.97, 1.0], k: 0.8, kind: 'flood' });
+    W.lampHeads.push({ x, y, z: CURB + 5.2, kind: 'flood' });
+  }
+  // ---- a walking net over the whole cross, joined to the sidewalks at the four ends ----
+  const nodes = [], edges = [], gates = [];
+  const idx = new Map();
+  const step = 2.2;
+  const inCross = (x, y) => (x > vx0 + 0.6 && x < vx1 - 0.6 && y > ey0 + 2.4 && y < ey1 - 2.4) || (y > hy0 + 0.6 && y < hy1 - 0.6 && x > ex0 + 2.4 && x < ex1 - 2.4)
+    || (x > F.x0 - 0.6 && x < F.x1 - 0.4 && y > F.y0 - 0.6 && y < F.y1 - 0.4);
+  const blocked = (x, y) => (x > tx0 - 0.7 && x < tx1 + 0.7 && y > ty0 - 0.7 && y < ty1 + 0.7) || (x > sx0 - 0.5 && x < sx1 + 0.5 && y > sy0 - 0.5 && y < sy1 + 1.6)
+    || Math.hypot(stx - x, sty - y) < 1.2
+    || tables.some(([tx, ty]) => Math.hypot(tx - x, ty - y) < 1.0) || planters.some(([px, py]) => Math.hypot(px - x, py - y) < 0.9);
+  const nx = Math.ceil((ex1 - ex0) / step), ny = Math.ceil((ey1 - ey0) / step);
+  for (let gy = 0; gy <= ny; gy++)
+    for (let gx = 0; gx <= nx; gx++) {
+      const x = ex0 + gx * step, y = ey0 + gy * step;
+      if (!inCross(x, y) || blocked(x, y)) continue;
+      idx.set(`${gx},${gy}`, nodes.length);
+      nodes.push({ x, y });
+    }
+  for (const [k, i] of idx) {
+    const [gx, gy] = k.split(',').map(Number);
+    for (const [dx, dy] of [[1, 0], [0, 1], [1, 1], [1, -1]]) {
+      const j = idx.get(`${gx + dx},${gy + dy}`);
+      if (j != null) edges.push([i, j]);
+    }
+  }
+  // gates at the four ends of the cross
+  const ends = [[cx, ey0 + 1], [cx, ey1 - 1], [ex0 + 1, cy], [ex1 - 1, cy], [fcx + 5, F.y1 + 1], [F.x1 + 1, fcy + 4]];
+  for (const [gxp, gyp] of ends) {
+    let best = -1, bd = 1e9;
+    nodes.forEach((n, i) => { const d = Math.hypot(n.x - gxp, n.y - gyp); if (d < bd) { bd = d; best = i; } });
+    if (best >= 0) gates.push({ node: best, sx: gxp, sy: gyp });
+  }
+  W.extraNets.push({ name: 'tsq', rect: { x0: ex0, y0: ey0, x1: ex1, y1: ey1 }, nodes, edges, gates });
+  // view: where to look from to take it all in (the steps in front, the screens behind)
+  W.timesSquare = { x: cx, y: cy, x0: ex0, y0: ey0, x1: ex1, y1: ey1, view: [(cx + scx) / 2 + 1, (cy + sy0) / 2 + 1] };
 }

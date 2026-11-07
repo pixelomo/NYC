@@ -330,7 +330,14 @@ export const SHOPS = {
   bakery: { name: ['BAKERY', 'PASTRY', 'CAKES', 'PANADERIA'], bg: 0xf2e2c8, fg: 0x8a4a2a, awn: 0xe58fb5, goods: 'cakes' },
   records: { name: ['RECORDS', 'VINYL', 'MUSIC'], bg: 0x2a1a3a, fg: 0x4fd2ff, awn: 0x2a1a3a, goods: 'records' },
   sports: { name: ['SPORTS', 'ATHLETIC', 'GYM GEAR'], bg: 0x2f8a46, fg: 0xffffff, awn: 0x2f8a46, goods: 'clothes' },
+  // Chinatown
+  dumplings: { name: ['DUMPLINGS', 'DUMPLING HOUSE', 'NOODLES'], bg: 0xc8202c, fg: 0xf2c230, awn: 0xc8202c, goods: 'food' },
+  teashop: { name: ['TEA HOUSE', 'BUBBLE TEA', 'TEA'], bg: 0x1f6a3a, fg: 0xf2d27a, awn: 0x1f6a3a, goods: 'cafe' },
+  herbs: { name: ['HERBS', 'GINSENG', 'MARKET'], bg: 0xf2c230, fg: 0xc8202c, awn: 0xc8202c, goods: 'snacks' },
+  seafood: { name: ['SEAFOOD', 'FISH MARKET', 'LIVE CRAB'], bg: 0x1f4f9a, fg: 0xf2f2ee, awn: 0xc8202c, goods: 'food' },
+  bakeryCn: { name: ['BAKERY', 'MOONCAKES', 'BUNS'], bg: 0xc8202c, fg: 0xffffff, awn: 0xf2c230, goods: 'cakes' },
 };
+export const CHINATOWN = ['dumplings', 'teashop', 'herbs', 'seafood', 'bakeryCn', 'chinese', 'jewelry', 'dumplings'];
 export const SHOPPING = ['shoes', 'fashion', 'electronics', 'toys', 'jewelry', 'bakery', 'records', 'sports', 'coffee', 'books', 'pharmacy', 'boutique', 'pizza'];
 
 function goods(p, x, y, w, h, kind, rng, t) {

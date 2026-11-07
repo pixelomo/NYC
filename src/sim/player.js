@@ -78,7 +78,7 @@ export class Player {
     if (p) {
       p.state = 'idle'; p.timer = 0.4; p.alpha = 1; p.inCar = false; p.forceFace = false; p.animFrame = null; p.anim = 'idle';
       p.node = P.nearestOf(P.nav.nodes, p.x, p.y);
-      const home = p.home || P.pickHome();
+      const home = p.home || P.pickHome(p.x, p.y);
       p.plan = [{ t: 'go', node: home, thought: 'What a day' }, { t: 'enter' }];
     }
     this.clearWanted(true);
@@ -175,7 +175,7 @@ export class Player {
     let x = c.x + hy * (c.wid / 2 + 0.4), y = c.y - hx * (c.wid / 2 + 0.4);
     if (!this.coll.free(x, y, 0.2)) { x = c.x - hy * (c.wid / 2 + 0.4); y = c.y + hx * (c.wid / 2 + 0.4); }
     q.x = x; q.y = y; q.z = this.coll.groundZ(x, y); q.alpha = 1;
-    q.home = P.pickHome();
+    q.home = P.pickHome(x, y);
     q.state = 'flee'; q.timer = why === 'crash' ? 1.2 : 2.4; q.fleeFrom = { x: c.x, y: c.y };
     q.plan = [{ t: 'go', node: q.home, thought: why === 'jack' ? 'Somebody stole my car!' : 'My poor car...' }, { t: 'enter' }];
     q.thought = this.rng.pick(why === 'jack' ? ['HEY! MY CAR!', 'STOP! THIEF!', 'Not again...', 'Call the cops!'] : why === 'fire' ? ['FIRE!', "It's gonna blow!", 'RUN!'] : why === 'shot' ? ["DON'T SHOOT!", 'AAAH!', 'Get down!'] : ['My car!!', 'Are you crazy?!', 'Learn to drive!', 'Insurance is gonna love this']);
@@ -248,13 +248,41 @@ export class Player {
     }
     p.z += (this.coll.groundZ(p.x, p.y) - p.z) * Math.min(1, dt * 14);
   }
-  moveFoot(p, dx, dy) {
-    const C = this.coll, V = this.city.vehicles, me = this.car;
-    const blocked = (x, y) => !C.free(x, y, R_FOOT) || this.city.traffic.cars.some((c) => c !== me && c.type !== 'subway' && c.fadeOut == null && dist2(c.x, c.y, x, y) < (c.len / 2 + 0.6) ** 2 && V.inBox(c, x, y, R_FOOT));
-    if (!blocked(p.x + dx, p.y + dy)) { p.x += dx; p.y += dy; return true; }
-    if (!blocked(p.x + dx, p.y)) { p.x += dx; return true; }
-    if (!blocked(p.x, p.y + dy)) { p.y += dy; return true; }
+  // would someone on foot at (x, y) be inside a wall or a car?
+  footBlocked(x, y) {
+    if (!this.coll.free(x, y, R_FOOT)) return true;
+    const V = this.city.vehicles, me = this.car;
+    for (const c of V.carsNear(x, y)) if (c !== me && dist2(c.x, c.y, x, y) < (c.len / 2 + 0.6) ** 2 && V.inBox(c, x, y, R_FOOT)) return true;
     return false;
+  }
+  moveFoot(p, dx, dy) {
+    if (!this.footBlocked(p.x + dx, p.y + dy)) { p.x += dx; p.y += dy; return true; }
+    // slide along whatever's in the way (an axis with nothing to move along is no way out)
+    if (Math.abs(dx) > 1e-6 && !this.footBlocked(p.x + dx, p.y)) { p.x += dx; return true; }
+    if (Math.abs(dy) > 1e-6 && !this.footBlocked(p.x, p.y + dy)) { p.y += dy; return true; }
+    return false;
+  }
+  // an officer working round a parked car or a lamp post: the way he wants if the next stride is
+  // open, else the nearest way that is (looking a stride ahead so he doesn't walk into a gap too
+  // narrow to pass). Once he's picked a side to go round he sticks to it for a moment, or he'd
+  // dither in front of the thing.
+  stepFoot(o, dx, dy, sp, dt) {
+    const open = (ux, uy) => !this.footBlocked(o.x + ux * 0.3, o.y + uy * 0.3) && !this.footBlocked(o.x + ux * 0.6, o.y + uy * 0.6);
+    o.sideT = (o.sideT || 0) - dt;
+    let ux = dx, uy = dy;
+    if (!open(dx, dy)) {
+      if (!(o.sideT > 0)) o.side = this.rng.chance(0.5) ? 1 : -1;
+      o.sideT = 1.2;
+      let found = false;
+      for (const sg of [o.side, -o.side]) {
+        for (const a of [0.4, 0.8, 1.2, 1.6, 2.0, 2.4, 2.8]) {
+          const ca = Math.cos(a * sg), sa = Math.sin(a * sg), vx = dx * ca - dy * sa, vy = dx * sa + dy * ca;
+          if (open(vx, vy)) { ux = vx; uy = vy; found = true; break; }
+        }
+        if (found) { if (sg !== o.side) { o.side = sg; } break; }
+      }
+    }
+    return this.moveFoot(o, ux * sp, uy * sp);
   }
   drive(dt) {
     const c = this.car, p = this.p, inp = this.input, V = this.city.vehicles;
@@ -466,7 +494,7 @@ export class Player {
   policeSee(r = 30, at = null) {
     const t = at || this.target();
     if (!t) return false;
-    const sees = (x, y) => { const d = dist(x, y, t.x, t.y); return d < 7 || (d < r && this.lineClear(x, y, t.x, t.y)); };
+    const sees = (x, y) => { const d = dist(x, y, t.x, t.y); return d < 7 || (d < r && this.sightClear(x, y, t.x, t.y)); };
     for (const c of this.chasers) if (sees(c.x, c.y)) return true;
     for (const o of this.officers) if (o.state === 'cop' && sees(o.x, o.y)) return true;
     for (const c of this.city.traffic.cars) if (c.type === 'police' && !c.free && c.state !== 'parked' && dist2(c.x, c.y, t.x, t.y) < r * r && sees(c.x, c.y)) return true;
@@ -509,7 +537,10 @@ export class Player {
     this.chasers = this.chasers.filter((c) => c.state === 'chase' && c.fadeOut == null && !c.wreck);
     const want = this.busted > 0 ? 0 : CARS_FOR[this.stars];
     this.recruitT -= dt;
-    if (this.chasers.length < want && this.recruitT <= 0) {
+    // a car parked up with its crew out on foot still counts
+    let crews = 0;
+    for (const o of this.officers) if (o.car && o.state === 'cop' && !this.officers.some((q) => q !== o && q.car === o.car && this.officers.indexOf(q) < this.officers.indexOf(o))) crews++;
+    if (this.chasers.length + crews < want && this.recruitT <= 0) {
       this.recruitT = this.chasers.length ? 3.0 : 0.8;
       const t = this.target();
       let best = null, bd = 60 * 60;
@@ -532,6 +563,7 @@ export class Player {
     if (!c.free) { this.city.traffic.detach(c); V.launch(c); }
     V.init(c);
     c.state = 'chase'; c.siren = true; c.special = null; c.revT = 0; c.stuckT = 0; c.life = 1e9; c.fadeIn = 0; c.idleT = 0;
+    c.bestD = null; c.gainT = 0;
     this.chasers.push(c);
     this.city.audio?.event('siren', c);
   }
@@ -583,7 +615,22 @@ export class Player {
   }
   // distance field (Dial's algorithm, 4-neighbour, integer costs) from the player's cell
   buildFlow(tx, ty) {
-    const N = MAP, D = this.flow, cells = this.cells;
+    const N = MAP, D = this.flow;
+    // parked cars and burnt-out wrecks don't move: route round them (a gap between a parked car
+    // and a lamp post is no way through)
+    const cells = this.cellsNow || (this.cellsNow = new Uint8Array(this.cells.length));
+    cells.set(this.cells);
+    for (const c of this.city.traffic.cars) {
+      if (c.state !== 'parked' && !c.wreck) continue;
+      if (Math.abs(c.x - tx) > 70 || Math.abs(c.y - ty) > 70) continue;
+      const ch = Math.cos(c.h), sh = Math.sin(c.h), hl = c.len / 2 + 0.3, hw = c.wid / 2 + 0.3;
+      const ex = Math.abs(ch) * hl + Math.abs(sh) * hw, ey = Math.abs(sh) * hl + Math.abs(ch) * hw;
+      for (let y = Math.max(0, Math.floor(c.y - ey)); y <= Math.min(N - 1, Math.floor(c.y + ey)); y++)
+        for (let x = Math.max(0, Math.floor(c.x - ex)); x <= Math.min(N - 1, Math.floor(c.x + ex)); x++) {
+          const rx = x + 0.5 - c.x, ry = y + 0.5 - c.y;
+          if (Math.abs(rx * ch + ry * sh) < hl && Math.abs(-rx * sh + ry * ch) < hw) cells[y * N + x] = 0;
+        }
+    }
     D.fill(1e9);
     const s = clamp(Math.floor(ty), 0, N - 1) * N + clamp(Math.floor(tx), 0, N - 1);
     const buckets = [[s]];
@@ -610,23 +657,22 @@ export class Player {
     if (ix < 0 || iy < 0 || ix >= MAP || iy >= MAP) return 1e9;
     return this.flow[iy * MAP + ix];
   }
-  // which way the distance field falls fastest around (x, y)
-  flowDir(x, y) {
+  // which way the distance field falls fastest around (x, y) (never through a wall: a thin wall
+  // can separate two cells whose distances differ by the whole way round)
+  flowDir(x, y, onFoot = false) {
     let best = this.flowAt(x, y), bx = 0, by = 0;
     for (let k = 0; k < 16; k++) {
-      const a = (k / 16) * Math.PI * 2;
-      for (const r of [1.4, 2.6]) {
-        const v = this.flowAt(x + Math.cos(a) * r, y + Math.sin(a) * r) + r * 0.05;
-        if (v < best) { best = v; bx = Math.cos(a); by = Math.sin(a); }
+      const a = (k / 16) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+      for (const r of onFoot ? [1.0, 1.8, 2.6] : [1.4, 2.6]) {
+        const v = this.flowAt(x + ca * r, y + sa * r) + r * 0.05;
+        if (v < best && (!onFoot || this.lineClear(x, y, x + ca * r, y + sa * r))) { best = v; bx = ca; by = sa; }
       }
     }
     return [bx, by];
   }
-  lineClear(x0, y0, x1, y1) {
-    const d = Math.hypot(x1 - x0, y1 - y0), n = Math.ceil(d / 0.5);
-    for (let k = 1; k < n; k++) if (this.coll.isSolid(x0 + ((x1 - x0) * k) / n, y0 + ((y1 - y0) * k) / n)) return false;
-    return true;
-  }
+  lineClear(x0, y0, x1, y1) { return this.coll.segClear(x0, y0, x1, y1); }
+  // line of sight: over knee-high walls, benches and planters, not through buildings
+  sightClear(x0, y0, x1, y1) { return this.coll.segClear(x0, y0, x1, y1, true); }
   drivePolice(c, dt) {
     const V = this.city.vehicles, t = this.target();
     V.init(c);
@@ -663,6 +709,10 @@ export class Player {
     // pulled up next to a suspect on foot (or one who has stopped): officers out
     const reach = this.car ? 9 : 13;
     if (!c.crewOut && this.busted <= 0 && dTrue < reach && (V.speed(c) < 1.6 || c.stuckT > 0.4 || c.revT > 0) && (!this.car || V.speed(this.car) < 1.2)) this.deployOfficers(c);
+    // a suspect on foot somewhere the car can't get any nearer to (inside a walled park, up a
+    // plaza): as close as it gets, so the crew goes in on foot
+    if (c.bestD == null || dTrue < c.bestD - 0.75) { c.bestD = dTrue; c.gainT = 0; } else c.gainT = (c.gainT || 0) + dt;
+    if (!c.crewOut && this.busted <= 0 && !this.car && dTrue < 40 && c.gainT > 2.5) this.deployOfficers(c);
   }
 
   // ---- police on foot -------------------------------------------------------------------------
@@ -677,6 +727,7 @@ export class Player {
       if (!this.coll.free(x, y, 0.2)) { x = c.x + Math.sin(c.h) * side * (c.wid / 2 + 0.35); y = c.y - Math.cos(c.h) * side * (c.wid / 2 + 0.35); }
       if (!this.coll.free(x, y, 0.15)) { x = c.x - Math.cos(c.h) * (c.len / 2 + 0.4); y = c.y - Math.sin(c.h) * (c.len / 2 + 0.4); }
       o.x = x; o.y = y; o.z = this.coll.groundZ(x, y); o.car = c;
+      const t = this.target(); o.d0 = t ? dist(x, y, t.x, t.y) : 0;
       o.thought = this.rng.pick(['FREEZE!', 'POLICE! STOP!', 'Hands where I can see them!', "Don't move!"]);
       P.list.push(o);
       this.officers.push(o);
@@ -703,8 +754,8 @@ export class Player {
       if (this.busted > 0) { o.anim = 'idle'; o.animFrame = null; continue; }
       const d = dist(o.x, o.y, t.x, t.y);
       const car = o.car;
-      // the suspect has driven off: back to the car to give chase
-      const back = car && !car.wreck && car.fireT == null && car.state === 'stopped' && d > 20;
+      // the suspect has driven (or run) off: back to the car to give chase
+      const back = car && !car.wreck && car.fireT == null && car.state === 'stopped' && d > Math.max(20, (o.d0 || 0) + 8);
       let gx = t.x, gy = t.y;
       if (back) { gx = car.x; gy = car.y; }
       const dd = dist(o.x, o.y, gx, gy);
@@ -719,16 +770,15 @@ export class Player {
       const reach = this.car ? this.car.wid / 2 + 0.75 : 0.75;
       if (!back && d < reach) { o.anim = 'idle'; o.animFrame = null; this.faceTo(o, t.x, t.y); continue; }
       let dx, dy;
-      if (dd < 14 && this.lineClear(o.x, o.y, gx, gy)) { dx = (gx - o.x) / (dd || 1); dy = (gy - o.y) / (dd || 1); }
-      else if (!back) { [dx, dy] = this.flowDir(o.x, o.y); if (!dx && !dy) { dx = (gx - o.x) / (dd || 1); dy = (gy - o.y) / (dd || 1); } }
+      const direct = dd < 14 && this.lineClear(o.x, o.y, gx, gy);
+      if (direct) { dx = (gx - o.x) / (dd || 1); dy = (gy - o.y) / (dd || 1); }
+      else if (!back) { [dx, dy] = this.flowDir(o.x, o.y, true); if (!dx && !dy) { dx = (gx - o.x) / (dd || 1); dy = (gy - o.y) / (dd || 1); } }
       else { dx = (gx - o.x) / (dd || 1); dy = (gy - o.y) / (dd || 1); }
-      // close to a suspect on foot: gun drawn, closing in at a walk
-      const covering = !back && !this.car && d < 4.5;
+      // close to a suspect on foot with nothing in between: gun drawn, closing in at a walk
+      // (a wall in the way: run round it)
+      const covering = !back && !this.car && d < 4.5 && direct;
       const sp = (covering ? 1.5 : 2.55) * dt;
-      if (!this.moveFoot(o, dx * sp, dy * sp)) {
-        // blocked: sidestep
-        if (!this.moveFoot(o, -dy * sp, dx * sp)) this.moveFoot(o, dy * sp, -dx * sp);
-      }
+      this.stepFoot(o, dx, dy, sp, dt);
       o.dx = dx; o.dy = dy; o.dist += sp;
       if (covering) { o.anim = 'aim'; o.animFrame = 0; o.forceFace = true; o.dx = (t.x - o.x) / (d || 1); o.dy = (t.y - o.y) / (d || 1); }
       else { o.anim = 'run'; o.animFrame = null; o.forceFace = false; }

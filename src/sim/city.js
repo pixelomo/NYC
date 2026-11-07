@@ -26,7 +26,7 @@ export class City {
     this.camera = camera;
     this.atlas = new SpriteAtlas();
     buildPropSprites(this.atlas);
-    this.pal = new PaletteBank(2048);
+    this.pal = new PaletteBank(4096);
     this.statics = new Statics(this);
     this.coll = new Collision(world);
     this.carLayer = new CarLayer(gl, this);
@@ -61,6 +61,12 @@ export class City {
     this.addSystem({ update: (dt) => this.decals.update(dt) });
     this.traffic.init();
     this.people.init();
+  }
+  // where the life of the city is concentrated: the player when playing, otherwise the camera
+  focus() {
+    const pl = this.player;
+    if (pl && pl.active) { const t = pl.target(); if (t) return t; }
+    return this.camera;
   }
   addSystem(s) {
     this.systems.push(s);

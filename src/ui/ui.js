@@ -23,9 +23,9 @@ export class UI {
   }
   computeZoomLevels() {
     const dpr = window.devicePixelRatio || 1;
-    // device pixels per art pixel; down to 1/8 CSS pixel per art pixel shows the whole diorama
-    const dev = [0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12];
-    return dev.filter((d) => d / dpr >= 0.124 && d / dpr <= 6.01);
+    // device pixels per art pixel; down to 1/16 CSS pixel per art pixel shows the whole diorama
+    const dev = [0.0625, 0.125, 0.25, 0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12];
+    return dev.filter((d) => d / dpr >= 0.062 && d / dpr <= 6.01);
   }
   h(tag, cls, html) {
     const e = document.createElement(tag);
@@ -90,7 +90,8 @@ export class UI {
     const places = [['GO TO…', null]];
     if (W.park) places.push(['CENTRAL PARK', [W.park.cx, W.park.cy]]);
     if (W.pond) places.push(['THE LAKE', [W.pond.x, W.pond.y + 4]]);
-    if (W.timesSquare) places.push(['TIMES SQUARE', [W.timesSquare.x, W.timesSquare.y + 4]]);
+    if (W.timesSquare) places.push(['TIMES SQUARE', W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
+    for (const l of W.landmarks || []) places.push([l.name, [l.x, l.y]]);
     if (W.court) places.push(['BASKETBALL COURT', [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
     const dept = W.shops.find((sh) => sh.kind === 'dept');
     if (dept) places.push(['DEPARTMENT STORE', [dept.x, dept.y]]);

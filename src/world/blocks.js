@@ -1,6 +1,7 @@
 // Block-by-block city generation + street furniture.
 
-import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection } from './layout.js';
+import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, RIVER_X, roadEnd, WATER_Z } from './layout.js';
+import { RNG } from '../core/math.js';
 import { GC, COL } from './ground.js';
 import { MAT, GRP } from './mesh.js';
 import { shade, mixc, hash2i, valueNoise } from '../core/math.js';
@@ -10,31 +11,37 @@ import {
   propTex, streetLamp, parkLamp, signalPole, hydrant, mailbox, newsBoxes, trashBasket, bench, steamGrate, kiosk,
   busShelter, subwayEntrance, parkWall, chainFence, hoop, bleachers, handballWall, playground, scaffolding,
 } from './props.js';
-import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard, SHOPPING } from './facades.js';
+import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard, SHOPPING, CHINATOWN } from './facades.js';
+import * as LM from './landmarks.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { bigPark } from './park.js';
-import { billboardsBlock, timesSquareBlock } from './timessq.js';
+import { billboardsBlock, timesSquareBlock, timesSquareDistrict } from './timessq.js';
 
 export function makeContext(world, mb, atlas, rng) {
   const gp = world.ground.p;
   const C = {
     mb, atlas, rng, world, z0: CURB, ground: world.ground,
     paintGround(x0, y0, x1, y1, kind) {
+      // (the ground painter may be half resolution: step over the texels it really has)
+      const st = gp.half ? 2 : 1;
       const X0 = Math.round(Math.min(x0, x1) * T), X1 = Math.round(Math.max(x0, x1) * T);
       const Y0 = Math.round(Math.min(y0, y1) * T), Y1 = Math.round(Math.max(y0, y1) * T);
-      for (let y = Y0; y < Y1; y++)
-        for (let x = X0; x < X1; x++) {
+      const sx = gp.half ? X0 & ~1 : X0, sy = gp.half ? Y0 & ~1 : Y0;
+      for (let y = sy; y < Y1; y += st)
+        for (let x = sx; x < X1; x += st) {
           const r = groundFill(kind, x, y, X0, Y0, X1, Y1);
           if (r) gp.set(x, y, r[0], r[1]);
         }
     },
     // paint texels whose centre satisfies inside(wx, wy) within a bounding box
     paintWhere(x0, y0, x1, y1, inside, kind) {
+      const st = gp.half ? 2 : 1;
       const X0 = Math.floor(Math.min(x0, x1) * T), X1 = Math.ceil(Math.max(x0, x1) * T);
       const Y0 = Math.floor(Math.min(y0, y1) * T), Y1 = Math.ceil(Math.max(y0, y1) * T);
-      for (let y = Y0; y < Y1; y++)
-        for (let x = X0; x < X1; x++) {
-          if (!inside((x + 0.5) / T, (y + 0.5) / T)) continue;
+      const sx = gp.half ? X0 & ~1 : X0, sy = gp.half ? Y0 & ~1 : Y0;
+      for (let y = sy; y < Y1; y += st)
+        for (let x = sx; x < X1; x += st) {
+          if (!inside((x + st * 0.5) / T, (y + st * 0.5) / T)) continue;
           const r = groundFill(kind, x, y, X0, Y0, X1, Y1);
           if (r) gp.set(x, y, r[0], r[1]);
         }
@@ -249,20 +256,51 @@ function frames(L) {
 }
 
 // ---------------------------------------------------------------------------
+// The common block types come in a few variants each: every copy of a variant is built from the
+// same seed, so it can reuse the facade textures its first copy painted (see Atlas.beginReplay).
+// That keeps a 4x city inside the texture budget; towers and landmarks stay one of a kind.
+const VARIANTS = { brownstones: 4, walkups: 5, tenements: 4, redbrick: 5, shops: 4, commercial: 3, bodega: 3, lofts: 3, billboards: 2 };
+const typeSeed = (t) => { let h = 2166136261; for (const ch of t) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
+
 export function buildBlocks(C) {
   const prof = {};
   const time = (name, fn) => { const t = performance.now(); fn(); prof[name] = (prof[name] || 0) + performance.now() - t; };
+  const rng0 = C.rng;
   for (let by = 0; by < NB; by++)
     for (let bx = 0; bx < NB; bx++) {
       if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const fn = BLOCKS[type];
-      if (fn) time(type, () => fn(C, L, bx, by));
+      if (!fn) continue;
+      const nv = VARIANTS[type];
+      const variant = nv ? (bx * 7 + by * 13 + ((bx * by) % 5)) % nv : 0;
+      C.rng = new RNG(nv ? typeSeed(type) % 100000 + variant * 7919 : 4000 + bx * 97 + by * 31);
+      if (nv) C.atlas.beginReplay(`${type}:${variant}`);
+      time(type, () => fn(C, L, bx, by, variant));
+      C.atlas.endReplay();
     }
+  C.rng = rng0;
   time('park', () => bigPark(C));
+  time('tsq', () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart));
+  time('river', () => riverside(C));
   time('furniture', () => streetFurniture(C));
-  C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ');
+  C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') + `, replayed ${C.atlas.replayed || 0}`;
+}
+
+
+// The East River's edge: a granite quay with an iron railing along the riverside promenade
+function riverside(C) {
+  const W = C.world, mb = C.mb;
+  const x = RIVER_X - 0.12;
+  const P = propTex(C);
+  W.solids.push([RIVER_X - 0.2, 0, MAP + 1, MAP]);
+  // the Brooklyn Bridge off the bottom of the island, the Statue of Liberty out in the harbour
+  LM.brooklynBridge(C, roadCenter(9));
+  LM.statueOfLiberty(C, (RIVER_X + MAP) / 2 + 1, MAP - 12);
+  for (let y = 0.5; y < MAP - 0.5; y += 1.5) mb.box(x - 0.04, y - 0.04, CURB, x + 0.04, y + 0.04, CURB + 0.55, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
+  mb.box(x - 0.05, 0.3, CURB + 0.5, x + 0.05, MAP - 0.3, CURB + 0.58, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
+  void WATER_Z; void roadEnd;
 }
 
 const BLOCKS = {
@@ -285,10 +323,23 @@ const BLOCKS = {
     brick: ['brickRed', 'brickRed', 'brickBrown', 'brickOrange'], widths: [[6, 6, 6], [6.5, 5, 6.5], [9, 9], [4.5, 9, 4.5]],
   }),
   // shopping streets: a storefront in every building, and sometimes a department store
-  shops: (C, L, bx, by) => walkupBlock(C, L, { shops: 1, shopKinds: SHOPPING, floors: [4, 6], dept: (bx + by) % 3 === 0 ? 'S' : null, billboards: 0.5, awning: 1 }),
-  // the mini Times Square: sign towers either side of a pedestrian square
-  billboards: (C, L, bx, by) => billboardsBlock(C, L, BLOCK_TYPES[by][bx + 1] === 'timessq' ? 'E' : 'W', 900 + bx * 7 + by),
+  shops: (C, L, bx, by, v) => walkupBlock(C, L, { shops: 1, shopKinds: SHOPPING, floors: [4, 6], dept: v % 2 === 0 ? 'S' : null, billboards: 0.5, awning: 1 }),
+  // sign towers facing Times Square
+  billboards: (C, L, bx, by, v) => billboardsBlock(C, L, 'E', 900 + v * 7),
   timessq: (C, L, bx, by) => timesSquareBlock(C, L, 950 + bx * 7 + by),
+  river: () => {},
+  // landmarks
+  rockefeller: (C, L) => LM.rockefeller(C, L),
+  library: (C, L) => LM.library(C, L),
+  grandcentral: (C, L) => LM.grandCentral(C, L),
+  chrysler: (C, L) => LM.chryslerTower(C, L),
+  empire: (C, L) => LM.empireState(C, L),
+  arena: (C, L) => LM.arena(C, L),
+  flatiron: (C, L) => LM.flatiron(C, L),
+  washsq: (C, L) => LM.washingtonSquare(C, L),
+  chinatown: (C, L, bx, by) => { walkupBlock(C, L, { shops: 1, shopKinds: CHINATOWN, floors: [4, 6], fireEscape: true, awning: 1 }); LM.chinatownExtras(C, L, by === 8 && bx === 5); },
+  wtc: (C, L) => LM.oneWTC(C, L),
+  exchange: (C, L) => LM.exchange(C, L),
 };
 
 // ---------------------------------------------------------------------------
@@ -729,6 +780,7 @@ function streetFurniture(C) {
     for (let bx = 0; bx < NB; bx++) {
       if (blockInPark(bx, by)) continue;
       const type = BLOCK_TYPES[by][bx];
+      if (type === 'river') continue;
       const L = blockRect(bx, by);
       const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts', 'redbrick', 'shops'].includes(type);
       // sides: [x0,y0,x1,y1 of the curb line], normal toward road
@@ -804,13 +856,19 @@ function streetFurniture(C) {
   W.carts.push({ x: PR.x1 + 1.1, y: pcy + 4.0, kind: 'pretzel', axis: 'y' });
   W.carts.push({ x: pcx - 4.2, y: PR.y1 + 1.1, kind: 'hotdog', axis: 'x' });
   parkSidewalks(C, PR, [[PR.x0 + 9, PR.y0 - 1], [PR.x1 + 1, PR.y0 + 9], [PR.x0 - 1, pcy - 7.5], [PR.x1 + 1, pcy + 4.0], [pcx - 4.2, PR.y1 + 1]]);
-  // more subway stations round the outer ring
-  subwayEntrance(C, lotStart(1) + 14, lotEnd(4) + 1.0, 'x');
-  subwayEntrance(C, lotStart(0) - 1.0, lotStart(2) + 9, 'y');
-  subwayEntrance(C, lotEnd(5) + 1.0, lotStart(3) + 4, 'y');
-  subwayEntrance(C, lotStart(3) + 4, lotEnd(5) + 1.0, 'x');
-  // food carts
-  W.carts.push({ x: lotStart(2) + 14, y: lotEnd(1) + 1.3, kind: 'halal', axis: 'x' });
+  // subway stations every couple of blocks (on a sidewalk of an ordinary block)
+  const plain = (bx, by) => bx >= 0 && by >= 0 && bx < NB && by < NB && !blockInPark(bx, by) && BLOCK_TYPES[by][bx] !== 'river';
+  for (let by = 0; by < NB; by += 2)
+    for (let bx = (by / 2) % 2; bx < NB - 1; bx += 2) {
+      if (!plain(bx, by)) continue;
+      if ((bx + by) % 4 === 0) subwayEntrance(C, lotStart(bx) + 13, lotEnd(by) + 1.0, 'x');
+      else subwayEntrance(C, lotEnd(bx) + 1.0, lotStart(by) + 5, 'y');
+    }
+  // food carts on busy corners
+  const kinds = ['halal', 'hotdog', 'pretzel', 'halal', 'hotdog'];
+  let ck = 0;
+  for (let by = 1; by < NB; by += 3)
+    for (let bx = 1; bx < NB - 1; bx += 3) if (plain(bx, by)) W.carts.push({ x: lotStart(bx) + 14, y: lotEnd(by) + 1.3, kind: kinds[ck++ % kinds.length], axis: 'x' });
   // food cart geometry
   for (const c of W.carts) buildCart(C, c);
   // manhole steam sources

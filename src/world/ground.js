@@ -1,13 +1,13 @@
 // Ground texture (world-space, T texels / unit) + the raised sidewalk plinths and diorama base.
 
-import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, parkPlinth, isParkIntersection } from './layout.js';
+import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, isParkIntersection, MERGES, mergePlinth, RIVER_X, WATER_Z } from './layout.js';
 import { MAT } from './mesh.js';
 import { RNG, hash2i, shade, mixc } from '../core/math.js';
 
 export const GC = {
   ASPHALT: 1, PARKING: 2, PAINT_W: 3, PAINT_Y: 4, CROSSWALK: 5, SIDEWALK: 6, CURB: 7, GRASS: 8,
   SOIL: 9, FLOWERBED: 10, PATH: 11, COURT: 12, COURT_LINE: 13, RUBBER: 14, WATER: 15, PLAZA: 16,
-  PATIO: 17, METAL: 18, BUSLANE: 19, BIKELANE: 20, SAND: 21, GRAVEL: 22, WOOD: 23, STAIRS: 24,
+  PATIO: 17, METAL: 18, BUSLANE: 19, BIKELANE: 20, SAND: 21, GRAVEL: 22, WOOD: 23, STAIRS: 24, RIVER: 25,
 };
 
 export const COL = {
@@ -38,35 +38,39 @@ export function raisedIntervals() {
   return out;
 }
 
-// Raised plinths [x0, y0, x1, y1]: one per block (with its sidewalks), the park's blocks merged into one.
+// Raised plinths [x0, y0, x1, y1]: one per block (with its sidewalks), each merged region (park,
+// Times Square) as one; nothing out over the river but the riverside promenade.
 export function plinthRects() {
   const iv = raisedIntervals();
-  const P = parkPlinth();
-  const inPark = (a, b) => a >= P.x0 && b <= P.x1;
+  const xs = iv.filter(([a]) => a < RIVER_X).map(([a, b]) => [a, Math.min(b, RIVER_X)]);
+  const Ps = MERGES.map(mergePlinth);
   const out = [];
-  for (const [ax, bx] of iv)
-    for (const [ay, by] of iv) if (!(inPark(ax, bx) && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
-  out.push([P.x0, P.y0, P.x1, P.y1]);
+  for (const [ax, bx] of xs)
+    for (const [ay, by] of iv) if (!Ps.some((P) => ax >= P.x0 && bx <= P.x1 && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
+  for (const P of Ps) out.push([P.x0, P.y0, P.x1, P.y1]);
   return out;
 }
-const inParkPlinth = (x, y, m = 0) => {
-  const P = parkPlinth();
+export const inParkPlinth = (x, y, m = 0) => x > RIVER_X - m || MERGES.some((M) => {
+  const P = mergePlinth(M);
   return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
-};
+});
 
 export function paintGround(region, rng) {
   const p = region.p;
   const N = MAP * T;
   const d = region.page.data;
-  // 1. asphalt everywhere (direct writes: this is ~14M texels)
+  // 1. asphalt everywhere (direct writes on the half-resolution page, sampled at even T-texels)
   const cells = Math.ceil(N / 64);
   const big = new Float32Array(cells * cells);
   for (let i = 0; i < big.length; i++) big[i] = hash2i(i % cells, (i / cells) | 0, 12) - 0.5;
   const ar = (COL.asphalt >> 16) & 255, ag = (COL.asphalt >> 8) & 255, ab = COL.asphalt & 255;
-  for (let y = 0; y < N; y++) {
+  const PW = region.page.w;
+  for (let Y = 0; Y < PW; Y++) {
+    const y = Y * 2;
     const row = (y >> 6) * cells;
-    let i = y * N * 4;
-    for (let x = 0; x < N; x++, i += 4) {
+    let i = Y * PW * 4;
+    for (let X = 0; X < PW; X++, i += 4) {
+      const x = X * 2;
       let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11) | 0;
       h = Math.imul(h ^ (h >>> 13), 1274126177);
       h ^= h >>> 16;
@@ -192,12 +196,15 @@ export function paintGround(region, rng) {
         }
       }
     }
+  // 5. the East River (the shader animates it; it never freezes)
+  p.rect(Math.round(RIVER_X * T), 0, N - Math.round(RIVER_X * T), N, 0x2a5a70, GC.RIVER);
   return { manholes };
 }
 
 function markBand(p, x, y, w, h, code) {
-  for (let yy = y; yy < y + h; yy++)
-    for (let xx = x; xx < x + w; xx++) {
+  const st = p.half ? 2 : 1;
+  for (let yy = y; yy < y + h; yy += st)
+    for (let xx = x; xx < x + w; xx += st) {
       const a = p.getA(xx, yy);
       if (a === GC.ASPHALT) p.setA(xx, yy, code);
     }
@@ -218,8 +225,9 @@ function zebra(p, x, y, w, h, dir) {
 
 function paintSidewalkRect(p, x, y, w, h, rng) {
   const S = 24; // slab size (0.75 units)
-  for (let yy = 0; yy < h; yy++)
-    for (let xx = 0; xx < w; xx++) {
+  const st = p.half ? 2 : 1;
+  for (let yy = 0; yy < h; yy += st)
+    for (let xx = 0; xx < w; xx += st) {
       const gx = x + xx, gy = y + yy;
       const hh = hash2i(gx, gy, 31);
       const slab = hash2i(Math.floor(gx / S), Math.floor(gy / S), 33);
@@ -273,18 +281,22 @@ function manhole(p, cx, cy, rng) {
 
 // Paint a rectangular lot area with a fill function f(x,y)->[color, code]
 export function paintLot(p, x0, y0, x1, y1, fn) {
-  for (let y = Math.round(y0 * T); y < Math.round(y1 * T); y++)
-    for (let x = Math.round(x0 * T); x < Math.round(x1 * T); x++) {
+  const st = p.half ? 2 : 1;
+  for (let y = Math.round(y0 * T); y < Math.round(y1 * T); y += st)
+    for (let x = Math.round(x0 * T); x < Math.round(x1 * T); x += st) {
       const r = fn(x, y);
       if (r) p.set(x, y, r[0], r[1]);
     }
 }
 
 // Geometry for ground, plinths and the diorama base
-export function buildGroundGeometry(mb, ground, tex) {
-  // road surface over entire map + diorama base sides
+export function buildGroundGeometry(mb, ground, tex, quay) {
+  // road surface over the land, the river a little lower behind a stone quay
   const g = { t: ground, world: true, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-  mb.box(0, 0, -BASE_DEPTH, MAP, MAP, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
+  mb.box(0, 0, -BASE_DEPTH, RIVER_X, MAP, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
+  mb.box(RIVER_X, 0, -BASE_DEPTH, MAP, MAP, WATER_Z, { pz: { t: ground, world: true, mat: MAT.GROUND } }, { topMat: MAT.GROUND });
+  mb.quad([RIVER_X, MAP, 0], [RIVER_X, 0, 0], [RIVER_X, 0, WATER_Z], [RIVER_X, MAP, WATER_Z],
+    [[0, 0], [MAP * T, 0], [MAP * T, -WATER_Z * T], [0, -WATER_Z * T]], quay, [1, 0, 0], 0);
   for (const [ax, ay, bx, by] of plinthRects()) {
     mb.box(ax, ay, 0, bx, by, CURB, {
       pz: { t: ground, u0: ax * T, v0: ay * T, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
@@ -370,9 +382,18 @@ export function buildSlabSides(mb, atlas, tex) {
     mb.quad([p0[0], p0[1], zz1], [p1[0], p1[1], zz1], [p1[0], p1[1], zz0], [p0[0], p0[1], zz0],
       [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], texr, [S.n[0], S.n[1], 0], mat);
   };
+  // the stretch of each side that runs under the river (in that side's own a-coordinate)
+  const RW = MAP - RIVER_X;
+  const riverSpan = { py: [RIVER_X, MAP], ny: [0, RW], px: [0, MAP], nx: null };
   for (const S of sides) {
-    // soil face around the opening
-    quadSide(S, 0, MAP, 0, tz1, 0, soil);
+    // soil face around the opening (stopping at the water where the river meets the edge)
+    const rs = riverSpan[S.key];
+    if (!rs) quadSide(S, 0, MAP, 0, tz1, 0, soil);
+    else {
+      if (rs[0] > 0) quadSide(S, 0, rs[0], 0, tz1, 0, soil);
+      quadSide(S, rs[0], rs[1], 0, tz1, WATER_Z, soil);
+      if (rs[1] < MAP) quadSide(S, rs[1], MAP, 0, tz1, 0, soil);
+    }
     quadSide(S, 0, MAP, 0, -BASE_DEPTH, tz0, soil);
     quadSide(S, 0, a0, 0, tz0, tz1, soil);
     quadSide(S, a1, MAP, 0, tz0, tz1, soil);
