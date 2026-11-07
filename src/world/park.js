@@ -13,7 +13,7 @@ import { stoneFill } from './facades.js';
 const PI = Math.PI;
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
 
-function segDist(px, py, ax, ay, bx, by) {
+export function segDist(px, py, ax, ay, bx, by) {
   const dx = bx - ax, dy = by - ay;
   const L2 = dx * dx + dy * dy || 1e-9;
   let t = ((px - ax) * dx + (py - ay) * dy) / L2;
@@ -22,7 +22,7 @@ function segDist(px, py, ax, ay, bx, by) {
 }
 
 // Catmull-Rom spline through control points (passes through every point)
-function spline(cp, per = 8) {
+export function spline(cp, per = 8) {
   if (cp.length < 3) return cp.map((p) => [p[0], p[1]]);
   const out = [];
   const P = (i) => cp[Math.max(0, Math.min(cp.length - 1, i))];
@@ -38,14 +38,14 @@ function spline(cp, per = 8) {
   return out;
 }
 
-function polyLen(pts) {
+export function polyLen(pts) {
   let L = 0;
   for (let i = 1; i < pts.length; i++) L += dist(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
   return L;
 }
 
 // point + unit direction at arc length s along a polyline
-function along(pts, s) {
+export function along(pts, s) {
   for (let i = 1; i < pts.length; i++) {
     const L = dist(pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]);
     if (s <= L || i === pts.length - 1) {
@@ -60,7 +60,7 @@ function along(pts, s) {
 }
 
 // points every ~step along the polyline, always including both ends
-function resample(pts, step) {
+export function resample(pts, step) {
   const L = polyLen(pts);
   const n = Math.max(1, Math.round(L / step));
   const out = [];
@@ -70,7 +70,7 @@ function resample(pts, step) {
   return out;
 }
 
-function roundedRect(x0, y0, x1, y1, r, step = 0.4) {
+export function roundedRect(x0, y0, x1, y1, r, step = 0.4) {
   const pts = [];
   const line = (ax, ay, bx, by) => { const n = Math.max(1, Math.ceil(dist(ax, ay, bx, by) / step)); for (let i = 0; i < n; i++) pts.push([ax + ((bx - ax) * i) / n, ay + ((by - ay) * i) / n]); };
   const arc = (ccx, ccy, a0, a1) => { const n = Math.max(4, Math.ceil((Math.abs(a1 - a0) * r) / step)); for (let i = 0; i < n; i++) { const a = a0 + ((a1 - a0) * i) / n; pts.push([ccx + Math.cos(a) * r, ccy + Math.sin(a) * r]); } };
@@ -81,7 +81,7 @@ function roundedRect(x0, y0, x1, y1, r, step = 0.4) {
   return pts;
 }
 
-function ellipsePts(ecx, ecy, rx, ry, step = 0.4) {
+export function ellipsePts(ecx, ecy, rx, ry, step = 0.4) {
   const n = Math.max(16, Math.ceil((2 * PI * Math.max(rx, ry)) / step));
   const pts = [];
   for (let i = 0; i < n; i++) { const a = (i / n) * 2 * PI; pts.push([ecx + Math.cos(a) * rx, ecy + Math.sin(a) * ry]); }
@@ -90,7 +90,7 @@ function ellipsePts(ecx, ecy, rx, ry, step = 0.4) {
 
 // Split a closed polyline at the points nearest the given junctions.
 // Returns the pieces (each from one junction to the next) and the snapped junction points.
-function splitClosed(pts, js) {
+export function splitClosed(pts, js) {
   const n = pts.length;
   const idx = js.map(([x, y]) => {
     let b = 0, bd = 1e9;
@@ -109,11 +109,11 @@ function splitClosed(pts, js) {
 }
 
 // Path network: junction-to-junction polylines, resampled into nav nodes.
-class Net {
+export class Net {
   constructor() { this.nodes = []; this.edges = []; this.strokes = []; }
-  node(x, y) {
-    for (let i = 0; i < this.nodes.length; i++) { const n = this.nodes[i]; if (Math.abs(n.x - x) < 0.35 && Math.abs(n.y - y) < 0.35) return i; }
-    this.nodes.push({ x, y });
+  node(x, y, z) {
+    for (let i = 0; i < this.nodes.length; i++) { const n = this.nodes[i]; if (Math.abs(n.x - x) < 0.35 && Math.abs(n.y - y) < 0.35 && (z == null || n.z == null || Math.abs(n.z - z) < 0.3)) return i; }
+    this.nodes.push(z == null ? { x, y } : { x, y, z });
     return this.nodes.length - 1;
   }
   edge(a, b) {
@@ -122,8 +122,9 @@ class Net {
   }
   // paint + walk a path; returns its node ids in order
   path(pts, w, o = {}) {
-    if (w > 0) this.strokes.push({ pts, w, edge: o.edge ?? 2 });
-    const ids = resample(pts, o.step ?? 2.6).map(([x, y]) => this.node(x, y));
+    if (w > 0) this.strokes.push({ pts, w, edge: o.edge ?? 2, kind: o.kind });
+    const rs = resample(pts, o.step ?? 2.6);
+    const ids = rs.map(([x, y], k) => this.node(x, y, o.z ? o.z(k / Math.max(1, rs.length - 1)) : undefined));
     for (let k = 1; k < ids.length; k++) this.edge(ids[k - 1], ids[k]);
     return ids;
   }
@@ -521,7 +522,7 @@ export function bigPark(C) {
 }
 
 // Raised ring wall (fountain basin)
-function ringWall(C, x, y, r, w, h, n = 16) {
+export function ringWall(C, x, y, r, w, h, n = 16) {
   const S = sharedTex(C);
   for (let k = 0; k < n; k++) {
     const a0 = (k / n) * 2 * PI, a1 = ((k + 1) / n) * 2 * PI;
@@ -539,7 +540,7 @@ function ringWall(C, x, y, r, w, h, n = 16) {
 }
 
 // Flat disc sampling the ground texture (so it shades as water / ice) at height z
-function waterDisc(C, x, y, r, z, n, group = GRP.ALWAYS) {
+export function waterDisc(C, x, y, r, z, n, group = GRP.ALWAYS) {
   const gt = C.world.ground;
   const ox = x * T, oy = y * T;
   // paint water under it so the ground texture holds the water code
@@ -552,7 +553,7 @@ function waterDisc(C, x, y, r, z, n, group = GRP.ALWAYS) {
 }
 
 // Radially paved plaza: concentric courses of limestone setts with a darker band near the rim
-function radialPlaza(C, x, y, r, inner) {
+export function radialPlaza(C, x, y, r, inner) {
   const g = C.world.ground.p;
   for (let ty = Math.floor((y - r) * T); ty < Math.ceil((y + r) * T); ty++)
     for (let tx = Math.floor((x - r) * T); tx < Math.ceil((x + r) * T); tx++) {
@@ -577,7 +578,7 @@ function radialPlaza(C, x, y, r, inner) {
 }
 
 // Little rowboat moored at the dock (hidden while the lake is frozen)
-function boat(C, x, y, ang, color) {
+export function boat(C, x, y, ang, color) {
   const A = C.atlas;
   const side = A.shared(`boat_side_${color}`, 48, 9, (p) => {
     p.rect(0, 0, 48, 9, 0xf2efe6);

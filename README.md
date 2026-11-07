@@ -22,35 +22,45 @@ npm run build
 
 ## What's in the city
 
-![The whole city from above: Midtown's towers and Times Square, Central Park, the Financial District, the East River, the Brooklyn Bridge and the Statue of Liberty](docs/city.png)
+![The Manhattan section from above: the Hudson, Central Park, Midtown's towers and Times Square, downtown, the Brooklyn Bridge over the East River to Brooklyn, the Statue of Liberty in the harbour](docs/city.png)
 
-- **12×12 blocks** of Manhattan-style city on a floating diorama slab, laid out roughly like the
-  real island: **Central Park** fills four blocks uptown between brownstone and walk-up streets,
-  Midtown packs in the towers, landmarks and a four-block **Times Square**, the Village, SoHo-style
-  lofts and **Chinatown** sit below it, and the Financial District fills the southern tip. The
-  **East River** runs down the east side past a granite quay, with the **Brooklyn Bridge** striding
-  out over it and the **Statue of Liberty** on her island at the harbour mouth. Pick a place from
-  the **GO TO** menu to glide there, or press **V** for a bird's-eye view (top-down, tilted just
-  enough to show the building fronts). The slab's cross-section reveals soil, schist and utility
-  pipes — and a **subway tunnel** where silver trains loop around the city and stop at a tiled
-  station with passengers waiting on the platform.
-  - an art-deco skyscraper with stepped setbacks and a crown that lights up at night in seasonal
-    colours, a blue glass curtain-wall tower, a dark bronze modernist tower with plaza fountains,
-    a limestone office with a copper roof, and a hotel with a vertical neon sign and marquee
-  - rows of **brownstones** with stoops, iron railings, cornices, areaway gardens and backyards
-  - red-brick **walk-ups** with zig-zag fire escapes, storefronts (bodega, pizza, laundromat,
-    coffee, bar, florist…), awnings, roll-down graffiti gates at night, ghost signs on side walls
-  - cast-iron **lofts** with a sidewalk shed, a firehouse, a movie theater marquee
+- **A section of Manhattan, river to river**, on a floating diorama slab: the **Hudson** down the
+  west side, the **East River** down the east with **Brooklyn**'s waterfront beyond it, and the
+  harbour across the bottom with the **Statue of Liberty**. North to south it runs from 110th Street
+  to the Battery: **Central Park**, five blocks long, between the Upper West and Upper East Sides;
+  Midtown's towers, hotels and **Times Square**; Chelsea, the Flatiron and the Village; SoHo,
+  Chinatown and the Financial District; the **Brooklyn Bridge** crossing to Brooklyn. Mostly towers,
+  offices, hotels, shops and museums — houses only here and there. Pick a place from the **GO TO**
+  menu to glide there (the camera turns to that place's best side), or press **V** for a bird's-eye
+  view (top-down, tilted just enough to show the building fronts). The slab's cross-section reveals
+  soil, schist and utility pipes — and a **subway tunnel** where silver trains loop around the city
+  and stop at a tiled station with passengers waiting on the platform.
+  - pre-war apartment towers along the park: twin-towered with little temples on top on Central
+    Park West, limestone under slate mansards on Fifth Avenue, buff brick with art deco setbacks
+  - pencil-thin supertalls on Billionaires' Row, glass and limestone office towers, art deco
+    skyscrapers with crowns that light up at night in seasonal colours, a hotel with a vertical
+    neon sign and marquee
+  - rows of **brownstones** with stoops, iron railings and areaway gardens, red-brick **walk-ups**
+    with zig-zag fire escapes and storefronts (bodega, pizza, laundromat, coffee, bar, florist…),
+    cast-iron **lofts** in SoHo, a firehouse, a movie theater marquee
   - rooftops packed with water towers (some painted like flags), billboards, bulkheads, HVAC,
     chimneys, satellite dishes, roof decks and gardens
-  - pre-war **red-brick apartment houses**, six and seven storeys, with fire escapes, water
-    towers and canvas entrance canopies reaching to the kerb
   - **shopping streets**: a storefront in every building (shoes, fashion, electronics, toys,
     jewellery, bakery, records, sports…) with window displays, awnings, sandwich boards and
-    district banners on the lamp posts, and a limestone **department store** with lit display
-    windows, revolving doors and flags
+    district banners on the lamp posts, and a limestone **department store**
 - **Landmarks**, each built from the same pixel kit as the rest of the town (and each on the
   GO TO menu):
+  - round Central Park: the **Guggenheim**'s white spiral, **the Met**'s Beaux-Arts front with its
+    banners, steps and fountains, the **Natural History** museum with its glass-cube planetarium,
+    **Lincoln Center**'s fountain between the opera's arches, **Columbus Circle**'s twin towers and
+    column, and **the Plaza** with its green copper roofs, the Pulitzer fountain and a gilded general
+  - **St Patrick's Cathedral**: white marble, twin spires, a rose window and stained glass
+  - the **United Nations**' green glass slab by the East River, its row of flags on First Avenue
+  - **Hudson Yards**' glass towers with the observation deck, and the copper honeycomb Vessel
+  - the **9/11 Memorial**: two square pools, water falling into the voids, bronze parapets, a grove
+    of oaks, and the Oculus's white ribs
+  - **Battery Park** at the southern tip: lawns, plane trees, Castle Clinton's round fort, the glass
+    carousel
   - an **Empire State**-style art-deco tower with five setbacks, full-height aluminium piers, a
     crown lit in seasonal colours and the mooring mast on top — the tallest thing in Midtown
   - a **Chrysler**-style tower: white brick, steel eagles at the setback, a crown of stacked
@@ -70,28 +80,40 @@ npm run build
   - **Washington Square**: lawns, paths, the round fountain and the white marble arch
   - **Chinatown**: red-and-gold shopfronts (dumplings, tea, herbs, seafood, bakeries), red
     lanterns strung along the street and a gate with a green-tiled roof
-  - the **Brooklyn Bridge**: a granite abutment at the quay, a deck with a raised boardwalk running
-    through the Gothic stone tower, and the main cables sweeping down with their suspenders and web
-    of diagonal stays
-  - the **Statue of Liberty** on a grassy island with the star-shaped fort and granite pedestal,
-    torch held high, floodlit at night
-- **Times Square** takes over four blocks: the streets inside are closed to traffic and paved
-  into one pedestrian plaza, ringed by towers whose facades are stacked with animated screens, lit
-  billboards and a scrolling news ticker. Its south-east corner is left open as a square of its
-  own, where red bleacher steps rise behind a ticket booth, crowded with people taking in the
-  lights, among café tables, planters, carts and floodlights. A bronze statue stands at the north
-  end and a tower with a crystal ball on its mast at the south end (the ball drops at midnight on
-  winter nights, then fireworks). The city opens on this view. All the ads are made up; at night
-  the screens wash the square in colour.
-- A **basketball court** with chain-link fence, hoops and floodlights, a playground with a swing
-  set (kids pump the swings on their chains), a slide with a ladder, deck and roof, a sprinkler,
-  and a handball wall with a mural.
-- **Central Park** takes over the streets between its four blocks:
-  a stone wall with gate pillars, a loop drive for joggers, an elm-lined promenade leading to a
-  tiered fountain on a paved terrace, a mown oval Great Lawn, a lake with an island, rocky
-  shores, a boat dock and rowboats (an ice rink in winter), a statue garden with formal flower
-  beds, a cherry grove, a wooded ramble with pines and boulders, a dog run, and over a hundred
-  trees, lanterns and benches. Benches line its outer wall, and the bus loops round it.
+  - the **Brooklyn Bridge**, river to river: an arched stone approach climbing from Manhattan to the
+    granite anchorage, then over FDR Drive and the East River through two Gothic towers standing in
+    the water to the Brooklyn anchorage. Four main cables sag across the main span, hung with
+    suspenders and the web of diagonal stays; roadways run either side of the raised wooden
+    promenade, which people walk across (stairs down to Brooklyn's promenade at the far end)
+  - **Brooklyn's waterfront** across the river: a promenade with benches facing the skyline, lawns,
+    the carousel in its glass box, brick warehouses and brownstones, a subway station
+  - the **Statue of Liberty** on her island in the harbour: copper-green, torch held high, the
+    crown's seven rays, the tablet, the stola draped over the folds of her gown, the broken chain at
+    her feet; the granite pedestal with its loggias and balcony on Fort Wood's eleven-pointed star;
+    lawns, trees, a museum pavilion and a ferry at the pier; floodlit at night
+- **Times Square** takes over four blocks in Midtown (42nd to 47th Street, two blocks south of the
+  park): the streets inside are closed to traffic and paved into one pedestrian plaza, ringed by
+  towers whose facades are stacked with animated screens, lit billboards and a scrolling news
+  ticker. Its south-east corner is left open as a square of its own, where red bleacher steps rise
+  behind a ticket booth, crowded with people taking in the lights, among café tables, planters,
+  carts and floodlights. A bronze statue stands at the north end and a tower with a crystal ball on
+  its mast at the south end (the ball drops at midnight on winter nights, then fireworks). The city
+  opens on this view. All the ads are made up; at night the screens wash the square in colour.
+- **Central Park**, five blocks long, takes over the streets inside it and is laid out like the real
+  one from north to south: **Harlem Meer**, the North Woods with the Loch and the Great Hill, the
+  **Conservatory Garden** (fountain, beds, hedges, a wisteria pergola) and a dog run; the
+  **Reservoir** inside its fence and running track, a gatehouse and cherry trees on its bank; the
+  **Great Lawn** with its ballfields, **Turtle Pond** under **Belvedere Castle** on Vista Rock, and
+  **Cleopatra's Needle**; the wooded **Ramble** down to **the Lake**, crossed by cast-iron **Bow
+  Bridge**, with the **Boathouse** and its rowboats; **Bethesda Terrace** and its fountain with the
+  angel, the **Mall**'s double row of elms, **Sheep Meadow**, **Strawberry Fields** and its "Imagine"
+  mosaic; **Wollman Rink** and **the Pond** with stone **Gapstow Bridge** at the bottom. The drive loops
+  round it all, stone walls run round the edge with a gate at every street, and thousands of trees,
+  lanterns and benches fill the rest. The bus loops round it, and the walking paths, bridges and
+  sights (Bethesda Terrace, the Reservoir, the castle, Bow Bridge, Harlem Meer, the Great Lawn) are
+  on the GO TO menu.
+- A **basketball court** with chain-link fence, hoops and floodlights, a playground and a handball
+  wall with a mural, in the Village.
 - Streets with crosswalks, working **traffic and pedestrian signals**, street lamps, hydrants,
   mailboxes, newspaper boxes, bus shelters, subway entrances with green globes, food carts, and
   steel **vent grates in the sidewalks** and manholes that puff steam (most in winter).
@@ -160,7 +182,7 @@ nearest the middle of the screen; the camera switches to the bird's-eye view and
   grab you (or their cars box you in) you're **BUSTED** and released across town with a clean
   slate. Break line of sight and keep out of view (a low wall or a bench won't hide you); when the
   stars start blinking they're searching, and if they don't find you, you've lost them. Hide
-  somewhere a car can't reach — inside the park walls, up on a plaza — and the patrol car parks as
+  somewhere a car can't reach — inside the park walls, out on a plaza — and the patrol car parks as
   close as it can get while its crew comes in after you on foot.
 - **Esc** (or **P**) hands the person back to their day.
 
@@ -198,8 +220,11 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
-  `layout.js` is the 12×12 block map (with merged regions for Central Park and Times Square and
-  the river column), `landmarks.js` and `timessq.js` build the one-off places. To keep the big map
+  `layout.js` is the 12×12 block map of the Manhattan section (merged regions for Central Park and
+  Times Square, land and water rectangles for the island, Brooklyn's shore, the rivers and the
+  harbour); `centralpark.js` builds the park, `manhattan.js` the towers, museums and plazas round
+  it and downtown, `landmarks.js` the skyscrapers, the bridge and the statue, `timessq.js` the
+  square. To keep the big map
   quick to build and light on memory, ordinary blocks come in a few seeded variants per type whose
   atlas art is painted once and reused, and the ground is painted at half the art resolution with
   the fine grain added back in the shader.

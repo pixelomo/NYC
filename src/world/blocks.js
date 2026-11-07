@@ -1,6 +1,7 @@
 // Block-by-block city generation + street furniture.
 
-import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, RIVER_X, roadEnd, WATER_Z } from './layout.js';
+import { T, NB, PERIOD, CURB, MAP, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, roadEnd, WATER_Z, WATERS } from './layout.js';
+import { quayEdges } from './ground.js';
 import { RNG } from '../core/math.js';
 import { GC, COL } from './ground.js';
 import { MAT, GRP } from './mesh.js';
@@ -13,8 +14,9 @@ import {
 } from './props.js';
 import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard, SHOPPING, CHINATOWN } from './facades.js';
 import * as LM from './landmarks.js';
+import * as MH from './manhattan.js';
 import { winCode, textWidth } from '../core/painter.js';
-import { bigPark } from './park.js';
+import { centralPark } from './centralpark.js';
 import { billboardsBlock, timesSquareBlock, timesSquareDistrict } from './timessq.js';
 
 export function makeContext(world, mb, atlas, rng) {
@@ -143,6 +145,27 @@ function groundFill(kind, x, y, X0, Y0, X1, Y1) {
       else if (b < 0.08) c = shade(c, 0.84);
       if (h > 0.996) c = [0xf2f2e8, 0xf2d84a, 0xd8d0f0][Math.floor(hash2i(x, y, 3) * 3)]; // clover / dandelions
       return [c, GC.GRASS];
+    }
+    case 'falls': {
+      // water pouring over the edge of a memorial pool: white foam streaks
+      const c = hash2i(x >> 1, y >> 3, 63) > 0.5 ? 0xe8f0f4 : 0xb8ccd8;
+      return [shade(c, 0.95 + h * 0.08), GC.RIVER];
+    }
+    case 'void': {
+      return [shade(0x101418, 0.9 + h * 0.15), GC.METAL];
+    }
+    case 'rink': {
+      // the ice at the rink: blue-white, scored by skates
+      let c = shade(0xdcecf4, 0.95 + h * 0.05);
+      if (hash2i(x >> 3, y >> 1, 61) > 0.94) c = 0xc4d8e6;
+      else if (hash2i(x >> 1, y >> 3, 62) > 0.96) c = 0xeef6fa;
+      return [c, GC.COURT];
+    }
+    case 'driveway': {
+      // the park drive: smooth asphalt
+      let c = shade(0x56595f, 0.93 + h * 0.1);
+      if (h > 0.986) c = 0x6c6f75;
+      return [c, GC.PATH];
     }
     case 'path': {
       // hexagonal asphalt pavers
@@ -281,26 +304,37 @@ export function buildBlocks(C) {
       C.atlas.endReplay();
     }
   C.rng = rng0;
-  time('park', () => bigPark(C));
+  time('park', () => centralPark(C));
   time('tsq', () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart));
-  time('river', () => riverside(C));
+  time('waterfront', () => waterfront(C));
   time('furniture', () => streetFurniture(C));
   C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') + `, replayed ${C.atlas.replayed || 0}`;
 }
 
 
-// The East River's edge: a granite quay with an iron railing along the riverside promenade
-function riverside(C) {
+// The waterfront: the water is out of bounds, an iron railing runs along every quay, the Brooklyn
+// Bridge crosses the East River to Brooklyn's shore and the Statue of Liberty stands in the harbour
+function waterfront(C) {
   const W = C.world, mb = C.mb;
-  const x = RIVER_X - 0.12;
   const P = propTex(C);
-  W.solids.push([RIVER_X - 0.2, 0, MAP + 1, MAP]);
-  // the Brooklyn Bridge off the bottom of the island, the Statue of Liberty out in the harbour
-  LM.brooklynBridge(C, roadCenter(9));
-  LM.statueOfLiberty(C, (RIVER_X + MAP) / 2 + 1, MAP - 12);
-  for (let y = 0.5; y < MAP - 0.5; y += 1.5) mb.box(x - 0.04, y - 0.04, CURB, x + 0.04, y + 0.04, CURB + 0.55, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
-  mb.box(x - 0.05, 0.3, CURB + 0.5, x + 0.05, MAP - 0.3, CURB + 0.58, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
-  void WATER_Z; void roadEnd;
+  for (const w of WATERS) W.solids.push([w.x0 - 0.2, w.y0 - 0.2, w.x1 + 0.2, w.y1 + 0.2]);
+  const iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
+  for (const [ax, ay, bx, by, n] of quayEdges()) {
+    // (just inside the land, along the edge)
+    const ox = -n[0] * 0.12, oy = -n[1] * 0.12;
+    const x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
+    if (n[0]) {
+      for (let y = y0 + 0.5; y < y1 - 0.3; y += 1.5) mb.box(x0 - 0.04, y - 0.04, CURB, x0 + 0.04, y + 0.04, CURB + 0.55, iron);
+      mb.box(x0 - 0.05, y0 + 0.3, CURB + 0.5, x0 + 0.05, y1 - 0.3, CURB + 0.58, iron);
+    } else {
+      for (let x = x0 + 0.5; x < x1 - 0.3; x += 1.5) mb.box(x - 0.04, y0 - 0.04, CURB, x + 0.04, y0 + 0.04, CURB + 0.55, iron);
+      mb.box(x0 + 0.3, y0 - 0.05, CURB + 0.5, x1 - 0.3, y0 + 0.05, CURB + 0.58, iron);
+    }
+  }
+  LM.brooklynBridge(C);
+  LM.brooklynShore(C);
+  LM.statueOfLiberty(C);
+  void WATER_Z; void roadEnd; void MAP;
 }
 
 const BLOCKS = {
@@ -337,9 +371,25 @@ const BLOCKS = {
   arena: (C, L) => LM.arena(C, L),
   flatiron: (C, L) => LM.flatiron(C, L),
   washsq: (C, L) => LM.washingtonSquare(C, L),
-  chinatown: (C, L, bx, by) => { walkupBlock(C, L, { shops: 1, shopKinds: CHINATOWN, floors: [4, 6], fireEscape: true, awning: 1 }); LM.chinatownExtras(C, L, by === 8 && bx === 5); },
+  chinatown: (C, L, bx, by) => { walkupBlock(C, L, { shops: 1, shopKinds: CHINATOWN, floors: [4, 6], fireEscape: true, awning: 1 }); LM.chinatownExtras(C, L, by === 9 && bx === 8); },
   wtc: (C, L) => LM.oneWTC(C, L),
   exchange: (C, L) => LM.exchange(C, L),
+  // the rest of Manhattan
+  prewar: (C, L, bx, by) => MH.prewar(C, L, bx, by),
+  hotel: (C, L, bx, by) => MH.hotelBlock(C, L, bx, by),
+  supertall: (C, L, bx) => MH.supertall(C, L, bx),
+  guggenheim: (C, L) => MH.guggenheim(C, L),
+  museum: (C, L) => MH.metMuseum(C, L),
+  naturalhistory: (C, L) => MH.naturalHistory(C, L),
+  lincoln: (C, L) => MH.lincolnCenter(C, L),
+  columbus: (C, L) => MH.columbusCircle(C, L),
+  plazahotel: (C, L) => MH.plazaHotel(C, L),
+  stpatricks: (C, L) => MH.stPatricks(C, L),
+  un: (C, L) => MH.unHQ(C, L),
+  hudsonyards: (C, L) => MH.hudsonYards(C, L),
+  memorial: (C, L) => MH.memorial(C, L),
+  battery: (C, L) => MH.batteryPark(C, L),
+  bridge: (C, L) => MH.bridgeApproach(C, L),
 };
 
 // ---------------------------------------------------------------------------

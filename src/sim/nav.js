@@ -224,7 +224,7 @@ export function buildNav(world) {
   // Park network (paths described by the park builder) ---------------------------
   if (world.parkNet) {
     const N = world.parkNet;
-    const pn = N.nodes.map((n) => G.add(n.x, n.y, CURB, 'park'));
+    const pn = N.nodes.map((n) => G.add(n.x, n.y, n.z ?? CURB, 'park'));
     for (const [a, b] of N.edges) G.link(pn[a], pn[b]);
     // gates: link to the sidewalk outside (or straight to an intersection corner)
     for (const g of N.gates) {
@@ -249,10 +249,19 @@ export function buildNav(world) {
   }
   // other walkable squares (Times Square): their own nets, joined to the sidewalks
   poi.squares = {};
+  const netSights = [];
   for (const N of world.extraNets || []) {
-    const pn = N.nodes.map((n) => G.add(n.x, n.y, CURB, 'plaza'));
+    const pn = N.nodes.map((n) => G.add(n.x, n.y, n.z ?? CURB, 'plaza'));
     for (const [a, b] of N.edges) G.link(pn[a], pn[b]);
     for (const g of N.gates) { const sw = G.attach(g.sx, g.sy, 2.5); if (sw) G.link(pn[g.node], sw); }
+    // a net's own subway stations (Brooklyn's), and the spots tourists come to see (the bridge)
+    for (const st of N.subways || []) {
+      const bottom = G.add(st.bx, st.by, CURB - 1.2, 'subway', st);
+      G.link(pn[st.node], bottom);
+      bottom.sw = pn[st.node];
+      poi.subways.push(bottom);
+    }
+    for (const k of N.sights || []) netSights.push(pn[k]);
     poi.squares[N.name] = pn;
     const R = N.rect;
     for (const b of world.benches) {
@@ -263,7 +272,7 @@ export function buildNav(world) {
     }
   }
   // landmarks tourists come to photograph
-  poi.landmarks = [];
+  poi.landmarks = [...netSights];
   for (const l of world.landmarks || []) { const sw = G.attach(l.x, l.y, 5); if (sw) poi.landmarks.push(sw); }
   // other benches (plazas, bus shelters): attach to sidewalk
   for (const b of world.benches) {

@@ -1142,57 +1142,138 @@ export function buildPropSprites(atlas) {
   // ---- landmark statues ----
   // The Statue of Liberty: copper-green gown in folds, the stola across the body, the tablet in her
   // left arm, the torch held high in her right (its flame glows at night), the seven-rayed crown.
-  A.add('liberty', 64, 184, (sp) => {
-    const G = S.C1, D = S.C2, Lt = S.C3, F1 = S.C4, F2 = S.C5, Tb = S.C6;
-    const g = 183;
-    // gown from the bust to the hem, widening, with drapery folds; lit left edge, shadowed right
-    for (let y = 66; y <= g; y++) {
-      const t = (y - 66) / (g - 66);
-      const half = 10 + t * 7, cx = 33 + Math.sin(t * 2.2) * 1.2;
-      for (let x = Math.floor(cx - half); x <= Math.ceil(cx + half); x++) {
-        const u = (x - (cx - half)) / (2 * half);
-        const fold = Math.sin(u * 17 + t * 5 + Math.sin(t * 9) * 0.6);
-        let slot = G, sh = 126;
-        if (fold > 0.82) { slot = Lt; sh = 136; } else if (fold < -0.78) { slot = D; sh = 112; }
-        if (u < 0.1) { slot = Lt; sh = 132; } else if (u > 0.9) { slot = D; sh = 104; }
-        if (y > g - 3) { slot = D; sh = 110; }
-        sp.set(x, y, slot, sh);
+  // the Statue of Liberty, copper-green and verdigris, lit from the upper left: her right arm holds
+  // the torch high (a gilded flame on its balconied cup), her left arm the tablet against her side;
+  // seven rays in the crown, the stola draped across the folded gown, the broken chain at her feet
+  A.add('liberty', 128, 384, (sp) => {
+    const G = S.C1, D = S.C2, Lt = S.C3, F1 = S.C4, F2 = S.C5, Tb = S.C6, DD = S.C7, Au = S.C8;
+    const W = 128, H = 384;
+    const slotA = new Uint8Array(W * H), shA = new Uint8Array(W * H);
+    const put = (x, y, slot, sh) => {
+      x = Math.round(x); y = Math.round(y);
+      if (x < 0 || y < 0 || x >= W || y >= H) return;
+      const v = Math.max(60, Math.min(190, Math.round(sh)));
+      sp.set(x, y, slot, v); slotA[y * W + x] = slot; shA[y * W + x] = v;
+    };
+    // patina by a 0..1 light value: deep shadow, shadow, mid, highlight
+    const pat = (x, y, l) => {
+      l = Math.max(0, Math.min(1, l));
+      if (l < 0.16) put(x, y, DD, 110 + l * 80);
+      else if (l < 0.42) put(x, y, D, 104 + (l - 0.16) * 80);
+      else if (l < 0.78) put(x, y, G, 110 + (l - 0.42) * 64);
+      else put(x, y, Lt, 118 + (l - 0.78) * 90);
+    };
+    const nz = (x, y, k) => hash2i(x, y, k) - 0.5;
+    const poly = (pts, fn) => {
+      let y0 = Infinity, y1 = -Infinity;
+      for (const [, y] of pts) { y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+      for (let y = Math.floor(y0); y <= Math.ceil(y1); y++) {
+        const xs = [];
+        for (let i = 0; i < pts.length; i++) {
+          const [ax, ay] = pts[i], [bx, by] = pts[(i + 1) % pts.length];
+          if ((ay <= y + 0.5 && by > y + 0.5) || (by <= y + 0.5 && ay > y + 0.5)) xs.push(ax + ((y + 0.5 - ay) / (by - ay)) * (bx - ax));
+        }
+        xs.sort((a, b) => a - b);
+        for (let k = 0; k + 1 < xs.length; k += 2) for (let x = Math.round(xs[k]); x < Math.round(xs[k + 1]); x++) fn(x, y, xs[k], xs[k + 1]);
+      }
+    };
+    const ell = (cx, cy, rx, ry, fn) => {
+      for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+        const dx = (x + 0.5 - cx) / rx, dy = (y + 0.5 - cy) / ry;
+        if (dx * dx + dy * dy <= 1) fn(x, y, dx, dy);
+      }
+    };
+    // ---- the gown: deep vertical folds, falling to a hem over her feet
+    poly([[46, 146], [84, 146], [90, 182], [96, 232], [102, 290], [107, 340], [110, 381], [20, 381], [23, 332], [29, 282], [35, 224], [40, 182]], (x, y, xl, xr) => {
+      const u = (x - xl) / Math.max(1, xr - xl);
+      const f = Math.sin(x * 0.52 + Math.sin(y * 0.031) * 2.4 + y * 0.004);
+      let l = 0.74 - u * 0.5 + f * 0.2 + nz(x, y, 301) * 0.05;
+      if (f < -0.8) l -= 0.14;
+      if (u < 0.05) l += 0.18; else if (u > 0.95) l -= 0.2;
+      if (y > 370) l -= 0.18 + (y - 370) * 0.03;
+      pat(x, y, l);
+    });
+    // ---- the stola: a heavy band across the body from her left shoulder to her right hip
+    const sa = [88, 147], sb = [42, 258], sw = 15;
+    const sdx = sb[0] - sa[0], sdy = sb[1] - sa[1], sl = Math.hypot(sdx, sdy), ux = sdx / sl, uy = sdy / sl;
+    poly([[sa[0] + uy * sw, sa[1] - ux * sw], [sb[0] + uy * sw, sb[1] - ux * sw], [sb[0] - uy * sw * 0.7, sb[1] + ux * sw * 0.7], [sa[0] - uy * sw * 0.7, sa[1] + ux * sw * 0.7]], (x, y) => {
+      const across = (x - sa[0]) * -uy + (y - sa[1]) * ux, along = (x - sa[0]) * ux + (y - sa[1]) * uy;
+      const f = Math.sin(across * 0.62 + along * 0.025);
+      let l = 0.66 + f * 0.24 - along / sl * 0.12 + nz(x, y, 302) * 0.04;
+      if (across > sw * 0.82 || across < -sw * 0.6) l -= 0.18;
+      pat(x, y, l);
+    });
+    // its end hanging from her left forearm, in long folds on the shadow side
+    poly([[86, 204], [106, 214], [112, 300], [108, 334], [94, 332], [88, 262]], (x, y, xl, xr) => {
+      const u = (x - xl) / Math.max(1, xr - xl);
+      const f = Math.sin(x * 0.7 + y * 0.05);
+      pat(x, y, 0.46 - u * 0.25 + f * 0.17 + nz(x, y, 303) * 0.04);
+    });
+    // ---- her left arm and the tablet held against her side
+    poly([[82, 146], [95, 150], [100, 192], [89, 196]], (x, y, xl, xr) => pat(x, y, 0.5 - (x - xl) / Math.max(1, xr - xl) * 0.3 + Math.sin(y * 0.4) * 0.08));
+    poly([[86, 162], [106, 155], [111, 232], [91, 239]], (x, y, xl, xr) => {
+      const u = (x - xl) / Math.max(1, xr - xl);
+      put(x, y, Tb, u < 0.08 ? 150 : 128 - u * 18 + nz(x, y, 304) * 8);
+    });
+    poly([[106, 155], [110, 158], [115, 231], [111, 232]], (x, y) => put(x, y, D, 104 + nz(x, y, 305) * 6));
+    for (const [ry, a0, a1] of [[182, 92, 103], [192, 93, 104], [202, 93, 102]]) for (let x = a0; x < a1; x++) if (hash2i(x, ry, 306) > 0.3) put(x, ry + (x - 90) * 0.33, D, 100);
+    ell(94, 236, 6.5, 5.2, (x, y, dx) => pat(x, y, 0.72 - dx * 0.25));
+    // ---- neck, face, hair
+    poly([[58, 124], [70, 124], [71, 146], [57, 146]], (x, y) => pat(x, y, 0.72 - (x - 57) * 0.022 + (y > 140 ? -0.12 : 0)));
+    ell(64, 115, 8.4, 10.6, (x, y, dx, dy) => pat(x, y, 0.82 - dx * 0.32 - Math.max(0, dy) * 0.1));
+    put(59, 112, Lt, 160); put(60, 112, Lt, 160); put(67, 112, Lt, 150); put(68, 112, Lt, 150); // brows
+    put(59, 114, DD, 96); put(60, 114, DD, 90); put(67, 114, DD, 96); put(68, 114, DD, 90); // eyes
+    for (let y = 113; y < 120; y++) { put(63, y, Lt, 150); put(65, y, D, 110); } // nose
+    put(64, 120, D, 104); put(62, 122, D, 100); put(63, 122, D, 96); put(64, 122, D, 96); put(65, 122, D, 100);
+    put(63, 123, Lt, 140); put(64, 123, Lt, 132); put(64, 126, D, 112); put(63, 126, D, 112);
+    for (const [hx, side] of [[54.5, -1], [73.5, 1]]) ell(hx, 117, 4.0, 9.5, (x, y, dx) => pat(x, y, (side < 0 ? 0.62 : 0.32) + Math.sin(y * 1.1 + dx * 2) * 0.14));
+    // ---- the crown: the diadem with its windows, seven rays fanning out above
+    for (let y = 100; y < 108; y++) for (let x = 53; x < 76; x++) {
+      const yy = y + Math.round(((x - 64.5) / 11) ** 2 * 2.5);
+      pat(x, yy, (y === 100 ? 0.92 : y > 105 ? 0.4 : 0.7) - (x - 53) * 0.012);
+    }
+    for (const wx of [55, 58, 61, 64, 67, 70, 73]) { const wy = 103 + Math.round(((wx - 64.5) / 11) ** 2 * 2.5); put(wx, wy, DD, 90); put(wx + 1, wy, DD, 96); put(wx, wy + 1, DD, 100); }
+    for (const deg of [166, 140, 115, 90, 65, 40, 14]) {
+      const a = (deg * Math.PI) / 180, dx = Math.cos(a), dy = -Math.sin(a);
+      const bx = 64.5 + dx * 9.5, by = 101 + dy * 5;
+      for (let t = 0; t < 26; t++) {
+        const w = 2.4 * (1 - t / 27) + 0.4;
+        for (let s2 = -w; s2 <= w; s2 += 0.5) put(bx + dx * t - dy * s2, by + dy * t + dx * s2, s2 < 0 ? Lt : D, s2 < 0 ? 146 - t * 0.8 : 112);
       }
     }
-    // the stola, draped from the left shoulder across to the right hip
-    for (let k = 0; k < 46; k++) for (let w = 0; w < 6; w++) sp.set(Math.round(26 + k * 0.42 + w), 70 + k, w < 2 ? Lt : w > 4 ? D : G, w < 2 ? 140 : 120);
-    // shoulders, neck and head
-    for (let y = 58; y < 70; y++) for (let x = 22; x < 45; x++) if (((x + 0.5 - 33) / 11.5) ** 2 + ((y + 0.5 - 70) / 11) ** 2 <= 1) sp.set(x, y, x < 28 ? Lt : x > 39 ? D : G, 128);
-    for (let y = 52; y < 59; y++) for (let x = 30; x < 36; x++) sp.set(x, y, x < 32 ? Lt : G, 124);
-    for (let y = 40; y < 54; y++) for (let x = 27; x < 39; x++) if (((x + 0.5 - 33) / 5.6) ** 2 + ((y + 0.5 - 47) / 6.8) ** 2 <= 1) sp.set(x, y, x < 31 ? Lt : x > 36 ? D : G, x < 31 ? 136 : 122);
-    sp.set(31, 46, D, 100); sp.set(35, 46, D, 100); sp.set(33, 48, D, 110); sp.set(32, 51, D, 104); sp.set(33, 51, D, 104);
-    // the crown: a band and seven rays
-    for (let x = 27; x < 39; x++) { sp.set(x, 40, Lt, 140); sp.set(x, 41, G, 122); }
-    for (let k = 0; k < 7; k++) {
-      const a = PI * (1.12 + (k / 6) * 0.76);
-      for (let r = 0; r < 10; r++) sp.set(Math.round(33 + Math.cos(a) * (5 + r)), Math.round(41 + Math.sin(a) * (5 + r)), r < 6 ? G : Lt, 132);
+    // ---- her right arm raised: the sleeve falling back from the elbow, the forearm, the hand
+    poly([[44, 146], [57, 150], [55, 118], [47, 98], [35, 104], [30, 130]], (x, y, xl, xr) => {
+      const u = (x - xl) / Math.max(1, xr - xl);
+      pat(x, y, 0.8 - u * 0.4 + Math.sin(x * 0.9 + y * 0.12) * 0.15 + nz(x, y, 307) * 0.04);
+    });
+    poly([[40, 104], [49, 102], [43, 70], [35, 72]], (x, y, xl, xr) => pat(x, y, 0.86 - (x - xl) / Math.max(1, xr - xl) * 0.42));
+    ell(39.5, 64, 5.2, 6.4, (x, y, dx) => pat(x, y, 0.82 - dx * 0.3));
+    // ---- the torch: handle, cup and balcony, the gilded flame
+    for (let y = 44; y < 61; y++) for (let x = 36; x < 42; x++) pat(x, y, x < 38 ? 0.85 : x > 40 ? 0.35 : 0.6);
+    poly([[25, 35], [52, 35], [45, 47], [32, 47]], (x, y, xl, xr) => pat(x, y, 0.82 - (x - xl) / Math.max(1, xr - xl) * 0.5 - (y - 35) * 0.012));
+    for (let x = 23; x < 55; x++) { put(x, 34, Lt, 150); if (x % 3 === 0) for (let y = 29; y < 34; y++) put(x, y, x < 38 ? Lt : D, x < 38 ? 136 : 108); put(x, 29, x < 38 ? Lt : G, 132); }
+    for (let y = 0; y < 30; y++) {
+      const t = y / 30, hw = y < 22 ? 10.5 * Math.pow(t / 0.733, 0.62) : 10.5 - (y - 22) * 0.45;
+      const cx = 38.5 + Math.sin(y * 0.35) * 1.2;
+      for (let x = Math.floor(cx - hw); x <= Math.ceil(cx + hw); x++) {
+        const d = Math.abs(x + 0.5 - cx) / Math.max(0.5, hw);
+        if (d > 1) continue;
+        if (d > 0.82) put(x, y, Au, 150);
+        else if (d < 0.42 && y > 6) put(x, y, F1, 150 - d * 30);
+        else put(x, y, F2, 140 - d * 20);
+      }
     }
-    // raised right arm (on our left) up to the torch
-    for (let y = 16; y < 64; y++) {
-      const t = (y - 16) / 48, x = 17 + t * 8;
-      for (let w = -3; w <= 2; w++) sp.set(Math.round(x + w), y, w < -1 ? Lt : w > 1 ? D : G, 126);
+    // ---- her right foot stepping out from the hem, the broken chain
+    ell(44, 380, 6.5, 3.2, (x, y, dx) => pat(x, y, 0.84 - dx * 0.3));
+    for (const [cx, cy] of [[60, 381], [66, 382], [72, 381]]) ell(cx, cy, 2.6, 1.6, (x, y, dx, dy) => { if (dx * dx + dy * dy > 0.3) put(x, y, DD, 96); });
+    // ---- a rim of light down her left side, a darker edge down her right
+    for (let y = 1; y < H - 4; y++) for (let x = 1; x < W - 1; x++) {
+      const i = y * W + x;
+      if (!slotA[i] || slotA[i] === F1 || slotA[i] === F2 || slotA[i] === Au) continue;
+      if (!slotA[i - 1]) put(x, y, Lt, Math.min(180, shA[i] + 14));
+      else if (!slotA[i + 1]) put(x, y, DD, 92);
     }
-    for (let y = 14; y < 19; y++) for (let x = 14; x < 21; x++) sp.set(x, y, x < 16 ? Lt : G, 130);
-    // the torch: a cup on a handle, and the flame
-    for (let y = 6; y < 14; y++) for (let x = 15; x < 21; x++) sp.set(x, y, y < 8 ? Lt : D, y < 8 ? 150 : 116);
-    for (let y = 0; y < 8; y++) for (let x = 12; x < 24; x++) {
-      const dx = (x + 0.5 - 18) / 4.2, dy = (y + 0.5 - 5) / 5;
-      const d = dx * dx + dy * dy;
-      if (d <= 1) sp.set(x, y, d < 0.35 ? F1 : F2, d < 0.35 ? 150 : 128);
-    }
-    // left arm bent, holding the tablet against the body (on our right)
-    for (let y = 70; y < 84; y++) for (let x = 41; x < 46; x++) sp.set(x, y, x > 44 ? D : G, 120);
-    for (let y = 72; y < 102; y++) for (let x = 0; x < 10; x++) {
-      const xx = Math.round(43 + x - (y - 72) * 0.12);
-      sp.set(xx, y, Tb, x === 0 ? 146 : x === 9 ? 104 : 124);
-    }
-    for (let x = 0; x < 9; x++) sp.set(Math.round(43 + x - 3), 98, D, 96);
-  }, 32, 183);
+  }, 64, 383);
   // a stone lion lying on its plinth, head up, as at the library steps
   A.add('lion', 48, 32, (sp) => {
     const G = S.C1, D = S.C2, Lt = S.C3;
@@ -1254,6 +1335,33 @@ export function buildPropSprites(atlas) {
     // plinth
     for (let x = 3; x < 29; x++) { sp.set(x, 38, c, 116); sp.set(x, 39, c, 94); }
   });
+  // the Angel of the Waters over Bethesda Fountain: a winged bronze figure blessing the water,
+  // a lily in her other hand
+  A.add('angel', 28, 40, (sp) => {
+    const c = S.C9;
+    // the gown, widening to the feet, folds catching the light
+    for (let y = 16; y < 38; y++) {
+      const t = (y - 16) / 22, half = 2.4 + t * 3.4;
+      for (let x = Math.floor(14 - half); x <= Math.ceil(14 + half); x++) {
+        const u = (x - (14 - half)) / (2 * half);
+        sp.set(x, y, c, u < 0.18 ? 146 : u > 0.82 ? 98 : Math.sin(u * 15 + t * 3) > 0.55 ? 136 : 120);
+      }
+    }
+    // wings raised behind the shoulders
+    for (const sd of [-1, 1]) for (let k = 0; k < 13; k++) for (let w = 0; w < 3 + (k >> 2); w++) {
+      const x = 14 + sd * (2.6 + k * 0.72 + w * 0.25), y = 19 - k * 1.0 + w * 0.9;
+      sp.set(Math.round(x), Math.round(y), c, sd < 0 ? 142 - w * 8 : 112 - w * 5);
+    }
+    // head; the right arm raised in blessing; the left holding the lily
+    sp.ellipse(14, 12.5, 2.1, 2.4, c, 134);
+    sp.set(13, 12, c, 104);
+    for (let k = 0; k < 7; k++) { sp.set(16 + (k >> 1), 17 - k, c, 132); sp.set(17 + (k >> 1), 17 - k, c, 106); }
+    for (let k = 0; k < 6; k++) { sp.set(11 - (k >> 1), 18 + k, c, 126); sp.set(10 - (k >> 1), 18 + k, c, 104); }
+    for (let k = 0; k < 6; k++) sp.set(8, 12 + k, c, 112);
+    sp.set(8, 11, S.C10, 150); sp.set(7, 10, S.C10, 140); sp.set(9, 10, S.C10, 140);
+    // plinth
+    for (let x = 7; x < 21; x++) { sp.set(x, 38, c, 116); sp.set(x, 39, c, 94); }
+  }, 14, 39);
   const X = TREE_SPECIES.xmas;
   A.add('xmas', X.w, X.h, (sp) => paintTree(sp, X, 77), X.w / 2, X.h - 1);
   A.add('snowman', 18, 26, (sp) => {

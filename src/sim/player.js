@@ -7,7 +7,7 @@
 // and stop to let officers out to chase you on foot. Get grabbed or boxed in and you're busted;
 // stay out of sight long enough and they lose you.
 
-import { MAP } from '../world/layout.js';
+import { MAP, MERGES, mergePlinth } from '../world/layout.js';
 import { clamp, dist, dist2, RNG } from '../core/math.js';
 import { personPose } from '../render/sprites.js';
 
@@ -659,11 +659,12 @@ export class Player {
   }
   // which way the distance field falls fastest around (x, y) (never through a wall: a thin wall
   // can separate two cells whose distances differ by the whole way round)
-  flowDir(x, y, onFoot = false) {
+  flowDir(x, y, onFoot = false, avoid = null) {
     let best = this.flowAt(x, y), bx = 0, by = 0;
     for (let k = 0; k < 16; k++) {
       const a = (k / 16) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
       for (const r of onFoot ? [1.0, 1.8, 2.6] : [1.4, 2.6]) {
+        if (avoid && avoid(x + ca * r, y + sa * r)) continue;
         const v = this.flowAt(x + ca * r, y + sa * r) + r * 0.05;
         if (v < best && (!onFoot || this.lineClear(x, y, x + ca * r, y + sa * r))) { best = v; bx = ca; by = sa; }
       }
@@ -680,10 +681,16 @@ export class Player {
     let tx = t.x, ty = t.y;
     if (this.car && this.stars >= 3) { const lead = Math.min(0.9, dist(c.x, c.y, t.x, t.y) / 10); tx += (this.car.vx || 0) * lead; ty += (this.car.vy || 0) * lead; }
     const d = dist(c.x, c.y, tx, ty), dTrue = dist(c.x, c.y, t.x, t.y);
-    let dir;
-    if (d < 12 && this.lineClear(c.x, c.y, tx, ty)) dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)];
-    else dir = this.flowDir(c.x, c.y);
-    if (!dir[0] && !dir[1]) dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)];
+    // after a suspect on foot they keep out of the park and the Times Square plaza (sidewalks round
+    // them included): as close as they can get, they stop and the crew goes in on foot
+    const noCar = this.car ? null : (x, y) => MERGES.some((M) => { const P = mergePlinth(M); return x > P.x0 && x < P.x1 && y > P.y0 && y < P.y1; });
+    let dir, hold = false;
+    if (d < 12 && !(noCar && noCar(tx, ty)) && this.lineClear(c.x, c.y, tx, ty)) dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)];
+    else dir = this.flowDir(c.x, c.y, false, noCar);
+    if (!dir[0] && !dir[1]) {
+      if (noCar && noCar(tx, ty)) { hold = true; dir = [Math.cos(c.h), Math.sin(c.h)]; }
+      else dir = [(tx - c.x) / (d || 1), (ty - c.y) / (d || 1)];
+    }
     const dh = wrap(Math.atan2(dir[1], dir[0]) - c.h);
     let v = V.fwd(c), yaw;
     if (c.stuckT > 0.9) { c.revT = 0.9; c.stuckT = 0; }
@@ -695,7 +702,7 @@ export class Player {
       const ram = this.stars >= 4 && this.car && V.speed(this.car) > 2;
       const top = 8.0 + this.stars * 0.25;
       // a suspect on foot: pull up a few metres short; one in a car: right up to the bumper (or into it)
-      const close = this.busted > 0 ? 0 : !this.car ? clamp((dTrue - 3.5) * 1.3, 0, top) : dTrue < 3.2 ? (ram ? 6.5 : Math.max(0.8, dTrue - 1.4)) : top;
+      const close = this.busted > 0 || hold ? 0 : !this.car ? clamp((dTrue - 3.5) * 1.3, 0, top) : dTrue < 3.2 ? (ram ? 6.5 : Math.max(0.8, dTrue - 1.4)) : top;
       const vmax = close * (1 - Math.min(0.62, (Math.abs(dh) / Math.PI) * 1.3));
       v += clamp(vmax - v, -10 * dt, 5 * dt);
       yaw = clamp(dh, -1, 1) * 2.8 * clamp(Math.abs(v) / 2, 0.35, 1);

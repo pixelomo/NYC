@@ -4,34 +4,36 @@
 // plaza (rink in winter, fountains in summer) with the golden statue and flags, the Flatiron wedge,
 // Grand Central's arched front with the tower behind it, the Public Library with its stone lions
 // and Bryant Park, the arena drum, the stock exchange's columns and great flag, Washington Square's
-// arch and fountain, Chinatown, the Brooklyn Bridge over the East River and the Statue of Liberty.
+// arch and fountain, Chinatown, the Brooklyn Bridge over the East River to Brooklyn's shore, and the
+// Statue of Liberty on her island in the harbour.
 
-import { T, CURB, WATER_Z, RIVER_X, MAP } from './layout.js';
+import { T, CURB, WATER_Z, MAP, EAST_X, BROOKLYN_X, HARBOR_Y, HUDSON_X, NB, BLOCK_TYPES, blockRect } from './layout.js';
 import { MAT } from './mesh.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { shade, mixc, hash2i, RNG } from '../core/math.js';
 import { PAL, stoneFill, brickFill, smoothFill, drawWindow, signBoard } from './facades.js';
-import { sharedTex, markHeight, Frame } from './buildings.js';
-import { section, band, region, beacon, lobbyDoors, plaza } from './towers.js';
-import { propTex, beam } from './props.js';
+import { sharedTex, markHeight, Frame, rowhouse } from './buildings.js';
+import { section, band, region, beacon, lobbyDoors, plaza, loft } from './towers.js';
+import { propTex, beam, parkLamp, subwayEntrance } from './props.js';
 
 const PI = Math.PI;
 const CROWN = 254; // window code for coloured crown lights at night
 
 // a landmark's name and where to look at it from (for the GO TO menu and tourists)
-function landmark(C, name, x, y) {
-  (C.world.landmarks || (C.world.landmarks = [])).push({ name, x, y });
+// (rot: the quarter turn the camera takes to see its best side over whatever is lowest beside it)
+export function landmark(C, name, x, y, rot = 0) {
+  (C.world.landmarks || (C.world.landmarks = [])).push({ name, x, y, rot });
 }
 
 // a free-standing flagpole with a waving flag
-function flagPole(C, x, y, h, type = 'us') {
+export function flagPole(C, x, y, h, type = 'us') {
   const P = propTex(C);
   C.mb.box(x - 0.04, y - 0.04, CURB, x + 0.04, y + 0.04, CURB + h, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver });
   C.world.flags.push({ x, y, z: CURB + h - 0.05, n: [0, 1], type, tip: { x: x + 0.45, y } });
 }
 
 // lobby band: stone with bronze doors and a name over the main entrance
-function lobbyBand(C, x0, y0, x1, y1, z0, z1, name, o = {}) {
+export function lobbyBand(C, x0, y0, x1, y1, z0, z1, name, o = {}) {
   const S = sharedTex(C);
   band(C, x0, y0, x1, y1, z0, z1, (p, w, h, i) => {
     stoneFill(p, 0, 0, w, h, [o.stone ?? 0xd8ccb0], 7 + i, 16, { blocks: 32 });
@@ -265,20 +267,20 @@ export function rockefeller(C, L) {
 
 // ---------------------------------------------------------------------------------------------
 // helpers for odd shapes
-function fillHeight(W, inside, x0, y0, x1, y1, h) {
+export function fillHeight(W, inside, x0, y0, x1, y1, h) {
   const MAPN = Math.sqrt(W.heights.length) | 0;
   for (let y = Math.max(0, Math.floor(y0)); y < Math.min(MAPN, Math.ceil(y1)); y++)
     for (let x = Math.max(0, Math.floor(x0)); x < Math.min(MAPN, Math.ceil(x1)); x++)
       if (inside(x + 0.5, y + 0.5)) W.heights[y * MAPN + x] = Math.max(W.heights[y * MAPN + x], h);
 }
 // a vertical wall between two points with a tiled texture (u along the wall)
-function wall(C, a, b, z0, z1, tex, mat, seed = 0) {
+export function wall(C, a, b, z0, z1, tex, mat, seed = 0) {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]) * T, H = (z1 - z0) * T;
   const nx = (b[1] - a[1]), ny = -(b[0] - a[0]), l = Math.hypot(nx, ny) || 1;
   C.mb.quad([a[0], a[1], z1], [b[0], b[1], z1], [b[0], b[1], z0], [a[0], a[1], z0], [[0, 0], [len, 0], [len, H], [0, H]], tex, [nx / l, ny / l, 0], mat, C.mb.defaultGroup, seed);
 }
 // round stone rim of a pool / fountain basin, water painted on the ground inside
-function roundPool(C, cx, cy, r, h = 0.45) {
+export function roundPool(C, cx, cy, r, h = 0.45) {
   const S = sharedTex(C);
   C.paintWhere(cx - r, cy - r, cx + r, cy + r, (x, y) => Math.hypot(x - cx, y - cy) < r - 0.1, 'water');
   const n = Math.max(12, Math.round(r * 6));
@@ -415,7 +417,7 @@ export function grandCentral(C, L) {
   section(C, L.x0 + 1.2, L.y0 + 0.5, L.x1 - 1.2, L.y0 + 6.0, z0, z0 + 50, slab, S.roofSilver, { seed: 159 });
   W.officeDoors.push({ x: (L.x0 + L.x1) / 2, y: ty1 + 0.9, dx: (L.x0 + L.x1) / 2, dy: ty1 - 0.2, kind: 'office' });
   W.officeDoors.push({ x: L.x0 + 4, y: ty1 + 0.9, dx: L.x0 + 4, dy: ty1 - 0.2, kind: 'office' });
-  landmark(C, 'GRAND CENTRAL', (L.x0 + L.x1) / 2, L.y1 + 3);
+  landmark(C, 'GRAND CENTRAL', (L.x0 + L.x1) / 2, L.y1 + 3, 3);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -598,7 +600,7 @@ export function washingtonSquare(C, L) {
   fS.facadeQuad(mb, 1.5, 4.5, 0, CURB + 3.15, CURB + 4.4, curve, { mat: 0 });
   for (const sx of [-1, 1]) W.solids.push([cx + sx * 1.55 - (sx > 0 ? 0 : 1.45), ay0, cx + sx * 1.55 + (sx > 0 ? 1.45 : 0), ay1, 6]);
   W.lamps.push({ x: cx, y: ay1 + 1.5, z: 1, r: 4, color: [1, 0.95, 0.85], k: 0.5, kind: 'flood' });
-  landmark(C, 'WASHINGTON SQUARE', cx, L.y1 + 3);
+  landmark(C, 'WASHINGTON SQUARE', cx, L.y1 + 3, 2);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -622,16 +624,27 @@ export function chinatownExtras(C, L, gate) {
   C.world.solids.push([gx - 0.18, gy0 - 0.18, gx + 0.18, gy0 + 0.18, 3.4]);
   C.world.solids.push([gx - 0.18, gy1 - 0.18, gx + 0.18, gy1 + 0.18, 3.4]);
   void P;
-  landmark(C, 'CHINATOWN', gx, L.y1 + 2);
+  landmark(C, 'CHINATOWN', gx, L.y1 + 2, 1);
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Brooklyn Bridge: from a granite abutment at the quay, a deck with a raised boardwalk runs out
-// over the East River through a Gothic stone tower; the main cables sweep down from the tower
-// saddles, hung with suspenders and the web of diagonal stays
-export function brooklynBridge(C, yb) {
+// The Brooklyn Bridge, river to river: from the granite anchorage on the Manhattan side, over FDR
+// Drive and the East River through two Gothic towers standing in the water, to the anchorage on the
+// Brooklyn shore. Four main cables sweep from the anchorages up over the tower saddles and sag across
+// the main span, hung with suspenders and the web of diagonal stays; the roadways run either side
+// of the raised wooden promenade, which people walk across (stairs at both ends).
+export const BRIDGE = { ZD: 7.0 };
+const bridgeBlock = () => {
+  for (let by = 0; by < NB; by++) for (let bx = 0; bx < NB; bx++) if (BLOCK_TYPES[by][bx] === 'bridge') return blockRect(bx, by);
+  return null;
+};
+export function brooklynBridge(C) {
+  const L = bridgeBlock();
+  if (!L) return;
   const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);
-  const x0 = RIVER_X, x1 = MAP, zd = 2.2;
+  const yb = (L.y0 + L.y1) / 2, ZD = BRIDGE.ZD, ZT = ZD + 13;
+  const xa = L.x1 - 7.6, x1 = MAP;
+  const xm = EAST_X + 6.5, xbk = BROOKLYN_X - 6.5, xmid = (xm + xbk) / 2;
   const granite = C.atlas.shared('bb_granite', 64, 64, (p) => {
     for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
       const row = y >> 3, off = row % 2 ? 8 : 0;
@@ -646,23 +659,24 @@ export function brooklynBridge(C, yb) {
   });
   const road = C.atlas.shared('bb_road', 32, 32, (p) => {
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(0x4a4d57, 0.92 + hash2i(x, y, 63) * 0.12));
-    for (let x = 0; x < 32; x += 2) if ((x >> 3) % 2 === 0) p.set(x, 15, 0xeeeef0);
+    for (let x = 0; x < 32; x += 2) if ((x >> 3) % 2 === 0) { p.set(x, 7, 0xeeeef0); p.set(x, 24, 0xeeeef0); }
   });
   const planks = C.atlas.shared('bb_planks', 32, 32, (p) => {
     for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, x % 4 === 0 ? 0x6a4a30 : shade(0xa87a50, 0.92 + hash2i(x >> 2, y, 64) * 0.14));
   });
-  // abutment in the river beside the quay, the deck and the raised boardwalk on it
-  mb.box(x0, yb - 3.6, WATER_Z, x0 + 3.0, yb + 3.6, zd, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
-  mb.box(x0, yb - 3.1, zd - 0.45, x1, yb + 3.1, zd, { py: truss, ny: truss, pz: { t: road, world: true } });
-  mb.box(x0, yb - 0.8, zd, x1, yb + 0.8, zd + 0.45, { py: truss, ny: truss, pz: { t: planks, world: true } });
-  for (const sy of [-1, 1]) {
-    const y = yb + sy * 0.78;
-    for (let x = x0 + 0.5; x < x1; x += 1.0) mb.box(x - 0.03, y - 0.03, zd + 0.45, x + 0.03, y + 0.03, zd + 1.0, { px: P.black, nx: P.black, py: P.black, ny: P.black });
-    mb.box(x0, y - 0.03, zd + 0.95, x1, y + 0.03, zd + 1.02, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
+  const cable = C.atlas.shared('bb_cable', 8, 8, (p) => { for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) p.set(x, y, shade(0x5c5a56, 0.9 + hash2i(x, y, 65) * 0.15)); });
+  // the deck: roadways either side, the promenade raised along the middle
+  mb.box(xa, yb - 3.1, ZD - 0.55, x1, yb + 3.1, ZD, { py: truss, ny: truss, pz: { t: road, world: true } });
+  mb.box(xa, yb - 0.8, ZD, x1, yb + 0.8, ZD + 0.45, { py: truss, ny: truss, pz: { t: planks, world: true } });
+  const iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
+  for (const [y, z] of [[yb - 0.78, ZD + 0.45], [yb + 0.78, ZD + 0.45], [yb - 3.08, ZD], [yb + 3.08, ZD]]) {
+    for (let x = xa + 0.5; x < x1; x += 1.0) mb.box(x - 0.03, y - 0.03, z, x + 0.03, y + 0.03, z + 0.55, iron);
+    mb.box(xa, y - 0.03, z + 0.5, x1, y + 0.03, z + 0.57, iron);
   }
-  // the tower: three piers rising from the water, joined over the roadways by the arched upper block
-  const tx0 = x0 + 8.5, tx1 = tx0 + 3.0, zt = 12.0;
-  const arches = C.atlas.alloc(Math.round(7.6 * T), Math.round((zt - 7.0) * T));
+  // the towers: three piers rising from a footing in the river, joined above the roadways by the
+  // upper block with its two pointed arches, a cornice on top
+  const AH = ZT - (ZD + 3.4);
+  const arches = C.atlas.alloc(Math.round(9.2 * T), Math.round(AH * T));
   {
     const p = arches.p, w = arches.w, h = arches.h;
     for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
@@ -671,94 +685,281 @@ export function brooklynBridge(C, yb) {
       if (y % 8 === 0 || (x + off) % 16 === 0) c = 0x8a7e68;
       p.set(x, y, c);
     }
-    // two pointed (Gothic) arch heads over the roadway openings
-    for (const ac of [w * 0.27, w * 0.73]) {
-      const half = w * 0.16;
+    // pointed arch heads over the two roadway openings (each 2.3 wide, centred 1.85 off the middle)
+    for (const ac of [w / 2 - 1.85 * T, w / 2 + 1.85 * T]) {
+      const half = 1.15 * T, r = half * 1.7, cxo = half - r;
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
         const dx = Math.abs(x + 0.5 - ac), up = h - y;
-        const r = half * 1.6, cxo = half - r; // two circles meeting at a point
-        const inArch = dx < half && Math.hypot(dx - cxo, up) < r && up < h * 0.9;
-        if (inArch) p.set(x, y, 0x2a2622);
+        if (dx < half && Math.hypot(dx - cxo, up) < r && up < h * 0.62) p.set(x, y, 0x2a2622);
       }
+      // a pair of tall blind lancets above each arch
+      for (const lx of [ac - 0.55 * T, ac + 0.25 * T]) for (let y = Math.round(h * 0.12); y < Math.round(h * 0.3); y++) for (let x = Math.round(lx); x < Math.round(lx + 0.3 * T); x++) p.set(x, y, 0x5a5044);
     }
-    for (let x = 0; x < w; x++) { p.set(x, 0, 0xd8ccb0); p.set(x, 1, 0xc8bca0); }
+    for (let x = 0; x < w; x++) { p.set(x, 0, 0xd8ccb0); p.set(x, 1, 0xc8bca0); p.set(x, 2, 0x9a8e74); }
   }
-  for (const [ya, yb2] of [[yb - 3.8, yb - 2.4], [yb - 0.7, yb + 0.7], [yb + 2.4, yb + 3.8]]) mb.box(tx0, ya, WATER_Z, tx1, yb2, 7.0, { px: granite, nx: granite, py: granite, ny: granite });
-  mb.box(tx0, yb - 3.8, 7.0, tx1, yb + 3.8, zt, { px: arches, nx: arches, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
-  mb.box(tx0 - 0.2, yb - 4.0, zt, tx1 + 0.2, yb + 4.0, zt + 0.5, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
-  W.solids.push([tx0, yb - 3.8, tx1, yb + 3.8, zt]);
-  // main cables, suspenders and stays
-  const cable = P.black;
-  const cz = (x) => (x < tx0 ? zd + 0.6 + ((x - x0) / (tx0 - x0)) ** 2 * (zt + 0.4 - zd - 0.6) : zt + 0.4 - (1 - Math.exp(-(x - tx1) / 7)) * (zt - 4.6));
-  for (const sy of [-1, 1]) {
-    const y = yb + sy * 3.05;
-    const pts = [];
-    for (let x = x0 + 0.5; x <= tx0 + 0.01; x += (tx0 - x0 - 0.5) / 6) pts.push([x, y, cz(x)]);
-    pts.push([tx0 + 1.5, y, zt + 0.5]);
-    for (let x = tx1; x <= x1 + 0.01; x += (x1 - tx1) / 8) pts.push([x, y, cz(x)]);
-    for (let k = 1; k < pts.length; k++) beam(C, pts[k - 1], pts[k], 0.09, cable);
-    for (let x = x0 + 1; x < x1; x += 0.9) {
-      if (x > tx0 - 0.3 && x < tx1 + 0.3) continue;
-      mb.box(x - 0.02, y - 0.02, zd, x + 0.02, y + 0.02, cz(x), { px: cable, nx: cable, py: cable, ny: cable });
+  for (const xt of [xm, xbk]) {
+    mb.box(xt - 2.2, yb - 5.3, WATER_Z - 0.1, xt + 2.2, yb + 5.3, 0.6, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
+    for (const [ya, yz] of [[yb - 4.6, yb - 3.0], [yb - 0.7, yb + 0.7], [yb + 3.0, yb + 4.6]]) mb.box(xt - 1.6, ya, 0.6, xt + 1.6, yz, ZD + 3.4, { px: granite, nx: granite, py: granite, ny: granite });
+    mb.box(xt - 1.6, yb - 4.6, ZD + 3.4, xt + 1.6, yb + 4.6, ZT, { px: arches, nx: arches, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
+    mb.box(xt - 1.82, yb - 4.82, ZT, xt + 1.82, yb + 4.82, ZT + 0.45, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
+    W.solids.push([xt - 2.2, yb - 5.3, xt + 2.2, yb + 5.3, ZT]);
+    markHeight(W, xt - 1.6, yb - 4.6, xt + 1.6, yb + 4.6, ZT + 0.45);
+    W.lamps.push({ x: xt, y: yb + 5.6, z: ZD + 6, r: 6, color: [1, 0.93, 0.8], k: 0.45, kind: 'flood' });
+  }
+  // the Brooklyn anchorage
+  const bx0 = BROOKLYN_X + 4;
+  mb.box(bx0, yb - 4.6, CURB, x1, yb + 4.6, ZD + 1.4, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete, world: true } });
+  W.solids.push([bx0, yb - 4.6, x1, yb + 4.6, ZD + 1.4]);
+  markHeight(W, bx0, yb - 4.6, x1, yb + 4.6, ZD + 1.4);
+  // the main cables: anchorage, tower saddle, the sag across the main span, saddle, anchorage
+  const zA = ZD + 1.3, zS = ZT + 0.4, zLow = ZD + 1.15, xA = xa + 1.6, xB = bx0 + 2.4;
+  const cz = (x) => {
+    if (x <= xm) { const t = (x - xA) / (xm - xA); return zA + (zS - zA) * t - 0.7 * 4 * t * (1 - t); }
+    if (x >= xbk) { const t = (x - xbk) / (xB - xbk); return zS + (zA - zS) * t - 0.7 * 4 * t * (1 - t); }
+    const u = (x - xmid) / (xbk - xmid);
+    return zLow + (zS - zLow) * u * u;
+  };
+  for (const [dy, r] of [[-3.05, 0.13], [-0.95, 0.1], [0.95, 0.1], [3.05, 0.13]]) {
+    const y = yb + dy;
+    const xs = [];
+    for (let x = xA; x < xm; x += 1.6) xs.push(x);
+    xs.push(xm);
+    for (let x = xm + 1.4; x < xbk; x += 1.4) xs.push(x);
+    xs.push(xbk);
+    for (let x = xbk + 1.6; x < xB; x += 1.6) xs.push(x);
+    xs.push(xB);
+    for (let k = 1; k < xs.length; k++) beam(C, [xs[k - 1], y, cz(xs[k - 1])], [xs[k], y, cz(xs[k])], r, cable);
+    if (Math.abs(dy) < 2) continue;
+    // suspenders down to the deck from the outer cables
+    for (let x = xA + 0.9; x < xB - 0.4; x += 0.85) {
+      if (Math.abs(x - xm) < 1.9 || Math.abs(x - xbk) < 1.9) continue;
+      const zc = cz(x);
+      if (zc - ZD > 0.3) mb.box(x - 0.02, y - 0.02, ZD, x + 0.02, y + 0.02, zc, { px: cable, nx: cable, py: cable, ny: cable });
     }
-    for (const dx of [1.8, 3.6, 5.4, 7.2]) {
-      beam(C, [tx0, y, zt - 0.3], [tx0 - dx, y, zd], 0.03, cable);
-      beam(C, [tx1, y, zt - 0.3], [tx1 + dx * 1.3, y, zd], 0.03, cable);
+    // and the diagonal stays fanning out from each tower top
+    for (const xt of [xm, xbk]) for (const sd of [-1, 1]) for (const d of [1.9, 3.8, 5.7, 7.6, 9.5]) {
+      const xe = xt + sd * (1.6 + d);
+      if (xe < xa || xe > x1) continue;
+      beam(C, [xt + sd * 1.6, y, ZT - 0.4], [xe, y, ZD + 0.05], 0.035, cable);
     }
   }
-  // lamps along the boardwalk
-  for (let x = x0 + 2; x < x1; x += 5) {
-    W.lamps.push({ x, y: yb, z: zd + 1.5, r: 3, color: [1, 0.9, 0.7], k: 0.6, kind: 'street' });
-    W.lampHeads.push({ x, y: yb + 0.8, z: zd + 1.6, kind: 'globe' });
+  // lamps along the promenade
+  for (let x = xa + 2; x < x1 - 1; x += 4.2) {
+    if (Math.abs(x - xm) < 2.2 || Math.abs(x - xbk) < 2.2) continue;
+    W.lamps.push({ x, y: yb, z: ZD + 1.6, r: 3, color: [1, 0.9, 0.7], k: 0.6, kind: 'street' });
+    W.lampHeads.push({ x, y: yb + 0.8, z: ZD + 1.7, kind: 'globe' });
+    mb.box(x - 0.04, yb + 0.76, ZD + 0.45, x + 0.04, yb + 0.84, ZD + 1.6, iron);
   }
-  W.lamps.push({ x: tx0 + 1.5, y: yb, z: zt, r: 5, color: [1, 0.92, 0.8], k: 0.4, kind: 'flood' });
-  landmark(C, 'BROOKLYN BRIDGE', x0 - 3, yb + 4);
+  // stairs down from the promenade to the Brooklyn shore, on the anchorage's west face
+  const sx0 = BROOKLYN_X + 1.0, sx1 = BROOKLYN_X + 2.6, sy0 = yb + 3.1, sy1 = yb + 10.0;
+  const steelT = C.atlas.shared('bb_stair', 32, 32, (p) => { for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, y % 4 === 0 ? 0x3a3a3c : shade(0x6a6a6c, 0.94 + hash2i(x, y, 67) * 0.1)); });
+  mb.quad([sx0, sy0, ZD], [sx1, sy0, ZD], [sx1, sy1, CURB], [sx0, sy1, CURB], [[0, 0], [(sx1 - sx0) * T, 0], [(sx1 - sx0) * T, (sy1 - sy0) * T], [0, (sy1 - sy0) * T]], steelT, [0, 0.7, 0.7], MAT.SNOW);
+  for (const x of [sx0, sx1]) {
+    mb.quad(x > sx0 ? [x, sy1, CURB + 0.6] : [x, sy0, ZD + 0.6], x > sx0 ? [x, sy0, ZD + 0.6] : [x, sy1, CURB + 0.6], x > sx0 ? [x, sy0, ZD] : [x, sy1, CURB], x > sx0 ? [x, sy1, CURB] : [x, sy0, ZD], [[0, 0], [(sy1 - sy0) * T, 0], [(sy1 - sy0) * T, 16], [0, 16]], P.black, [x > sx0 ? 1 : -1, 0, 0], MAT.FLAT);
+    mb.box(x - 0.05, sy1 - 0.4, 0, x + 0.05, sy1 - 0.3, CURB + 0.6, iron);
+  }
+  // the walk across: Manhattan's sidewalk, up the steps and the approach, over the river, down
+  // the stairs to the Brooklyn promenade
+  const nodes = [], edges = [];
+  const add = (x, y, z) => { nodes.push({ x, y, z }); return nodes.length - 1; };
+  let prev = add(L.x0 - 0.4, yb, CURB);
+  const link = (i) => { edges.push([prev, i]); prev = i; };
+  link(add(L.x0 + 1.9, yb, CURB + 1.75));
+  for (let x = L.x0 + 4.3; x < xa; x += 2.4) link(add(x, yb, CURB + 1.6 + (ZD - CURB - 1.6) * ((x - L.x0 - 1.8) / (xa - L.x0 - 1.8))));
+  for (let x = xa + 0.6; x < sx0 + 0.8; x += 2.5) {
+    if (Math.abs(x - xm) < 1.9 || Math.abs(x - xbk) < 1.9) continue;
+    link(add(x, yb, ZD + 0.45));
+  }
+  link(add((sx0 + sx1) / 2, yb + 1.0, ZD + 0.45));
+  link(add((sx0 + sx1) / 2, sy0 + 0.3, ZD));
+  link(add((sx0 + sx1) / 2, (sy0 + sy1) / 2, (ZD + CURB) / 2));
+  const stairFoot = add((sx0 + sx1) / 2, sy1 + 0.6, CURB);
+  link(stairFoot);
+  const mid = nodes.reduce((b, n, i) => (n.z > ZD && Math.abs(n.x - xmid) < Math.abs(nodes[b].x - xmid) ? i : b), 1);
+  W.bridgeWalk = { nodes, edges, gates: [{ node: 0, sx: L.x0 - 1.2, sy: yb }], foot: stairFoot, sights: [mid] };
+  landmark(C, 'BROOKLYN BRIDGE', xmid, yb + 9);
 }
 
 // ---------------------------------------------------------------------------------------------
-// The Statue of Liberty on her island in the harbour: a grassy island with a stone quay, the
-// star-shaped fort, the granite pedestal, and the copper-green statue holding her torch high
-export function statueOfLiberty(C, ix, iy) {
-  const S = sharedTex(C), mb = C.mb, W = C.world, gt = W.ground;
-  const R = 5.4, n = 20, zi = CURB;
+// Brooklyn's shore across the river: a granite promenade along the water with benches facing the
+// Manhattan skyline, lawns and trees, the carousel in its glass box by the bridge; brick warehouses
+// north of the bridge, brownstones south of it; a subway station for the walk home
+export function brooklynShore(C) {
+  const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);
+  const x0 = BROOKLYN_X, x1 = MAP, y1 = HARBOR_Y;
+  const L = bridgeBlock(), yb = L ? (L.y0 + L.y1) / 2 : -100;
+  const rng = C.rng;
+  C.paintGround(x0, 0, x1, y1, 'grass');
+  C.paintGround(x0 + 2.6, 0, x0 + 6.6, y1, 'lawn');
+  C.paintGround(x0, 0, x0 + 2.6, y1, 'plaza');
+  C.paintGround(x0 + 6.6, 0, x1, y1, 'patio');
+  // the buildings along the back of the strip, facing the river
+  const fr = new Frame(x0 + 7.0, 0, -1, 0);
+  let a = 1.0;
+  while (a < y1 - 4) {
+    if (a + 4 > yb - 6.2 && a < yb + 6.2) { a = yb + 6.2; continue; }
+    const w = a < yb ? rng.pick([6, 7, 8]) : rng.pick([4, 4.5, 5]);
+    if (a + w > y1 - 0.5) break;
+    if (a < yb) loft(C, fr, a, w, x1 - x0 - 7.2, { floors: rng.int(5, 8) });
+    else rowhouse(C, fr, a, w, x1 - x0 - 7.2, { setback: 1.2 });
+    a += w + (a < yb ? 0.3 : 0);
+  }
+  // trees on the lawn, benches and lamps along the promenade
+  for (let y = 2.4; y < y1 - 2; y += 2.6) {
+    if (Math.abs(y - yb) < 6.5) continue;
+    if (hash2i(Math.round(y * 3), 7, 171) > 0.12) C.addTree(x0 + 4.6 + (hash2i(Math.round(y), 3, 172) - 0.5) * 1.6, y, rng.pick(['plane', 'locust', 'oak', 'cherry']), false);
+  }
+  for (let y = 4; y < y1 - 3; y += 6.5) {
+    if (Math.abs(y - yb) < 7) continue;
+    C.addBench(x0 + 1.75, y, 'y', -1);
+    parkLamp(C, x0 + 2.3, y + 3.2);
+  }
+  // the carousel in its glass pavilion, just north of the bridge
+  if (L) {
+    const cy = yb - 11, cx = x0 + 4.4;
+    const glassT = C.atlas.shared('jc_glass', 16, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) p.set(x, y, x % 8 === 0 ? 0xdce4ea : 0x8ab4cc, winCode(0.05, true)); });
+    const stripes = C.atlas.shared('jc_stripes', 32, 16, (p) => { for (let y = 0; y < 16; y++) for (let x = 0; x < 32; x++) p.set(x, y, (x >> 2) % 2 ? 0xd8302c : 0xf2efe6, winCode(0.02, true)); });
+    mb.cylinder(cx, cy, CURB, CURB + 0.9, 1.4, 16, stripes, stripes);
+    mb.cone(cx, cy, CURB + 0.9, CURB + 1.6, 1.5, 16, stripes);
+    mb.box(cx - 2.0, cy - 2.0, CURB, cx + 2.0, cy + 2.0, CURB + 2.0, { px: glassT, nx: glassT, py: glassT, ny: glassT }, { mat: MAT.GLASS });
+    mb.box(cx - 2.1, cy - 2.1, CURB + 2.0, cx + 2.1, cy + 2.1, CURB + 2.15, { px: S.roofSilver, nx: S.roofSilver, py: S.roofSilver, ny: S.roofSilver, pz: { t: S.roofSilver } });
+    W.solids.push([cx - 2.0, cy - 2.0, cx + 2.0, cy + 2.0, 2.15]);
+    W.lamps.push({ x: cx, y: cy, z: CURB + 1, r: 3.2, color: [1, 0.85, 0.6], k: 0.6, kind: 'neon' });
+  }
+  // the promenade's own walking net, joined to the bridge stairs, with the subway at the bridge
+  const nodes = [], edges = [];
+  for (let y = 1.4; y < y1 - 1; y += 2.5) { nodes.push({ x: x0 + 1.15, y }); if (nodes.length > 1) edges.push([nodes.length - 2, nodes.length - 1]); }
+  const promenade = nodes.length;
+  const near = (y) => { let b = 0; for (let i = 1; i < promenade; i++) if (Math.abs(nodes[i].y - y) < Math.abs(nodes[b].y - y)) b = i; return b; };
+  const net = { name: 'brooklyn', rect: { x0, y0: 0, x1, y1 }, nodes, edges, gates: [], subways: [], sights: [] };
+  if (W.bridgeWalk && L) {
+    const B = W.bridgeWalk, base = nodes.length;
+    for (const n of B.nodes) nodes.push(n);
+    for (const [u, v] of B.edges) edges.push([base + u, base + v]);
+    edges.push([base + B.foot, near(B.nodes[B.foot].y)]);
+    net.gates = B.gates.map((g) => ({ node: base + g.node, sx: g.sx, sy: g.sy }));
+    net.sights = B.sights.map((k) => base + k);
+    // High Street station, by the bridge
+    const sy = yb + 14;
+    const before = W.subways.length;
+    subwayEntrance(C, x0 + 4.4, sy, 'y');
+    const sub = W.subways.splice(before)[0];
+    if (sub) {
+      nodes.push({ x: x0 + 2.8, y: sy });
+      const k = nodes.length - 1;
+      edges.push([k, near(sy)]);
+      net.subways.push({ node: k, ...sub });
+    }
+  }
+  W.extraNets.push(net);
+  void P;
+}
+
+// ---------------------------------------------------------------------------------------------
+// The Statue of Liberty on her island in the harbour, south-west of the Battery: a green island
+// behind a granite sea wall with lawns, paths and trees; Fort Wood's eleven-pointed star; the granite
+// pedestal with its loggias, balcony and cornice; and the copper-green statue holding her torch high,
+// floodlit at night. A ferry waits at the pier.
+export function statueOfLiberty(C) {
+  const S = sharedTex(C), mb = C.mb, W = C.world, gt = W.ground, P = propTex(C);
+  const ix = HUDSON_X - 3, iy = HARBOR_Y + 14, RX = 9.6, RY = 6.6, zi = CURB;
   const granite = C.atlas.shared('bb_granite', 64, 64, () => {});
-  // the island: painted ground (grass, a paved ring and the fort's courtyard) on a stone-sided disc
-  C.paintWhere(ix - R, iy - R, ix + R, iy + R, (x, y) => Math.hypot(x - ix, y - iy) < R + 0.05, 'lawn');
-  C.paintWhere(ix - R, iy - R, ix + R, iy + R, (x, y) => { const d = Math.hypot(x - ix, y - iy); return d > R - 1.1 && d < R + 0.05; }, 'plaza');
+  const inIsle = (x, y, m = 0) => ((x - ix) / (RX - m)) ** 2 + ((y - iy) / (RY - m)) ** 2 < 1;
+  // the island: lawn, a paved ring path, the pier plaza
+  C.paintWhere(ix - RX, iy - RY, ix + RX, iy + RY, (x, y) => inIsle(x, y), 'lawn');
+  C.paintWhere(ix - RX, iy - RY, ix + RX, iy + RY, (x, y) => inIsle(x, y) && !inIsle(x, y, 1.1), 'plaza');
+  const fx = ix + 1.2, fy = iy;
+  C.paintWhere(fx - 6, fy - 6, fx + 6, fy + 6, (x, y) => { const d = Math.hypot(x - fx, y - fy); return d > 5.0 && d < 6.0; }, 'path');
+  C.paintWhere(ix + 5, iy - 1.0, ix + RX, iy + 1.0, () => true, 'path');
+  const n = 36;
+  const pts = [];
+  for (let k = 0; k < n; k++) { const a = (k / n) * 2 * PI; pts.push([ix + Math.cos(a) * RX, iy + Math.sin(a) * RY]); }
   for (let k = 0; k < n; k++) {
-    const a0 = (k / n) * 2 * PI, a1 = ((k + 1) / n) * 2 * PI;
-    const p0 = [ix + Math.cos(a0) * R, iy + Math.sin(a0) * R], p1 = [ix + Math.cos(a1) * R, iy + Math.sin(a1) * R];
+    const p0 = pts[k], p1 = pts[(k + 1) % n];
     mb.tri([ix, iy, zi], [p0[0], p0[1], zi], [p1[0], p1[1], zi], [[ix * T, iy * T], [p0[0] * T, p0[1] * T], [p1[0] * T, p1[1] * T]], gt, [0, 0, 1], MAT.GROUND | MAT.SNOW | MAT.WET);
     wall(C, p1, p0, WATER_Z, zi, granite, 0);
   }
-  // star fort: eleven points round the base of the pedestal
-  const pts = [];
-  for (let k = 0; k < 22; k++) { const a = (k / 22) * 2 * PI, r = k % 2 ? 2.0 : 2.9; pts.push([ix + Math.cos(a) * r, iy + Math.sin(a) * r]); }
-  const zf = zi + 0.9;
+  // Fort Wood: an eleven-pointed star of granite walls, its top a terrace round the pedestal
+  const star = [];
+  for (let k = 0; k < 22; k++) { const a = (k / 22) * 2 * PI + 0.14, r = k % 2 ? 3.3 : 4.7; star.push([fx + Math.cos(a) * r, fy + Math.sin(a) * r]); }
+  const zf = zi + 1.3;
   mb.body(() => {
     for (let k = 0; k < 22; k++) {
-      const a = pts[k], b = pts[(k + 1) % 22];
+      const a = star[k], b = star[(k + 1) % 22];
       wall(C, b, a, zi, zf, granite, 0);
-      mb.tri([ix, iy, zf], [a[0], a[1], zf], [b[0], b[1], zf], [[ix * T, iy * T], [a[0] * T, a[1] * T], [b[0] * T, b[1] * T]], S.concrete, [0, 0, 1], MAT.SNOW);
+      mb.tri([fx, fy, zf], [a[0], a[1], zf], [b[0], b[1], zf], [[fx * T, fy * T], [a[0] * T, a[1] * T], [b[0] * T, b[1] * T]], S.concrete, [0, 0, 1], MAT.SNOW);
     }
   });
-  // pedestal
-  const ped = C.atlas.shared('lib_ped', 32, 64, (p) => {
-    stoneFill(p, 0, 0, 32, 64, [0xc4b8a0], 201, 8, { blocks: 16 });
-    for (const x of [4, 13, 22]) { p.rect(x, 16, 6, 18, 0x6a604e); p.rect(x + 1, 17, 4, 16, 0x4a4238); }
-    p.rect(0, 12, 32, 3, 0xd8ccb4); p.rect(0, 38, 32, 3, 0xd8ccb4);
+  // the pedestal: a stepped base, the shaft with a loggia of columns on each face, the balcony,
+  // the upper stage with its shields
+  const ped = C.atlas.shared('lib_pedestal', 64, 192, (p) => {
+    stoneFill(p, 0, 0, 64, 192, [0xc8bca4], 211, 12, { blocks: 32 });
+    // rusticated lower half
+    for (let y = 108; y < 192; y += 12) p.hline(0, y, 64, 0x9a8e78);
+    // the loggia: four columns before a dark recess, under a cornice
+    p.rect(8, 24, 48, 64, 0x4a4238);
+    for (const cx of [8, 21, 34, 47]) { p.rect(cx, 24, 9, 64, 0xe0d6c0); p.vline(cx, 24, 64, 0xf2ead6); p.vline(cx + 8, 24, 64, 0xa89c84); }
+    p.rect(4, 18, 56, 6, 0xe6dcc6); p.hline(4, 23, 56, 0x9a8e78); p.rect(4, 88, 56, 5, 0xd8ccb4);
+    // a doorway below
+    p.rect(26, 150, 12, 42, 0x3a2e24);
+    for (let k = 0; k < 12; k++) { const dy = Math.round(Math.sqrt(Math.max(0, 36 - (k - 5.5) ** 2))); p.vline(26 + k, 150 - dy, dy, 0x3a2e24); }
   });
+  const shields = C.atlas.shared('lib_shields', 64, 32, (p) => {
+    stoneFill(p, 0, 0, 64, 32, [0xc8bca4], 212, 8, { blocks: 16 });
+    for (let x = 4; x < 64; x += 12) { p.rect(x, 9, 7, 9, 0xa89c84); p.rect(x + 1, 10, 5, 7, 0xd8ccb4); p.set(x + 3, 17, 0xa89c84); }
+  });
+  const zp0 = zf, zp1 = zp0 + 0.7, zp2 = zp1 + 6.0, zp3 = zp2 + 0.35, zp4 = zp3 + 0.9;
   mb.body(() => {
-    mb.box(ix - 1.25, iy - 1.25, zf, ix + 1.25, iy + 1.25, zf + 1.2, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete } });
-    mb.box(ix - 1.0, iy - 1.0, zf + 1.2, ix + 1.0, iy + 1.0, zf + 3.8, { px: ped, nx: ped, py: ped, ny: ped, pz: { t: S.concrete } });
-    mb.box(ix - 1.12, iy - 1.12, zf + 3.8, ix + 1.12, iy + 1.12, zf + 4.1, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete } });
+    mb.box(fx - 2.0, fy - 2.0, zp0, fx + 2.0, fy + 2.0, zp1, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete } });
+    mb.box(fx - 1.6, fy - 1.6, zp1, fx + 1.6, fy + 1.6, zp2, { px: ped, nx: ped, py: ped, ny: ped, pz: { t: S.concrete } });
+    mb.box(fx - 1.85, fy - 1.85, zp2, fx + 1.85, fy + 1.85, zp3, { px: granite, nx: granite, py: granite, ny: granite, pz: { t: S.concrete } });
+    mb.box(fx - 1.42, fy - 1.42, zp3, fx + 1.42, fy + 1.42, zp4, { px: shields, nx: shields, py: shields, ny: shields, pz: { t: S.concrete } });
   });
-  W.solids.push([ix - R, iy - R, ix + R, iy + R, zf + 4.1]);
-  C.addSprite('liberty', ix, iy, zf + 4.1);
-  W.liberty = { x: ix, y: iy, z: zf + 4.1 };
-  // floodlights and the torch
-  for (const [dx, dy] of [[-2.6, 2.6], [2.6, 2.6], [0, -3.2]]) W.lamps.push({ x: ix + dx * 0.4, y: iy + dy * 0.4, z: zf + 3, r: 4, color: [0.85, 1, 0.9], k: 0.7, kind: 'flood' });
-  W.lamps.push({ x: ix - 0.6, y: iy, z: zf + 10, r: 2.5, color: [1, 0.75, 0.3], k: 0.9, kind: 'neon' });
-  for (const [x, y] of [[ix - 3.6, iy + 3.0], [ix + 3.6, iy + 3.0], [ix - 3.6, iy - 3.0], [ix + 3.6, iy - 3.0]]) C.addTree(x, y, 'oak', false);
-  landmark(C, 'STATUE OF LIBERTY', ix, iy);
+  // the balcony railing round the cornice
+  for (const [ax, ay, bx2, by2] of [[fx - 1.8, fy - 1.8, fx + 1.8, fy - 1.8], [fx + 1.8, fy + 1.8, fx - 1.8, fy + 1.8], [fx + 1.8, fy - 1.8, fx + 1.8, fy + 1.8], [fx - 1.8, fy + 1.8, fx - 1.8, fy - 1.8]]) {
+    const b = beamBox(ax, ay, bx2, by2);
+    mb.box(b[0], b[1], zp3, b[2], b[3], zp3 + 0.32, { px: P.black, nx: P.black, py: P.black, ny: P.black });
+  }
+  markHeight(W, fx - 2.0, fy - 2.0, fx + 2.0, fy + 2.0, zp4);
+  W.solids.push([ix - RX, iy - RY, ix + RX, iy + RY, zp4]);
+  C.addSprite('liberty', fx, fy, zp4);
+  W.liberty = { x: fx, y: fy, z: zp4 };
+  // floodlights round the fort, the torch's glow
+  for (const [dx, dy] of [[-3.4, 2.6], [3.4, 2.6], [0, -3.8], [-3.4, -2.6]]) W.lamps.push({ x: fx + dx * 0.55, y: fy + dy * 0.55, z: zp1, r: 5, color: [0.85, 1, 0.92], k: 0.75, kind: 'flood' });
+  W.lamps.push({ x: fx - 1.2, y: fy, z: zp4 + 11, r: 3, color: [1, 0.75, 0.3], k: 0.9, kind: 'neon' });
+  // trees round the island, the museum pavilion, a flagpole by the pier
+  for (let k = 0; k < 14; k++) {
+    const a = (k / 14) * 2 * PI + 0.2, x = ix + Math.cos(a) * (RX - 2.0), y = iy + Math.sin(a) * (RY - 2.0);
+    if (x > ix + 4.5 && Math.abs(y - iy) < 2.4) continue;
+    if (Math.hypot(x - fx, y - fy) < 6.4) continue;
+    C.addTree(x, y, k % 3 ? 'oak' : 'plane', false, { scale: 0.9 });
+  }
+  const mx = ix - 6.0, my = iy - 2.6;
+  mb.box(mx - 1.6, my - 1.0, zi, mx + 1.6, my + 1.0, zi + 1.3, { px: S.glassBlue ?? S.concrete, nx: S.concrete, py: S.glassBlue ?? S.concrete, ny: S.concrete });
+  mb.box(mx - 1.7, my - 1.1, zi + 1.3, mx + 1.7, my + 1.1, zi + 1.45, { px: S.concrete, nx: S.concrete, py: S.concrete, ny: S.concrete, pz: { t: S.roofGreen ?? S.roofTar } });
+  flagPole(C, ix + 6.2, iy - 2.2, 3.4, 'us');
+  // the ferry pier on the east side, a ferry alongside
+  const px0 = ix + RX - 0.6, px1 = ix + RX + 3.6;
+  mb.box(px0, iy - 0.9, WATER_Z, px1, iy + 0.9, zi, { px: S.concrete, py: S.concrete, ny: S.concrete, pz: { t: S.concrete, world: true } });
+  ferry(C, px1 - 1.6, iy + 2.0, 0);
+  landmark(C, 'STATUE OF LIBERTY', fx + 3, fy + 5);
+}
+const beamBox = (ax, ay, bx, by) => [Math.min(ax, bx) - 0.04, Math.min(ay, by) - 0.04, Math.max(ax, bx) + 0.04, Math.max(ay, by) + 0.04];
+
+// A harbour ferry: a white hull with a blue band, two decks of windows and a wheelhouse
+export function ferry(C, x, y, ang) {
+  const mb = C.mb;
+  const hull = C.atlas.shared('ferry_hull', 32, 16, (p) => { for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, yy < 3 ? 0xf2efe6 : yy < 7 ? 0x1f4f9a : yy < 13 ? 0xf2efe6 : 0x8a2a2a); });
+  const deck = C.atlas.shared('ferry_deck', 32, 16, (p) => {
+    for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, 0xf2efe6);
+    for (let xx = 2; xx < 30; xx += 5) p.rect(xx, 4, 3, 7, 0x2a3a4a, winCode(0.2, true));
+  });
+  const top = C.atlas.shared('ferry_top', 16, 16, (p) => { for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) p.set(xx, yy, shade(0xd8d4cc, 0.95 + hash2i(xx, yy, 181) * 0.06)); });
+  void ang;
+  const hx = 3.2, hy = 1.0;
+  mb.box(x - hx, y - hy, WATER_Z - 0.1, x + hx, y + hy, 0.55, { px: hull, nx: hull, py: hull, ny: hull, pz: { t: top } });
+  mb.box(x - hx + 0.6, y - hy + 0.15, 0.55, x + hx - 0.6, y + hy - 0.15, 1.25, { px: deck, nx: deck, py: deck, ny: deck, pz: { t: top } });
+  mb.box(x - hx + 1.2, y - hy + 0.3, 1.25, x + hx - 1.4, y + hy - 0.3, 1.9, { px: deck, nx: deck, py: deck, ny: deck, pz: { t: top } });
+  mb.box(x + hx - 1.9, y - 0.4, 1.9, x + hx - 1.2, y + 0.4, 2.35, { px: deck, nx: deck, py: deck, ny: deck, pz: { t: top } });
+  C.world.solids.push([x - hx, y - hy, x + hx, y + hy, 2.35]);
 }

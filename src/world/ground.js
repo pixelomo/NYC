@@ -1,6 +1,6 @@
 // Ground texture (world-space, T texels / unit) + the raised sidewalk plinths and diorama base.
 
-import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, isParkIntersection, MERGES, mergePlinth, RIVER_X, WATER_Z } from './layout.js';
+import { T, MAP, NB, PERIOD, SIDEWALK, ROAD, CURB, BASE_DEPTH, roadStart, roadEnd, roadCenter, isParkIntersection, MERGES, mergePlinth, WATER_Z, LAND, WATERS, inWater } from './layout.js';
 import { MAT } from './mesh.js';
 import { RNG, hash2i, shade, mixc } from '../core/math.js';
 
@@ -38,19 +38,23 @@ export function raisedIntervals() {
   return out;
 }
 
-// Raised plinths [x0, y0, x1, y1]: one per block (with its sidewalks), each merged region (park,
-// Times Square) as one; nothing out over the river but the riverside promenade.
+// Raised plinths [x0, y0, x1, y1]: one per Manhattan block (with its sidewalks), each merged region
+// (park, Times Square) as one, and Brooklyn's shore as one strip; nothing out over the water.
 export function plinthRects() {
   const iv = raisedIntervals();
-  const xs = iv.filter(([a]) => a < RIVER_X).map(([a, b]) => [a, Math.min(b, RIVER_X)]);
+  const M = LAND[0], B = LAND[1];
+  const xs = iv.filter(([a, b]) => b > M.x0 && a < M.x1).map(([a, b]) => [Math.max(a, M.x0), Math.min(b, M.x1)]);
+  const ys = iv.filter(([a, b]) => b > 0 && a < M.y1).map(([a, b]) => [Math.max(a, 0), Math.min(b, M.y1)]);
   const Ps = MERGES.map(mergePlinth);
   const out = [];
   for (const [ax, bx] of xs)
-    for (const [ay, by] of iv) if (!Ps.some((P) => ax >= P.x0 && bx <= P.x1 && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
+    for (const [ay, by] of ys) if (!Ps.some((P) => ax >= P.x0 && bx <= P.x1 && ay >= P.y0 && by <= P.y1)) out.push([ax, ay, bx, by]);
   for (const P of Ps) out.push([P.x0, P.y0, P.x1, P.y1]);
+  out.push([B.x0, 0, MAP, B.y1]);
   return out;
 }
-export const inParkPlinth = (x, y, m = 0) => x > RIVER_X - m || MERGES.some((M) => {
+// no road here: water (or within m of it), Brooklyn's shore, or a merged region's plinth
+export const inParkPlinth = (x, y, m = 0) => inWater(x, y, m) || x > LAND[1].x0 - m || MERGES.some((M) => {
   const P = mergePlinth(M);
   return x > P.x0 - m && x < P.x1 + m && y > P.y0 - m && y < P.y1 + m;
 });
@@ -196,8 +200,8 @@ export function paintGround(region, rng) {
         }
       }
     }
-  // 5. the East River (the shader animates it; it never freezes)
-  p.rect(Math.round(RIVER_X * T), 0, N - Math.round(RIVER_X * T), N, 0x2a5a70, GC.RIVER);
+  // 5. the rivers and the harbour (the shader animates them; they never freeze)
+  for (const w of WATERS) p.rect(Math.round(w.x0 * T), Math.round(w.y0 * T), Math.round((w.x1 - w.x0) * T), Math.round((w.y1 - w.y0) * T), 0x2a5a70, GC.RIVER);
   return { manholes };
 }
 
@@ -291,18 +295,37 @@ export function paintLot(p, x0, y0, x1, y1, fn) {
 
 // Geometry for ground, plinths and the diorama base
 export function buildGroundGeometry(mb, ground, tex, quay) {
-  // road surface over the land, the river a little lower behind a stone quay
+  // road surface over the land, the water a little lower behind stone quays
   const g = { t: ground, world: true, mat: MAT.GROUND | MAT.SNOW | MAT.WET };
-  mb.box(0, 0, -BASE_DEPTH, RIVER_X, MAP, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET });
-  mb.box(RIVER_X, 0, -BASE_DEPTH, MAP, MAP, WATER_Z, { pz: { t: ground, world: true, mat: MAT.GROUND } }, { topMat: MAT.GROUND });
-  mb.quad([RIVER_X, MAP, 0], [RIVER_X, 0, 0], [RIVER_X, 0, WATER_Z], [RIVER_X, MAP, WATER_Z],
-    [[0, 0], [MAP * T, 0], [MAP * T, -WATER_Z * T], [0, -WATER_Z * T]], quay, [1, 0, 0], 0);
+  const clampR = (r) => [Math.max(0, r.x0), Math.max(0, r.y0), Math.min(MAP, r.x1), Math.min(MAP, r.y1)];
+  for (const L of LAND) { const [x0, y0, x1, y1] = clampR(L); mb.box(x0, y0, -BASE_DEPTH, x1, y1, 0, { pz: g }, { topMat: MAT.GROUND | MAT.SNOW | MAT.WET }); }
+  for (const w of WATERS) mb.box(w.x0, w.y0, -BASE_DEPTH, w.x1, w.y1, WATER_Z, { pz: { t: ground, world: true, mat: MAT.GROUND } }, { topMat: MAT.GROUND });
+  // the quays: every edge of the land that meets the water
+  const dz = -WATER_Z * T;
+  for (const [ax, ay, bx, by, n] of quayEdges()) {
+    const len = Math.hypot(bx - ax, by - ay) * T;
+    mb.quad([ax, ay, 0], [bx, by, 0], [bx, by, WATER_Z], [ax, ay, WATER_Z], [[0, 0], [len, 0], [len, dz], [0, dz]], quay, [n[0], n[1], 0], 0);
+  }
   for (const [ax, ay, bx, by] of plinthRects()) {
     mb.box(ax, ay, 0, bx, by, CURB, {
       pz: { t: ground, u0: ax * T, v0: ay * T, mat: MAT.GROUND | MAT.SNOW | MAT.WET },
       px: tex.curb, nx: tex.curb, py: tex.curb, ny: tex.curb,
     });
   }
+}
+
+// The land's edges that face the water, as [ax, ay, bx, by, normal] with the points ordered so the
+// quad faces out over the water
+export function quayEdges() {
+  const out = [];
+  for (const L of LAND) {
+    const [x0, y0, x1, y1] = [Math.max(0, L.x0), Math.max(0, L.y0), Math.min(MAP, L.x1), Math.min(MAP, L.y1)];
+    if (L.x0 > 0) out.push([x0, y0, x0, y1, [-1, 0]]);
+    if (L.x1 < MAP) out.push([x1, y1, x1, y0, [1, 0]]);
+    if (L.y1 < MAP) out.push([x0, y1, x1, y1, [0, 1]]);
+    if (L.y0 > 0) out.push([x1, y0, x0, y0, [0, -1]]);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -382,18 +405,31 @@ export function buildSlabSides(mb, atlas, tex) {
     mb.quad([p0[0], p0[1], zz1], [p1[0], p1[1], zz1], [p1[0], p1[1], zz0], [p0[0], p0[1], zz0],
       [[u0, v0], [u1, v0], [u1, v1], [u0, v1]], texr, [S.n[0], S.n[1], 0], mat);
   };
-  // the stretch of each side that runs under the river (in that side's own a-coordinate)
-  const RW = MAP - RIVER_X;
-  const riverSpan = { py: [RIVER_X, MAP], ny: [0, RW], px: [0, MAP], nx: null };
-  for (const S of sides) {
-    // soil face around the opening (stopping at the water where the river meets the edge)
-    const rs = riverSpan[S.key];
-    if (!rs) quadSide(S, 0, MAP, 0, tz1, 0, soil);
-    else {
-      if (rs[0] > 0) quadSide(S, 0, rs[0], 0, tz1, 0, soil);
-      quadSide(S, rs[0], rs[1], 0, tz1, WATER_Z, soil);
-      if (rs[1] < MAP) quadSide(S, rs[1], MAP, 0, tz1, 0, soil);
+  // the stretches of each side that run under the water (in that side's own a-coordinate)
+  const waterSpans = (S) => {
+    const sp = [];
+    for (const w of WATERS) {
+      let iv = null;
+      if (S.key === 'py' && w.y1 >= MAP) iv = [w.x0, w.x1];
+      else if (S.key === 'ny' && w.y0 <= 0) iv = [MAP - w.x1, MAP - w.x0];
+      else if (S.key === 'px' && w.x1 >= MAP) iv = [MAP - w.y1, MAP - w.y0];
+      else if (S.key === 'nx' && w.x0 <= 0) iv = [w.y0, w.y1];
+      if (iv) sp.push(iv);
     }
+    sp.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const iv of sp) { const last = merged[merged.length - 1]; if (last && iv[0] <= last[1] + 1e-6) last[1] = Math.max(last[1], iv[1]); else merged.push([...iv]); }
+    return merged;
+  };
+  for (const S of sides) {
+    // soil face around the opening (stopping at the water where a river or the harbour meets the edge)
+    let a = 0;
+    for (const [w0, w1] of waterSpans(S)) {
+      if (w0 > a) quadSide(S, a, w0, 0, tz1, 0, soil);
+      quadSide(S, w0, w1, 0, tz1, WATER_Z, soil);
+      a = w1;
+    }
+    if (a < MAP) quadSide(S, a, MAP, 0, tz1, 0, soil);
     quadSide(S, 0, MAP, 0, -BASE_DEPTH, tz0, soil);
     quadSide(S, 0, a0, 0, tz0, tz1, soil);
     quadSide(S, a1, MAP, 0, tz0, tz1, soil);

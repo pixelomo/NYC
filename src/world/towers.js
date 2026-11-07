@@ -301,7 +301,7 @@ export function limestoneOffice(C, L) {
   hotel(C, { x0: L.x0 + 1, y0: L.y0 + 12, x1: L.x1 - 1, y1: L.y1 - 0.5 });
 }
 
-function hotel(C, R) {
+export function hotel(C, R, o = {}) {
   const S = sharedTex(C);
   const { rng } = C;
   const z0 = C.z0;
@@ -326,7 +326,7 @@ function hotel(C, R) {
     signBoard(p, 16, 9, p.w - 32, 14, 'THE PIXEL HOTEL', { bg: 0x1b1b1b, fg: 0xffd84f, t: 0.02 });
   });
   const shaft = { t: brickMod, mat: 0, seed: 91 };
-  const H = 2.5 + 12 * 1.5;
+  const H = 2.5 + (o.floors ?? 12) * 1.5;
   C.mb.body(() => {
     C.mb.box(R.x0, R.y0, z0, R.x1, R.y1, z0 + 2.5, { py: { t: lobby, mat: 0 }, px: { t: S.brickTan }, nx: { t: S.brickTan } });
     C.mb.box(R.x0, R.y0, z0 + 2.5, R.x1, R.y1, z0 + H, { py: shaft, px: shaft, nx: shaft, ny: shaft, pz: { t: S.roofTar, world: true } });

@@ -89,9 +89,9 @@ export class UI {
     const W = this.app.world;
     const places = [['GO TO…', null]];
     if (W.park) places.push(['CENTRAL PARK', [W.park.cx, W.park.cy]]);
-    if (W.pond) places.push(['THE LAKE', [W.pond.x, W.pond.y + 4]]);
+    for (const [name, x, y] of W.parkSights || []) places.push([name, [x, y]]);
     if (W.timesSquare) places.push(['TIMES SQUARE', W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
-    for (const l of W.landmarks || []) places.push([l.name, [l.x, l.y]]);
+    for (const l of W.landmarks || []) places.push([l.name, [l.x, l.y], l.rot]);
     if (W.court) places.push(['BASKETBALL COURT', [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
     const dept = W.shops.find((sh) => sh.kind === 'dept');
     if (dept) places.push(['DEPARTMENT STORE', [dept.x, dept.y]]);
@@ -105,6 +105,11 @@ export class UI {
         if (this.app.camera.follow) this.unfollow();
         this.app.camera.vx = this.app.camera.vy = 0;
         this.app.camera.glide = { x: pl[1][0], y: pl[1][1] };
+        // turn to the side the place is best seen from (the default view unless it says otherwise)
+        const cam = this.app.camera;
+        let d = ((((pl[2] ?? 0) - cam.rot) % 4) + 4) % 4;
+        if (d === 3) d = -1;
+        if (d) cam.rotate(d);
       }
       this.placeSel.value = '0';
     });

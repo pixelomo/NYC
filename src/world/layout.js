@@ -3,7 +3,7 @@
 export const T = 32; // texels (pixels) per world unit (2x pixel density)
 export const GT = 16; // ground texture texels per world unit (half of T: the big city's ground has to fit a GPU texture)
 export const K = T / 16; // scale factor for pixel-art sizes authored at 16 texels/unit
-export const NB = 12; // blocks per side (the easternmost column is the East River)
+export const NB = 12; // blocks per side (water on three sides: the Hudson, the harbour and the East River)
 export const BLOCK = 18;
 export const SIDEWALK = 2;
 export const ROAD = 5;
@@ -24,32 +24,35 @@ export const roadCenter = (k) => k * PERIOD + SIDEWALK + ROAD / 2;
 export const lotStart = (b) => b * PERIOD + STREET;
 export const lotEnd = (b) => b * PERIOD + STREET + BLOCK;
 
-// BLOCK_TYPES[by][bx]: a slice of Manhattan, north at the top. Brownstone and walk-up streets
-// round Central Park; Midtown with Times Square, Rockefeller Center, the Public Library and Bryant
-// Park, Grand Central and the Chrysler and Empire State towers; the Flatiron, Washington Square,
-// SoHo lofts and Chinatown below; the Financial District at the bottom; the East River down the
-// east side with the Brooklyn Bridge and the Statue of Liberty.
+// BLOCK_TYPES[by][bx]: a section of Manhattan, north at the top, river to river. The Hudson down the
+// west side, the East River down the east with Brooklyn's shore beyond it, the harbour across the
+// bottom. Central Park runs five blocks long between the Upper West and Upper East Sides, with the
+// museums along its edges; Midtown below it (Columbus Circle, Billionaires' Row, the Plaza,
+// Rockefeller Center, Times Square, St Patrick's, Grand Central, the Chrysler and Empire State
+// towers, the UN, Hudson Yards); Chelsea, the Flatiron and Gramercy; the Village, SoHo and
+// Chinatown; the Financial District and the Battery at the bottom, looking out at the Statue of
+// Liberty. Mostly towers, hotels, offices, shops and museums: houses only here and there.
 export const BLOCK_TYPES = [
-  ['brownstones', 'walkups', 'redbrick', 'brownstones', 'walkups', 'redbrick', 'brownstones', 'walkups', 'redbrick', 'tenements', 'walkups', 'river'],
-  ['walkups', 'tenements', 'brownstones', 'redbrick', 'park', 'park', 'redbrick', 'brownstones', 'shops', 'walkups', 'redbrick', 'river'],
-  ['redbrick', 'shops', 'walkups', 'court', 'park', 'park', 'brownstones', 'bodega', 'walkups', 'redbrick', 'tenements', 'river'],
-  ['tenements', 'firehouse', 'commercial', 'deco', 'office', 'rockefeller', 'glass', 'office', 'commercial', 'shops', 'walkups', 'river'],
-  ['walkups', 'billboards', 'tsq', 'tsq', 'modern', 'library', 'grandcentral', 'chrysler', 'office', 'redbrick', 'brownstones', 'river'],
-  ['redbrick', 'billboards', 'tsq', 'tsq', 'glass', 'deco', 'office', 'modern', 'commercial', 'walkups', 'redbrick', 'river'],
-  ['shops', 'arena', 'commercial', 'office', 'shops', 'empire', 'glass', 'walkups', 'tenements', 'bodega', 'walkups', 'river'],
-  ['brownstones', 'walkups', 'lofts', 'flatiron', 'office', 'shops', 'tenements', 'redbrick', 'walkups', 'shops', 'tenements', 'river'],
-  ['tenements', 'redbrick', 'lofts', 'washsq', 'lofts', 'chinatown', 'chinatown', 'tenements', 'walkups', 'brownstones', 'walkups', 'river'],
-  ['walkups', 'shops', 'lofts', 'modern', 'lofts', 'chinatown', 'tenements', 'redbrick', 'shops', 'walkups', 'redbrick', 'river'],
-  ['redbrick', 'glass', 'wtc', 'office', 'deco', 'exchange', 'glass', 'office', 'commercial', 'bodega', 'walkups', 'river'],
-  ['shops', 'commercial', 'modern', 'glass', 'office', 'deco', 'modern', 'glass', 'shops', 'redbrick', 'tenements', 'river'],
+  ['river', 'glass', 'shops', 'prewar', 'park', 'park', 'prewar', 'commercial', 'office', 'glass', 'river', 'river'],
+  ['river', 'prewar', 'brownstones', 'prewar', 'park', 'park', 'guggenheim', 'shops', 'commercial', 'modern', 'river', 'river'],
+  ['river', 'hotel', 'shops', 'naturalhistory', 'park', 'park', 'museum', 'prewar', 'shops', 'redbrick', 'river', 'river'],
+  ['river', 'brownstones', 'commercial', 'prewar', 'park', 'park', 'prewar', 'hotel', 'firehouse', 'office', 'river', 'river'],
+  ['river', 'lincoln', 'glass', 'prewar', 'park', 'park', 'prewar', 'office', 'commercial', 'modern', 'river', 'river'],
+  ['river', 'modern', 'shops', 'columbus', 'supertall', 'rockefeller', 'plazahotel', 'supertall', 'office', 'deco', 'river', 'river'],
+  ['river', 'commercial', 'shops', 'billboards', 'tsq', 'tsq', 'stpatricks', 'grandcentral', 'chrysler', 'un', 'river', 'river'],
+  ['river', 'hudsonyards', 'glass', 'arena', 'tsq', 'tsq', 'library', 'commercial', 'glass', 'deco', 'river', 'river'],
+  ['river', 'glass', 'lofts', 'commercial', 'shops', 'flatiron', 'shops', 'empire', 'brownstones', 'redbrick', 'river', 'river'],
+  ['river', 'lofts', 'court', 'lofts', 'lofts', 'washsq', 'shops', 'tenements', 'chinatown', 'bridge', 'river', 'river'],
+  ['river', 'battery', 'glass', 'wtc', 'memorial', 'exchange', 'deco', 'glass', 'office', 'modern', 'river', 'river'],
+  ['river', 'river', 'river', 'river', 'river', 'river', 'river', 'river', 'river', 'river', 'river', 'river'],
 ];
 
-// Blocks merged into one region, swallowing the streets between them: the park (one big
+// Blocks merged into one region, swallowing the streets between them: Central Park (one long
 // landscape) and Times Square (four blocks of screens round a pedestrian plaza made of the old
 // streets).
 export const MERGES = [
-  { kind: 'park', bx0: 4, by0: 1, bx1: 5, by1: 2 },
-  { kind: 'tsq', bx0: 2, by0: 4, bx1: 3, by1: 5 },
+  { kind: 'park', bx0: 4, by0: 0, bx1: 5, by1: 4 },
+  { kind: 'tsq', bx0: 4, by0: 6, bx1: 5, by1: 7 },
 ];
 export const PARK = MERGES[0];
 export const TSQ = MERGES[1];
@@ -61,15 +64,33 @@ export const parkRect = () => mergeRect(PARK);
 export const parkPlinth = () => mergePlinth(PARK);
 export const blockInPark = (bx, by) => !!mergeOf(bx, by);
 
-// The East River: everything east of the riverside avenue's sidewalk is water, a little below
-// the street, behind a stone quay. Avenue line LAND_NI is the riverside drive; nothing east of it.
-export const LAND_NI = NB - 1;
-export const RIVER_X = lotStart(NB - 1);
+// The water. Manhattan is land from the Hudson's quay (the west sidewalk of 12th Avenue) to the
+// East River's (the east sidewalk of FDR Drive) and from the top edge down to the Battery's sea
+// wall (the south sidewalk of Battery Place); Brooklyn's shore is a strip across the East River.
+// Everything else is water, a little below the street, behind stone quays.
+export const HUDSON_X = streetStart(1);
+export const EAST_X = lotStart(NB - 2);
+export const BROOKLYN_X = 319;
+export const HARBOR_Y = lotStart(NB - 1);
+export const LAND = [
+  { x0: HUDSON_X, y0: -20, x1: EAST_X, y1: HARBOR_Y, name: 'manhattan' },
+  { x0: BROOKLYN_X, y0: -20, x1: MAP + 20, y1: HARBOR_Y, name: 'brooklyn' },
+];
+export const WATERS = [
+  { x0: 0, y0: 0, x1: HUDSON_X, y1: HARBOR_Y, name: 'hudson' },
+  { x0: EAST_X, y0: 0, x1: BROOKLYN_X, y1: HARBOR_Y, name: 'east' },
+  { x0: 0, y0: HARBOR_Y, x1: MAP, y1: MAP, name: 'harbor' },
+];
 export const WATER_Z = -0.45;
-export const inRiver = (x) => x > RIVER_X;
+// is (x, y) water (or within m of it)?
+export const inWater = (x, y, m = 0) => !LAND.some((r) => x > r.x0 + m && x < r.x1 - m && y > r.y0 + m && y < r.y1 - m);
+// the road grid on Manhattan: avenue lines 1..NB-2, street lines 0..NB-1
+export const AVE0 = 1, AVE1 = NB - 2, ST1 = NB - 1;
+// (kept for the old name) the East River's quay
+export const RIVER_X = EAST_X;
 
-// intersections that are not there: swallowed by a merged region, or out in the river
-export const isParkIntersection = (i, j) => i > LAND_NI || MERGES.some((m) => i > m.bx0 && i <= m.bx1 && j > m.by0 && j <= m.by1);
+// intersections that are not there: swallowed by a merged region, or out in the water
+export const isParkIntersection = (i, j) => i < AVE0 || i > AVE1 || j > ST1 || MERGES.some((m) => i > m.bx0 && i <= m.bx1 && j > m.by0 && j <= m.by1);
 // is the leg of intersection (i, j) heading in direction (dx, dy) a road?
 export const roadLegOpen = (i, j, dx, dy) => {
   const ni = i + dx, nj = j + dy;
@@ -79,8 +100,8 @@ export const roadLegOpen = (i, j, dx, dy) => {
 // intersections round the park, for the bus loop: [west/north index, east/south index]
 export const parkLoop = () => ({ i0: PARK.bx0, i1: PARK.bx1 + 1, j0: PARK.by0, j1: PARK.by1 + 1 });
 
-export const AVENUE_NAMES = ['11 AV', '10 AV', '9 AV', '8 AV', '7 AV', '6 AV', '5 AV', 'MADISON', 'PARK AV', 'LEXINGTON', '2 AV', 'FDR DR', 'EAST RIVER'];
-export const STREET_NAMES = ['W 59 ST', 'W 57 ST', 'W 53 ST', 'W 50 ST', 'W 47 ST', 'W 42 ST', 'W 34 ST', 'W 23 ST', 'W 14 ST', 'W 4 ST', 'CANAL ST', 'WALL ST', 'BATTERY PL'];
+export const AVENUE_NAMES = ['HUDSON', '12 AV', '11 AV', '10 AV', '8 AV', '7 AV', '5 AV', 'PARK AV', 'LEXINGTON', '1 AV', 'FDR DR', 'EAST RIVER', 'BROOKLYN'];
+export const STREET_NAMES = ['110 ST', '97 ST', '86 ST', '79 ST', '72 ST', '59 ST', '50 ST', '42 ST', '34 ST', '14 ST', 'CANAL ST', 'BATTERY PL', 'HARBOR'];
 
 export function blockRect(bx, by) {
   return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };

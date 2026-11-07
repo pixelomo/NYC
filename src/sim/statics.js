@@ -25,10 +25,11 @@ export class Statics {
     this.statueRow = pal.alloc({ ...PROP_COLORS, [S.C9]: 0x4f9a86, [S.C10]: 0xffd860 });
     // landmark statues and lanterns
     this.landmarkRows = {
-      liberty: pal.alloc({ [S.C1]: 0x6fb59d, [S.C2]: 0x3f8a72, [S.C3]: 0xa8dcc8, [S.C4]: [0xffe070, 128], [S.C5]: [0xff9a28, 128], [S.C6]: 0x5aa088 }),
+      liberty: pal.alloc({ [S.C1]: 0x6fb59d, [S.C2]: 0x3f8a72, [S.C3]: 0xa8dcc8, [S.C4]: [0xffe9a0, 128], [S.C5]: [0xffb030, 128], [S.C6]: 0x7cc2aa, [S.C7]: 0x2a5e50, [S.C8]: [0xf0c040, 128] }),
       lion: pal.alloc({ [S.C1]: 0xc4bcae, [S.C2]: 0x968e80, [S.C3]: 0xe6e0d4 }),
       goldStatue: pal.alloc({ [S.C1]: 0xd8a830, [S.C2]: 0x9a6e14, [S.C3]: 0xffe27a, [S.C4]: [0xffb030, 128] }),
       redLantern: pal.alloc({ [S.C1]: [0xe8202c, 128], [S.C2]: [0x9a1018, 128], [S.C3]: 0xe8c040 }),
+      sherman: pal.alloc({ ...PROP_COLORS, [S.C9]: 0xd8a830, [S.C10]: 0xffe27a }),
     };
     this.flagRow = pal.alloc({ [S.C1]: 0xd8302c, [S.C2]: 0xf2f2f0, [S.C3]: 0x9a9da3, [S.C7]: 0x23366e, [S.C6]: 0x8a2a6a });
     this.glowRows = {
@@ -50,7 +51,8 @@ export class Statics {
     this.lampDelay = world.lamps.map(() => rng.range(0, 0.6));
     this.lampFlicker = world.lamps.map(() => (rng.chance(0.04) ? rng.range(0.5, 2) : 0));
     this.frames = {};
-    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella', 'pedWalk', 'pedHand', 'tsqBall', 'liberty', 'lion', 'goldStatue', 'redLantern']) this.frames[n] = atlas.get(n);
+    for (const n of ['dish', 'antenna', 'deckchair', 'bush', 'grill', 'laundry', 'statue', 'xmas', 'snowman', 'glow', 'lamp2', 'lamp1', 'beacon', 'treeBundle', 'cartUmbrella', 'pedWalk', 'pedHand', 'tsqBall', 'liberty', 'lion', 'goldStatue', 'redLantern', 'angel']) this.frames[n] = atlas.get(n);
+    this.frames.sherman = this.frames.statue;
     this.ballRows = [0xf2f6ff, 0x6ab8ff, 0xff6ad8, 0xffd84f].map((c) => pal.alloc({ [S.C1]: c, [S.C2]: 0xffffff }));
     this.umbRows = {
       hotdog: pal.alloc({ [S.C1]: 0xf2c230, [S.C2]: 0x1f4fa0, [S.C3]: 0x9a9da3 }),
@@ -100,7 +102,7 @@ export class Statics {
       if (p.kind === 'deckchair' && env.season === 3) continue;
       const fr = this.frames[p.kind];
       if (!fr) continue;
-      const row = this.landmarkRows[p.kind] ?? (p.kind === 'laundry' ? this.laundryRow : p.kind === 'statue' ? this.statueRow : p.kind === 'cartUmbrella' ? this.umbRows[p.cart] || this.propRow : this.propRow);
+      const row = this.landmarkRows[p.kind] ?? (p.kind === 'laundry' ? this.laundryRow : p.kind === 'statue' || p.kind === 'angel' ? this.statueRow : p.kind === 'cartUmbrella' ? this.umbRows[p.cart] || this.propRow : this.propRow);
       L.push(p.x, p.y, p.z, fr, row, p.kind === 'statue' || p.kind === 'liberty' ? SF.TALL : p.kind === 'redLantern' ? SF.NOSHADOW : 0);
     }
     // flags wave
@@ -114,7 +116,7 @@ export class Statics {
     }
     // winter: christmas tree at park centre, sellers
     if (env.season === 3) for (const c of world.xmasTrees || []) if (vis(c.x, c.y, c.z, 4)) L.push(c.x, c.y, c.z, this.frames.xmas, this.xmasRow, SF.TALL);
-    if (env.season === 3 && world.parkCenter) {
+    if (env.season === 3 && world.parkCenter && !world.parkCenter.noTree) {
       const c = world.parkCenter;
       L.push(c.x, c.y, c.z ?? CURB + 1.0, this.frames.xmas, this.xmasRow, SF.TALL);
       for (const s of this.treeSellers) {
