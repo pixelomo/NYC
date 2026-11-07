@@ -51,9 +51,19 @@ npm run build
   - downtown: **Union Square** with its greenmarket, **City Hall** and the **Woolworth Building**
   - pre-war apartment towers along the park: twin-towered with little temples on top on Central
     Park West, limestone under slate mansards on Fifth Avenue, buff brick with art deco setbacks
-  - pencil-thin supertalls on Billionaires' Row, glass and limestone office towers, art deco
-    skyscrapers with crowns that light up at night in seasonal colours, a hotel with a vertical
-    neon sign and marquee
+  - **no two ordinary towers alike**: each is generated from its block and its district. Heights
+    follow the real skyline (peaks in Midtown and the Financial District, lower through Chelsea and
+    the Village); the era sets the look — glass curtain walls in eight tints and four mullion
+    patterns, mid-century slabs on plazas with pools, art deco wedding cakes with crowns lit at
+    night, pre-war limestone and brick office blocks with water towers. Footprints, podiums, twin
+    towers, setbacks, chamfered corners and crowns (penthouse, mast, spire, pyramid, slanted top,
+    glass lantern) vary, and every lobby has its own street address
+  - **real towers in their real blocks**: the Seagram Building and Lever House on Park Avenue,
+    Citigroup Center on its four columns with its slanted top, the Hearst Tower's diagrid, the New
+    York Times Building's ceramic rods, One Vanderbilt and the MetLife Building over Grand Central,
+    40 Wall Street's green pyramid, 70 Pine Street's lantern, 8 Spruce Street's rippling steel and
+    56 Leonard Street's stacked boxes, plus the Billionaires' Row supertalls (111 West 57th, 432
+    Park); pencil-thin supertalls, a hotel with a vertical neon sign and marquee
   - rows of **brownstones** with stoops, iron railings and areaway gardens, red-brick **walk-ups**
     with zig-zag fire escapes and storefronts (bodega, pizza, laundromat, coffee, bar, florist…),
     cast-iron **lofts** in SoHo, a firehouse, a movie theater marquee
@@ -239,7 +249,8 @@ URL parameters are handy for jumping straight to a moment, e.g.
   geometry, the quays and the collision grid; the ground texture is stored as tiles over the land
   only, looked up through an index texture in the shader, so the water costs nothing.
   `centralpark.js` builds the park, `manhattan.js` and `uptown.js` the towers, museums and plazas,
-  `landmarks.js` the skyscrapers, the Brooklyn Bridge and the statue, `bridges.js` the other bridges,
+  `skyline.js` the tower generator and the real towers, `landmarks.js` the older skyscrapers, the
+  Brooklyn Bridge and the statue, `bridges.js` the other bridges,
   `greater.js` the boroughs and islands, `timessq.js` the square. To keep the big map
   quick to build and light on memory, ordinary blocks come in a few seeded variants per type whose
   atlas art is painted once and reused, and the ground is painted at half the art resolution with

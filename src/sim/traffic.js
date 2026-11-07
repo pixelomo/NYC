@@ -380,7 +380,15 @@ export class Traffic {
       if (light === 'r') return false;
       if (light === 'y') {
         const rest = car.piece.len - car.s;
-        if (rest > 0.6 || car.v < 2.5) return false;
+        // a left-turner who waited at the line through the green finishes the turn as it goes amber
+        // (the oncoming traffic is stopping now), so the turn can't be starved forever
+        const sneak = C.turn === 'l' && lw > 3 && rest < 1.5;
+        if (!sneak && (rest > 0.6 || car.v < 2.5)) return false;
+        if (sneak) {
+          if (this.exitLock.get(C.to.id) && this.exitLock.get(C.to.id) !== car) return false;
+          for (const o of C.to.cars) if (o.s < car.len + 1.5 && o.state !== 'parked') return false;
+          return !(this.city.people && this.city.people.crossersNear(C.i, C.j, C.nd, C.to.pts[0][0] - DIRS[C.nd][0], C.to.pts[0][1] - DIRS[C.nd][1], 1.7));
+        }
       }
     }
     // exit lock

@@ -15,6 +15,7 @@ import { PAL, stoneFill, brickFill, smoothFill, drawWindow, signBoard } from './
 import { sharedTex, markHeight, Frame, rowhouse } from './buildings.js';
 import { section, band, region, beacon, lobbyDoors, plaza, loft } from './towers.js';
 import { propTex, beam, parkLamp, subwayEntrance } from './props.js';
+import { metlife } from './skyline.js';
 
 const PI = Math.PI;
 const CROWN = 254; // window code for coloured crown lights at night
@@ -413,7 +414,8 @@ export function grandCentral(C, L) {
     for (const bx of [2, 13]) p.rect(bx, 6, 9, 32, 0x2e3e52, winCode(0.5));
     p.rect(0, 40, 24, 8, 0x9a968c);
   });
-  section(C, L.x0 + 1.2, L.y0 + 0.5, L.x1 - 1.2, L.y0 + 6.0, z0, z0 + 50, slab, S.roofSilver, { seed: 159 });
+  metlife(C, L.x0 + 1.2, L.y0 + 0.5, L.x1 - 1.2, L.y0 + 6.0, z0, 50);
+  void slab;
   W.officeDoors.push({ x: (L.x0 + L.x1) / 2, y: ty1 + 0.9, dx: (L.x0 + L.x1) / 2, dy: ty1 - 0.2, kind: 'office' });
   W.officeDoors.push({ x: L.x0 + 4, y: ty1 + 0.9, dx: L.x0 + 4, dy: ty1 - 0.2, kind: 'office' });
   landmark(C, 'GRAND CENTRAL', (L.x0 + L.x1) / 2, L.y1 + 3, 3);

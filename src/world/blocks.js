@@ -7,7 +7,7 @@ import { GC, COL } from './ground.js';
 import { MAT, GRP } from './mesh.js';
 import { shade, mixc, hash2i, valueNoise } from '../core/math.js';
 import { Frame, rowhouse, walkup, gardenWall, sharedTex, markHeight, deptStore } from './buildings.js';
-import { decoTower, glassTower, modernTower, limestoneOffice, loft } from './towers.js';
+import { loft } from './towers.js';
 import {
   propTex, streetLamp, parkLamp, signalPole, hydrant, mailbox, newsBoxes, trashBasket, bench, steamGrate, kiosk,
   busShelter, subwayEntrance, parkWall, chainFence, hoop, bleachers, handballWall, playground, scaffolding,
@@ -18,6 +18,7 @@ import * as MH from './manhattan.js';
 import { buildBridges } from './bridges.js';
 import { greaterNewYork } from './greater.js';
 import * as UP from './uptown.js';
+import * as SK from './skyline.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { centralPark } from './centralpark.js';
 import { billboardsBlock, timesSquareBlock, timesSquareDistrict } from './timessq.js';
@@ -350,10 +351,19 @@ const BLOCKS = {
   bodega: (C, L) => walkupBlock(C, L, { bodegaCorner: true, shops: 0.6 }),
   firehouse: (C, L) => walkupBlock(C, L, { firehouse: true, shops: 0.5 }),
   lofts: (C, L) => loftBlock(C, L),
-  deco: (C, L) => decoTower(C, L),
-  glass: (C, L) => glassTower(C, L),
-  modern: (C, L) => modernTower(C, L),
-  office: (C, L) => limestoneOffice(C, L),
+  deco: (C, L, bx, by) => SK.towerBlock(C, L, bx, by, 'deco'),
+  glass: (C, L, bx, by) => SK.towerBlock(C, L, bx, by, 'glass'),
+  modern: (C, L, bx, by) => SK.towerBlock(C, L, bx, by, 'modern'),
+  office: (C, L, bx, by) => SK.towerBlock(C, L, bx, by, 'office'),
+  seagram: (C, L) => SK.seagramLever(C, L),
+  citigroup: (C, L) => SK.citigroup(C, L),
+  hearst: (C, L) => SK.hearst(C, L),
+  nyt: (C, L) => SK.nytimes(C, L),
+  vanderbilt: (C, L) => SK.vanderbilt(C, L),
+  fortywall: (C, L) => SK.fortyWall(C, L),
+  seventypine: (C, L) => SK.seventyPine(C, L),
+  spruce: (C, L) => SK.eightSpruce(C, L),
+  leonard: (C, L) => SK.leonard(C, L),
   court: (C, L) => courtBlock(C, L),
   park: (C, L) => parkBlock(C, L),
   // pre-war red-brick apartment houses: taller, mostly residential, canopied entrances

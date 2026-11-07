@@ -204,6 +204,7 @@ export function supertall(C, L, bx) {
     beacon(C, cx, y1 - 0.8, z + 4.1);
   }
   office(C, cx, L.y1 + 0.9, cx, L.y1 - 0.4);
+  landmark(C, bx % 2 ? '432 PARK AVENUE' : '111 WEST 57TH STREET', cx, L.y1 + 3, 0);
 }
 
 // ---------------------------------------------------------------------------------------------
