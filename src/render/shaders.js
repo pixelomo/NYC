@@ -524,7 +524,8 @@ void main() {
     float d0 = texture(uDepth, q).r;
     float dn = min(min(texture(uDepth, q + vec2(e.x, 0.0)).r, texture(uDepth, q - vec2(e.x, 0.0)).r),
                    min(texture(uDepth, q + vec2(0.0, e.y)).r, texture(uDepth, q - vec2(0.0, e.y)).r));
-    if (d0 - dn > 0.006) c *= (1.0 - uOutline);
+    // a dark line wherever something stands in front: the crisp outlines of the pixel-art look
+    if (d0 - dn > 0.0025) c = mix(c, c * vec3(0.18, 0.17, 0.24), uOutline);
   }
   if (uFog.w > 0.001) {
     float dz = texture(uDepth, (floor(p) + 0.5) / uBuf).r;
@@ -537,6 +538,9 @@ void main() {
   c *= uGrade;
   float l = dot(c, vec3(0.299, 0.587, 0.114));
   c = mix(vec3(l), c, uSat);
+  // a little more contrast in the mid-tones, so colours read bold and clean
+  c = clamp(c, 0.0, 1.0);
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.28);
   vec2 sc = gl_FragCoord.xy / uCanvas - 0.5;
   c *= 1.0 - dot(sc, sc) * uVignette;
   c += vec3(uFlash * 0.25);

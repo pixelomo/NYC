@@ -287,7 +287,7 @@ function frames(L) {
 // The common block types come in a few variants each: every copy of a variant is built from the
 // same seed, so it can reuse the facade textures its first copy painted (see Atlas.beginReplay).
 // That keeps a 4x city inside the texture budget; towers and landmarks stay one of a kind.
-const VARIANTS = { brownstones: 4, walkups: 5, tenements: 4, redbrick: 5, shops: 4, commercial: 3, bodega: 3, lofts: 3, billboards: 2 };
+const VARIANTS = { brownstones: 6, walkups: 7, tenements: 6, redbrick: 7, shops: 6, commercial: 4, bodega: 4, lofts: 5, billboards: 2, firehouse: 2 };
 const typeSeed = (t) => { let h = 2166136261; for (const ch of t) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
 export function buildBlocks(C) {
@@ -447,6 +447,10 @@ const BLOCKS = {
   carnegie: (C, L) => SG.carnegie(C, L),
   moma: (C, L) => SG.moma(C, L),
   chelseamarket: (C, L) => SG.chelseaMarket(C, L),
+  mansions: (C, L, bx, by) => SG.mansions(C, L, bx, by),
+  frick: (C, L) => SG.frick(C, L),
+  emanuel: (C, L) => SG.emanuel(C, L),
+  armory: (C, L) => SG.armory(C, L),
   trinity: (C, L, bx, by) => SG.trinity(C, L, bx, by),
   bowlinggreen: (C, L) => SG.bowlingGreen(C, L),
   ferry: (C, L) => SG.ferryTerminal(C, L),

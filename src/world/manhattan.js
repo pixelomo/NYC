@@ -99,13 +99,20 @@ function canopy(C, x0, y0, x1, y1, z, t) {
 // buff-brick block with art deco setbacks.
 export function prewar(C, L, bx, by) {
   const S = sharedTex(C), mb = C.mb, z0 = C.z0;
-  const west = bx === PARK.bx0 - 1, east = bx === PARK.bx1 + 1;
-  const style = west ? 'twin' : east ? 'fifth' : (bx + by) % 2 ? 'deco' : 'twin';
-  const wallC = style === 'fifth' ? 0xdccfb2 : style === 'deco' ? 0xd2b48a : 0xe0d0ae;
-  const mod = module(C, `pw_${style}`, style === 'deco' ? { brick: PAL.brickTan, frame: 0x2b2b30, lintel: 0xe6dabe, sill: 0xe6dabe } : { wall: wallC, frame: style === 'fifth' ? 0x2b2b30 : 0x3a4a3a, lintel: shade(wallC, 1.08), sill: shade(wallC, 1.06), band: style === 'twin' ? shade(wallC, 0.92) : null });
-  const crown = module(C, `pw_${style}_crown`, { wall: shade(wallC, 1.04), frame: 0xf2efe6, arch: true, keystone: true, pier: true });
+  const west = bx === PARK.bx0 - 1, east = bx === PARK.bx1 + 1, rng = C.rng;
+  // every block its own building: a style, a stone or brick, a height (the park's edges were a row of
+  // identical twins on Central Park West and identical limestone on Fifth)
+  const style0 = west ? rng.pick(['twin', 'twin', 'deco', 'single', 'slab']) : east ? rng.pick(['fifth', 'fifth', 'fifthTall', 'deco', 'slab']) : rng.pick(['deco', 'twin', 'slab', 'single']);
+  const style = style0 === 'single' ? 'twin' : style0 === 'fifthTall' ? 'fifth' : style0 === 'slab' ? 'deco' : style0;
+  const ci = rng.int(0, 3);
+  const STONES = [0xe0d0ae, 0xd6c49c, 0xcdc0aa, 0xe6dcc8], LIMES = [0xdccfb2, 0xe2d8c2, 0xd4c6a8, 0xcfc8ba];
+  const BRICKS = [PAL.brickTan, [0xc8a878, 0xbc9c6c, 0xd2b284], PAL.brickBrown, [0xb8704a, 0xac6640, 0xc27a52]];
+  const wallC = style === 'fifth' ? LIMES[ci] : style === 'deco' ? 0xd2b48a : STONES[ci];
+  const brick = style0 === 'slab' ? BRICKS[2 + (ci % 2)] : BRICKS[ci % 2];
+  const mod = module(C, `pw_${style0}_${ci}`, style === 'deco' ? { brick, frame: 0x2b2b30, lintel: 0xe6dabe, sill: 0xe6dabe, band: style0 === 'slab' ? 0xd8ccb0 : null } : { wall: wallC, frame: style === 'fifth' ? 0x2b2b30 : rng.pick([0x3a4a3a, 0x2b2b30, 0x4a3a2a]), lintel: shade(wallC, 1.08), sill: shade(wallC, 1.06), band: style === 'twin' ? shade(wallC, 0.92) : null });
+  const crown = module(C, `pw_${style}_crown_${ci}`, { wall: shade(wallC, 1.04), frame: 0xf2efe6, arch: true, keystone: true, pier: true });
   const x0 = L.x0 + 0.6, x1 = L.x1 - 0.6, y0 = L.y0 + 0.6, y1 = L.y1 - 0.6;
-  const floors = style === 'fifth' ? 9 : style === 'twin' ? 13 : 15;
+  const floors = style0 === 'fifthTall' ? rng.int(12, 14) : style === 'fifth' ? rng.int(8, 11) : style0 === 'slab' ? rng.int(10, 14) : style === 'twin' ? rng.int(11, 15) : rng.int(13, 17);
   const zb = z0 + 2.5, zt = zb + floors * 1.5;
   // the front faces the park (east on CPW, west on Fifth), else south
   const front = west ? 1 : east ? 3 : 0; // band face index: 0 py, 1 px, 2 ny, 3 nx
@@ -125,9 +132,9 @@ export function prewar(C, L, bx, by) {
       p.rect(0, 0, 32, 6, 0xe6dabe); p.hline(0, 5, 32, 0xb8ab8c);
     });
     const tw = 4.8;
-    const ax = front === 1 || front === 0 ? x1 - tw - 0.4 : x0 + 0.4;
-    for (const ty of [y0 + 0.4, y1 - tw - 0.4]) {
-      const tz = zt + 0.32, th = tz + 6 * 1.5;
+    const ax = style0 === 'single' ? (x0 + x1) / 2 - tw / 2 : front === 1 || front === 0 ? x1 - tw - 0.4 : x0 + 0.4;
+    for (const ty of style0 === 'single' ? [(y0 + y1) / 2 - tw / 2] : [y0 + 0.4, y1 - tw - 0.4]) {
+      const tz = zt + 0.32, th = tz + (style0 === 'single' ? 8 : 6) * 1.5;
       section(C, ax, ty, ax + tw, ty + tw, tz, th, crown, S.roofTar, { seed: 140 + by, mat: MAT.OFFICE });
       mb.box(ax - 0.15, ty - 0.15, th, ax + tw + 0.15, ty + tw + 0.15, th + 0.3, sides(S.limestone, { t: S.limeTop }));
       mb.box(ax + 0.6, ty + 0.6, th + 0.3, ax + tw - 0.6, ty + tw - 0.6, th + 2.3, sides(temple, { t: S.limeTop }), { mat: MAT.OFFICE });
@@ -143,9 +150,17 @@ export function prewar(C, L, bx, by) {
       for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade((y >> 2) % 2 ? 0x3e4450 : 0x4a5160, 0.93 + hash2i(x >> 2, y >> 2, 34) * 0.12));
       for (const dx of [6, 20]) { p.rect(dx, 10, 7, 12, 0xe6dabe); p.rect(dx + 1, 12, 5, 9, 0x2a3440, winCode(0.4)); p.rect(dx - 1, 8, 9, 3, 0xe6dabe); }
     });
-    mansard(C, x0 + 0.2, y0 + 0.2, x1 - 0.2, y1 - 0.2, zt + 0.32, zt + 3.4, 1.6, slate, S.roofTar);
+    if (style0 === 'fifthTall') {
+      section(C, x0 + 1.2, y0 + 1.2, x1 - 1.2, y1 - 1.2, zt + 0.32, zt + 3.3, mod, S.roofTar, { seed: 150 + by, mat: MAT.OFFICE });
+      mansard(C, x0 + 1.4, y0 + 1.4, x1 - 1.4, y1 - 1.4, zt + 3.3, zt + 6.2, 1.4, slate, S.roofTar);
+    } else mansard(C, x0 + 0.2, y0 + 0.2, x1 - 0.2, y1 - 0.2, zt + 0.32, zt + 3.4, 1.6, slate, S.roofTar);
     for (const [hx, hy] of [[x0 + 1.4, y0 + 1.4], [x1 - 1.4, y1 - 1.4]]) mb.box(hx - 0.3, hy - 0.3, zt + 0.32, hx + 0.3, hy + 0.3, zt + 4.0, sides(S.brickTan, { t: S.roofTar }));
     waterTower(C, cx, cy, zt + 3.4, 0.8);
+  } else if (style0 === 'slab') {
+    // a plain brick slab: a penthouse set back on the roof, a water tower or two
+    section(C, x0 + 2.4, y0 + 2.4, x1 - 2.4, (y0 + y1) / 2, zt + 0.32, zt + 3.3, mod, S.roofTar, { seed: 165 + bx, mat: MAT.OFFICE });
+    waterTower(C, x1 - 2.6, y1 - 2.6, zt + 0.32, 0.85);
+    if (rng.chance(0.5)) waterTower(C, x0 + 2.6, y1 - 2.8, zt + 0.32, 0.75);
   } else {
     // art deco setbacks and a finned crown
     section(C, x0 + 1.6, y0 + 1.6, x1 - 1.6, y1 - 1.6, zt + 0.32, zt + 6.32, mod, S.roofTar, { seed: 160 + bx, mat: MAT.OFFICE });

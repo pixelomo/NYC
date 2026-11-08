@@ -4,14 +4,14 @@ export const T = 32; // texels (pixels) per world unit (2x pixel density)
 export const GT = 16; // ground texture texels per world unit (half of T: the big city's ground has to fit a GPU texture)
 export const K = T / 16; // scale factor for pixel-art sizes authored at 16 texels/unit
 export const NBX = 15; // block columns: New Jersey, the Hudson, Manhattan (up to 10 avenues wide), the East River, Queens and Brooklyn
-export const NBY = 46; // block rows: the Bronx at the top, Inwood to the Battery (40 rows), the harbour at the bottom
+export const NBY = 66; // block rows: the Bronx at the top, Inwood to the Battery (60 rows), the harbour at the bottom
 export const BLOCK = 18;
 export const SIDEWALK = 2;
 export const ROAD = 5;
 export const STREET = SIDEWALK * 2 + ROAD; // 9
 export const PERIOD = STREET + BLOCK; // 27
 export const MAPX = NBX * PERIOD + STREET; // 414
-export const MAPY = NBY * PERIOD + STREET; // 1251
+export const MAPY = NBY * PERIOD + STREET; // 1791
 // world extent covered by the lamp light map (x, y in [0, LIGHT_EXT_X] x [0, LIGHT_EXT_Y])
 export const LIGHT_EXT_X = MAPX + 5;
 export const LIGHT_EXT_Y = MAPY + 5;
@@ -37,52 +37,72 @@ const _ = '~';
 const row = (from, ...types) => { const r = new Array(15).fill(_); types.forEach((t, k) => { r[from + k] = t; }); return r; };
 export const BLOCK_TYPES = [
   row(0),
-  row(4, 'inwoodhill', 'walkups'), //                                                   218-207 St
-  row(4, 'cloisters', 'walkups', 'tenements'), //                                        207-196
-  row(3, 'riverside', 'redbrick', 'shops', 'walkups', 'walkups'), //                      196-185
-  row(3, 'gwb', 'prewar', 'redbrick', 'shops', 'highbridge'), //                         185-174
-  row(3, 'riverside', 'redbrick', 'tenements', 'bodega', 'walkups'), //                  174-163
-  row(3, 'riverside', 'prewar', 'brownstones', 'walkups', 'shops', 'redbrick'), //       163-152
-  row(3, 'riverside', 'walkups', 'brownstones', 'shops', 'redbrick', 'tenements'), //    152-142
-  row(3, 'riverside', 'tenements', 'brownstones', 'brownstones', 'commercial', 'walkups', 'redbrick'), // 142-135
-  row(3, 'riverside', 'redbrick', 'brownstones', 'shops', 'tenements', 'bodega', 'tenements'), //        135-125 (Harlem)
-  row(3, 'grantstomb', 'columbia', 'prewar', 'apollo', 'brownstones', 'shops', 'tenements', 'tbridge'), // 125-116
+  row(4, 'inwoodhill', 'walkups'), //                                                     218-212 St (Inwood)
+  row(4, 'redbrick', 'shops', 'walkups'), //                                               212-207
+  row(4, 'cloisters', 'walkups', 'tenements'), //                                          207-201
+  row(3, 'riverside', 'prewar', 'walkups', 'bodega', 'tenements'), //                      201-196 (Hudson Heights)
+  row(3, 'riverside', 'redbrick', 'shops', 'tenements', 'walkups'), //                     196-191
+  row(3, 'riverside', 'redbrick', 'shops', 'walkups', 'walkups'), //                       191-185
+  row(3, 'gwb', 'prewar', 'redbrick', 'shops', 'highbridge'), //                           185-179 (Washington Heights)
+  row(3, 'riverside', 'walkups', 'tenements', 'shops', 'bodega'), //                       179-174
+  row(3, 'riverside', 'redbrick', 'tenements', 'bodega', 'walkups'), //                    174-168
+  row(3, 'riverside', 'prewar', 'redbrick', 'shops', 'tenements', 'walkups'), //           168-163
+  row(3, 'riverside', 'prewar', 'brownstones', 'walkups', 'shops', 'redbrick'), //         163-158
+  row(3, 'riverside', 'brownstones', 'redbrick', 'commercial', 'tenements', 'bodega'), //  158-153 (Sugar Hill)
+  row(3, 'riverside', 'prewar', 'brownstones', 'shops', 'walkups', 'redbrick'), //         153-148
+  row(3, 'riverside', 'walkups', 'brownstones', 'shops', 'redbrick', 'tenements'), //      148-143
+  row(3, 'riverside', 'redbrick', 'brownstones', 'tenements', 'shops', 'walkups', 'redbrick'), // 143-139
+  row(3, 'riverside', 'tenements', 'brownstones', 'brownstones', 'commercial', 'walkups', 'redbrick'), // 139-135
+  row(3, 'riverside', 'walkups', 'brownstones', 'brownstones', 'shops', 'tenements', 'bodega'), // 135-130 (Harlem)
+  row(3, 'riverside', 'redbrick', 'brownstones', 'shops', 'tenements', 'bodega', 'tenements'), // 130-125
+  row(3, 'grantstomb', 'columbia', 'prewar', 'apollo', 'brownstones', 'shops', 'tenements', 'tbridge'), // 125-121
+  row(3, 'riverside', 'prewar', 'brownstones', 'brownstones', 'commercial', 'tenements', 'walkups', 'redbrick'), // 121-118
+  row(3, 'riverside', 'prewar', 'prewar', 'shops', 'brownstones', 'tenements', 'bodega', 'redbrick'), // 118-116
   row(3, 'riverside', 'prewar', 'stjohn', 'brownstones', 'shops', 'walkups', 'tenements', 'redbrick'), // 116-110
-  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'commercial', 'redbrick', 'tenements'), // 110-102
-  row(3, 'soldiers', 'brownstones', 'prewar', 'park', 'park', 'guggenheim', 'prewar', 'office', 'redbrick'), // 102-96
-  row(3, 'riverside', 'brownstones', 'prewar', 'park', 'park', 'prewar', 'brownstones', 'walkups', 'redbrick'), // 96-90
-  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'hotel', 'shops', 'gracie'), //       90-84
-  row(3, 'riverside', 'prewar', 'naturalhistory', 'park', 'park', 'museum', 'prewar', 'brownstones', 'glass'), // 84-77
-  row(3, 'riverside', 'brownstones', 'brownstones', 'park', 'park', 'prewar', 'brownstones', 'redbrick', 'modern'), // 77-72
-  row(3, 'riverside', 'brownstones', 'dakota', 'park', 'park', 'prewar', 'hotel', 'redbrick', 'modern'), // 72-66
-  row(3, 'glass', 'lincoln', 'prewar', 'park', 'park', 'prewar', 'office', 'commercial', 'deco'), //      66-59
+  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'commercial', 'redbrick', 'tenements'), //      110-105
+  row(3, 'riverside', 'prewar', 'brownstones', 'park', 'park', 'prewar', 'brownstones', 'tenements', 'redbrick'), // 105-101
+  row(3, 'soldiers', 'brownstones', 'prewar', 'park', 'park', 'guggenheim', 'prewar', 'office', 'redbrick'), //     101-96
+  row(3, 'riverside', 'brownstones', 'prewar', 'park', 'park', 'mansions', 'brownstones', 'walkups', 'redbrick'), // 96-91
+  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'hotel', 'shops', 'gracie'), //                 91-86
+  row(3, 'riverside', 'prewar', 'brownstones', 'park', 'park', 'prewar', 'brownstones', 'redbrick', 'modern'), //    86-81
+  row(3, 'riverside', 'prewar', 'naturalhistory', 'park', 'park', 'museum', 'prewar', 'brownstones', 'glass'), //    81-77
+  row(3, 'riverside', 'brownstones', 'brownstones', 'park', 'park', 'frick', 'brownstones', 'redbrick', 'modern'), // 77-72
+  row(3, 'riverside', 'brownstones', 'dakota', 'park', 'park', 'prewar', 'hotel', 'redbrick', 'modern'), //         72-68
+  row(3, 'riverside', 'brownstones', 'prewar', 'park', 'park', 'emanuel', 'armory', 'redbrick', 'modern'), //       68-63
+  row(3, 'glass', 'lincoln', 'prewar', 'park', 'park', 'mansions', 'office', 'commercial', 'deco'), //              63-59
   row(3, 'glass', 'hearst', 'columbus', 'carnegie', 'plazahotel', 'supertall', 'citigroup', 'office', 'qbridge'), // 59-55
-  row(3, 'modern', 'glass', 'office', 'radiocity', 'moma', 'deco', 'office', 'glass', 'office'), //       55-50
-  row(3, 'intrepid', 'billboards', 'tsq', 'tsq', 'rockefeller', 'stpatricks', 'seagram', 'office', 'un'), // 50-45
-  row(3, 'glass', 'nyt', 'tsq', 'tsq', 'library', 'vanderbilt', 'grandcentral', 'chrysler', 'glass'), //   45-41
-  row(3, 'glass', 'office', 'commercial', 'office', 'deco', 'office', 'glass', 'office', 'modern'), //     41-37
-  row(3, 'hudsonyards', 'glass', 'commercial', 'macys', 'empire', 'office', 'deco', 'glass', 'modern'), // 37-33
-  row(3, 'glass', 'highline', 'arena', 'commercial', 'office', 'shops', 'brownstones', 'modern', 'glass'), // 33-28
-  row(3, 'lofts', 'highline', 'chelseamarket', 'shops', 'office', 'shops', 'brownstones', 'redbrick', 'redbrick'), // 28-25
-  row(3, 'lofts', 'highline', 'shops', 'shops', 'flatiron', 'office', 'brownstones', 'redbrick', 'redbrick'), // 25-22
-  row(3, 'lofts', 'highline', 'commercial', 'shops', 'office', 'brownstones', 'redbrick', 'tenements', 'redbrick'), // 22-18
-  row(3, 'littleisland', 'highline', 'commercial', 'shops', 'office', 'unionsq', 'redbrick', 'redbrick', 'redbrick'), // 18-14
+  row(3, 'modern', 'glass', 'office', 'radiocity', 'moma', 'deco', 'office', 'glass', 'office'), //         55-52
+  row(3, 'intrepid', 'billboards', 'tsq', 'tsq', 'rockefeller', 'stpatricks', 'seagram', 'office', 'un'), // 52-48
+  row(3, 'glass', 'nyt', 'tsq', 'tsq', 'library', 'vanderbilt', 'grandcentral', 'chrysler', 'glass'), //   48-45
+  row(3, 'glass', 'office', 'commercial', 'office', 'deco', 'office', 'glass', 'office', 'modern'), //     45-42
+  row(3, 'glass', 'commercial', 'shops', 'office', 'office', 'deco', 'glass', 'office', 'glass'), //       42-40 (the Garment District)
+  row(3, 'hudsonyards', 'glass', 'commercial', 'macys', 'empire', 'office', 'deco', 'glass', 'modern'), // 40-37
+  row(3, 'lofts', 'glass', 'shops', 'commercial', 'office', 'shops', 'brownstones', 'redbrick', 'glass'), // 37-33
+  row(3, 'glass', 'highline', 'arena', 'commercial', 'office', 'shops', 'brownstones', 'modern', 'glass'), // 33-29
+  row(3, 'lofts', 'highline', 'chelseamarket', 'shops', 'office', 'shops', 'brownstones', 'redbrick', 'redbrick'), // 29-26
+  row(3, 'lofts', 'highline', 'shops', 'shops', 'flatiron', 'office', 'brownstones', 'redbrick', 'redbrick'), // 26-23
+  row(3, 'lofts', 'highline', 'commercial', 'shops', 'office', 'brownstones', 'redbrick', 'tenements', 'redbrick'), // 23-20
+  row(3, 'littleisland', 'highline', 'commercial', 'shops', 'office', 'unionsq', 'redbrick', 'redbrick', 'redbrick'), // 20-17
+  row(3, 'glass', 'brownstones', 'lofts', 'shops', 'office', 'shops', 'walkups', 'tenements', 'tenements', 'redbrick'), // 17-14
   row(3, 'glass', 'brownstones', 'brownstones', 'court', 'washsq', 'walkups', 'shops', 'tenements', 'tenements', 'redbrick'), // 14-10
-  row(3, 'glass', 'brownstones', 'lofts', 'brownstones', 'shops', 'walkups', 'tenements', 'tenements', 'bodega', 'walkups'), // 10-7
-  row(3, 'glass', 'lofts', 'lofts', 'lofts', 'shops', 'tenements', 'tenements', 'bodega', 'tenements', 'walkups'), // 7-Houston
-  row(3, 'lofts', 'lofts', 'lofts', 'shops', 'chinatown', 'tenements', 'walkups', 'tenements', 'tenements', 'wbridge'), // Houston-Delancey
+  row(3, 'glass', 'brownstones', 'lofts', 'brownstones', 'shops', 'walkups', 'tenements', 'tenements', 'bodega', 'walkups'), // 10-6
+  row(3, 'glass', 'lofts', 'lofts', 'lofts', 'shops', 'tenements', 'tenements', 'bodega', 'tenements', 'walkups'), // 6-Houston
+  row(3, 'lofts', 'lofts', 'shops', 'lofts', 'shops', 'tenements', 'walkups', 'bodega', 'tenements', 'redbrick'), // Houston-Stanton
+  row(3, 'lofts', 'lofts', 'lofts', 'shops', 'chinatown', 'tenements', 'walkups', 'tenements', 'tenements', 'wbridge'), // Stanton-Delancey
   row(3, 'lofts', 'lofts', 'office', 'shops', 'chinatown', 'tenements', 'walkups', 'tenements', 'tenements', 'redbrick'), // Delancey-Canal
-  row(3, 'lofts', 'leonard', 'office', 'chinatown', 'chinatown', 'tenements', 'walkups', 'tenements', 'mbridge'), // Canal-Chambers
-  row(3, 'glass', 'office', 'cityhall', 'office', 'deco', 'spruce', 'bridge'), //                         Chambers-Fulton
-  row(3, 'glass', 'glass', 'office', 'deco', 'office', 'modern', 'walkups'), //                          Fulton-Maiden Lane
-  row(3, 'glass', 'wtc', 'memorial', 'trinity', 'fortywall', 'seventypine', 'seaport'), //               Maiden Lane-Wall
-  row(3, 'battery', 'bowlinggreen', 'exchange', 'deco', 'ferry'), //                                     Wall-Battery
+  row(3, 'lofts', 'leonard', 'office', 'chinatown', 'chinatown', 'tenements', 'walkups', 'tenements', 'mbridge'), // Canal-Worth
+  row(3, 'lofts', 'office', 'office', 'deco', 'chinatown', 'tenements', 'walkups', 'redbrick'), //          Worth-Chambers
+  row(3, 'glass', 'office', 'cityhall', 'office', 'deco', 'spruce', 'bridge'), //                          Chambers-Fulton
+  row(3, 'glass', 'glass', 'office', 'deco', 'office', 'modern', 'walkups'), //                           Fulton-Maiden Lane
+  row(3, 'glass', 'wtc', 'memorial', 'trinity', 'fortywall', 'seventypine', 'seaport'), //                Maiden Lane-Pine
+  row(3, 'glass', 'glass', 'office', 'deco', 'office', 'glass'), //                                       Pine-Wall
+  row(3, 'battery', 'bowlinggreen', 'exchange', 'deco', 'ferry'), //                                      Wall-Battery
   row(0), row(0), row(0), row(0), row(0),
 ];
-// Rows added since the 30-row island (Harlem, the Upper East and West Sides, Midtown, Chelsea, the
-// Village, the Lower East Side and the Financial District): OY maps a y position on the old map to
+// Rows added since the 30-row island, 30 of them, so the island is about six times as long as it is
+// wide like the real one (most uptown, where Manhattan is longest): OY maps a y position on the old map to
 // the new one, OR an old row to its new index, so everything across the rivers keeps its place
-const INS = [9, 13, 15, 18, 20, 22, 23, 25, 27, 29];
+const INS = [2, 3, 3, 5, 6, 7, 7, 8, 9, 9, 10, 10, 12, 13, 14, 15, 16, 18, 20, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30];
 export const OY = (y) => y + PERIOD * INS.filter((r) => y >= r * PERIOD).length;
 export const OR = (r) => r + INS.filter((i) => i <= r).length;
 export const isManhattan = (bx, by) => bx >= 0 && by >= 0 && bx < NBX && by < NBY && BLOCK_TYPES[by][bx] !== _;
@@ -91,8 +111,8 @@ export const isManhattan = (bx, by) => bx >= 0 && by >= 0 && bx < NBX && by < NB
 // landscape, 59th to 110th Street) and Times Square (four blocks of screens round a pedestrian
 // plaza made of the old streets).
 export const MERGES = [
-  { kind: 'park', bx0: 6, by0: 12, bx1: 7, by1: 19 },
-  { kind: 'tsq', bx0: 5, by0: 22, bx1: 6, by1: 23 },
+  { kind: 'park', bx0: 6, by0: 23, bx1: 7, by1: 33 },
+  { kind: 'tsq', bx0: 5, by0: 36, bx1: 6, by1: 37 },
 ];
 export const PARK = MERGES[0];
 export const TSQ = MERGES[1];
@@ -158,7 +178,7 @@ export const ROWS = { palisadesEnd: OR(19), hobokenEnd: OR(24), harbor: OR(31), 
 
 // (west to east / north to south, roughly where each line falls)
 export const AVENUE_NAMES = ['NJ', 'HUDSON', 'HUDSON', '12 AV', '11 AV', '9 AV', '8 AV', '6 AV', '5 AV', 'PARK AV', 'LEXINGTON', '1 AV', 'FDR DR', 'EAST RIVER', 'QUEENS', 'BROOKLYN'];
-export const STREET_NAMES = ['SPUYTEN DUYVIL', '218 ST', '207 ST', '196 ST', '185 ST', '174 ST', '163 ST', '152 ST', '142 ST', '135 ST', '125 ST', '116 ST', '110 ST', '102 ST', '96 ST', '90 ST', '84 ST', '77 ST', '72 ST', '66 ST', '59 ST', '55 ST', '50 ST', '45 ST', '41 ST', '37 ST', '33 ST', '28 ST', '25 ST', '22 ST', '18 ST', '14 ST', '10 ST', '7 ST', 'HOUSTON ST', 'DELANCEY ST', 'CANAL ST', 'CHAMBERS ST', 'FULTON ST', 'MAIDEN LN', 'WALL ST', 'BATTERY PL', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY'];
+export const STREET_NAMES = ['SPUYTEN DUYVIL', '218 ST', '212 ST', '207 ST', '201 ST', '196 ST', '191 ST', '185 ST', '179 ST', '174 ST', '168 ST', '163 ST', '158 ST', '153 ST', '148 ST', '143 ST', '139 ST', '135 ST', '130 ST', '125 ST', '121 ST', '118 ST', '116 ST', '110 ST', '105 ST', '101 ST', '96 ST', '91 ST', '86 ST', '81 ST', '77 ST', '72 ST', '68 ST', '63 ST', '59 ST', '55 ST', '52 ST', '48 ST', '45 ST', '42 ST', '40 ST', '37 ST', '33 ST', '29 ST', '26 ST', '23 ST', '20 ST', '17 ST', '14 ST', '10 ST', '6 ST', 'HOUSTON ST', 'STANTON ST', 'DELANCEY ST', 'CANAL ST', 'WORTH ST', 'CHAMBERS ST', 'FULTON ST', 'MAIDEN LN', 'PINE ST', 'WALL ST', 'BATTERY PL', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY'];
 
 export function blockRect(bx, by) {
   return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };

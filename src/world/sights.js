@@ -548,3 +548,114 @@ export function chelseaMarket(C, L) {
   for (let k = 0; k < 4; k++) C.addSprite('dish', x0 + 2 + k * 4, y0 + 2, z0 + 14);
   landmark(C, 'CHELSEA MARKET', cx, L.y1 + 3, 0);
 }
+
+// ---- Fifth Avenue's townhouse mansions: limestone, mansard roofs with dormers, iron fences -------------
+export function mansions(C, L, bx, by) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0, rng = C.rng;
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'patio');
+  const P = propTex(C);
+  const stones = [0xe2d8c4, 0xd8ccb0, 0xcfc4ae, 0xe8e0cc, 0xd2c09c];
+  let y = L.y0 + 0.5;
+  const facePark = bx <= 7; // the houses face Fifth Avenue and the park, to the west
+  const fx = facePark ? L.x0 + 0.6 : L.x1 - 0.6, dir = facePark ? 1 : -1;
+  while (y < L.y1 - 3) {
+    const w = Math.min(L.y1 - 0.5 - y, rng.pick([3.6, 4.2, 4.8, 5.6])), d = rng.range(9, 12), fl = rng.int(4, 6);
+    const c = rng.pick(stones);
+    const face = module(C, `mansion_${c.toString(16)}`, { wall: c, frame: 0x2b2b30, lintel: shade(c, 1.08), sill: shade(c, 1.06), arch: rng.chance(0.4), keystone: true, band: shade(c, 0.9) });
+    const xa = Math.min(fx, fx + dir * d), xb = Math.max(fx, fx + dir * d), zt = z0 + 2.2 + fl * 1.5;
+    section(C, xa, y, xb, y + w, z0, z0 + 2.2, lobbyModule(C, shade(c, 0.94), false), null, { mat: MAT.OFFICE });
+    section(C, xa, y, xb, y + w, z0 + 2.2, zt, face, null, { mat: MAT.OFFICE, seed: 930 + Math.round(y) });
+    mb.box(xa - 0.15, y - 0.05, zt, xb + 0.15, y + w + 0.05, zt + 0.3, sides(S.limestone, { t: S.limeTop }));
+    mansard(C, xa + 0.1, y + 0.1, xb - 0.1, y + w - 0.1, zt + 0.3, zt + 2.4, 1.0, S.slate, S.roofTar);
+    markHeight(W, xa, y, xb, y + w, zt + 2.4);
+    // the iron fence and the door
+    const ex = fx - dir * 1.2;
+    mb.box(Math.min(ex, fx) , y + 0.2, z0, Math.max(ex, fx), y + 0.25, z0 + 0.7, sides(P.black));
+    W.doors.push({ x: fx - dir * 1.6, y: y + w / 2, dx: fx + dir * 0.3, dy: y + w / 2, kind: 'home', n: [-dir, 0] });
+    y += w + 0.05;
+  }
+  // the gardens behind
+  for (let k = 0; k < 4; k++) C.addTree(facePark ? L.x1 - 2.5 : L.x0 + 2.5, L.y0 + 2 + k * 4.5, rng.pick(['plane', 'locust', 'cherry']), false);
+  void by;
+}
+
+// ---- the Frick Collection: a low limestone mansion behind its garden on Fifth Avenue ------------------
+export function frick(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0, P = propTex(C);
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'grass');
+  const lime = stoneModule(C, 0xe6dcc6, 'piers');
+  const x0 = L.x0 + 7, x1 = L.x1 - 0.5, y0 = L.y0 + 0.5, y1 = L.y1 - 0.5;
+  section(C, x0, y0, x1, y1, z0, z0 + 6, lime, S.roofTar, { mat: MAT.OFFICE, seed: 941 });
+  mb.box(x0 - 0.2, y0 - 0.2, z0 + 6, x1 + 0.2, y1 + 0.2, z0 + 6.4, sides(S.limestone, { t: S.limeTop }));
+  // the balustrade along the roof
+  for (let y = y0 + 0.4; y < y1; y += 0.5) mb.box(x0 - 0.1, y - 0.06, z0 + 6.4, x0 + 0.05, y + 0.06, z0 + 7.0, sides(S.limestone));
+  mb.box(x0 - 0.15, y0, z0 + 7.0, x0 + 0.1, y1, z0 + 7.12, sides(S.limestone, { t: S.limeTop }));
+  // a portico of columns on the garden front
+  for (let k = 0; k < 6; k++) mb.cylinder(x0 - 1.2, (y0 + y1) / 2 - 3 + k * 1.2, z0, z0 + 5.2, 0.2, 8, S.limestone, null);
+  mb.box(x0 - 1.6, (y0 + y1) / 2 - 3.6, z0 + 5.2, x0, (y0 + y1) / 2 + 3.6, z0 + 6, sides(S.limestone, { t: S.limeTop }));
+  // the garden: lawn, a pool, magnolias, the fence on the avenue
+  C.fountainPool(L.x0 + 3.5, (y0 + y1) / 2, 2, 4);
+  for (const y of [y0 + 1.5, y1 - 1.5]) C.addTree(L.x0 + 3.5, y, 'cherry', false);
+  for (let y = L.y0 + 0.4; y < L.y1; y += 0.6) mb.box(L.x0 + 0.3, y - 0.03, z0, L.x0 + 0.36, y + 0.03, z0 + 0.9, sides(P.black));
+  markHeight(W, x0, y0, x1, y1, z0 + 6.4);
+  W.officeDoors.push({ x: L.x0 - 0.9, y: (y0 + y1) / 2, dx: x0 - 1.4, dy: (y0 + y1) / 2, kind: 'office' });
+  landmark(C, 'THE FRICK COLLECTION', L.x0 - 3, (y0 + y1) / 2, 2);
+}
+
+// ---- Temple Emanu-El: Romanesque, its great arch on Fifth Avenue, towers either side ------------------
+export function emanuel(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0;
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
+  const stone = C.atlas.shared('emanuel', 32, 64, (p) => {
+    stoneFill(p, 0, 0, 32, 64, [0xd8c8a8], 951, 8, { blocks: 16 });
+    for (const wx of [6, 20]) { p.rect(wx, 16, 6, 30, 0x2a3440, winCode(0.3, true)); for (let k = 0; k < 6; k++) p.vline(wx + k, 16 - Math.round(Math.sqrt(9 - (k - 2.5) ** 2)), 3, 0x2a3440); }
+  });
+  const front = C.atlas.alloc(Math.round(10 * T), Math.round(12 * T));
+  {
+    const p = front.p, w = front.w, h = front.h;
+    stoneFill(p, 0, 0, w, h, [0xd8c8a8], 952, 8, { blocks: 16 });
+    const cx = w / 2, r = w * 0.32, top = h * 0.18;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const inArch = (y > top + r && Math.abs(x - cx) < r) || (y <= top + r && Math.hypot(x - cx, y - top - r) < r);
+      if (inArch && y < h * 0.98) p.set(x, y, Math.abs(x - cx) < r - 6 && y > top + 8 ? ((x + y) % 7 ? 0x3a4a7a : 0x8a3a3a) : 0xb8a888, Math.abs(x - cx) < r - 6 ? winCode(0.2, true) : 255);
+    }
+  }
+  const x0 = L.x0 + 0.5, x1 = L.x0 + 12, y0 = L.y0 + 2, y1 = L.y1 - 2;
+  mb.box(x0 + 1, y0, z0, x1, y1, z0 + 12, { px: stone, py: stone, ny: stone, nx: front, pz: { t: S.roofTar } }, { mat: MAT.OFFICE });
+  mb.gable(x0 + 1, y0 - 0.2, x1, y1 + 0.2, z0 + 12, z0 + 14.5, 'x', S.slate, stone);
+  for (const ty of [y0 - 1.5, y1 - 0.5]) {
+    mb.box(x0, ty, z0, x0 + 3, ty + 2, z0 + 15, sides(stone, { t: S.roofTar }), { mat: MAT.OFFICE });
+    mb.pyramid(x0 - 0.1, ty - 0.1, x0 + 3.1, ty + 2.1, z0 + 15, z0 + 17, S.slate);
+  }
+  markHeight(W, x0, y0, x1, y1, z0 + 14.5);
+  // and an apartment house behind it
+  const lime = stoneModule(C, 0xd8ccb2, 'piers');
+  section(C, L.x0 + 12.5, L.y0 + 0.5, L.x1 - 0.5, L.y1 - 0.5, z0, z0 + 22, lime, S.roofTar, { mat: MAT.OFFICE, seed: 953 });
+  landmark(C, 'TEMPLE EMANU-EL', L.x0 - 3, (y0 + y1) / 2, 2);
+}
+
+// ---- the Park Avenue Armory: a red-brick fortress with towers, the great drill hall behind ------------
+export function armory(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0;
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
+  const brick = module(C, 'armory_mod', { brick: [0x9a4a32, 0x8e432c, 0xa6553a], frame: 0x2b2b30, lintel: 0x8a8070, sill: 0x8a8070, arch: true });
+  const x0 = L.x0 + 0.5, x1 = L.x1 - 0.5, y0 = L.y0 + 0.5, y1 = L.y1 - 0.5;
+  // the administration building on Park Avenue (west), with crenellated towers
+  section(C, x0, y0, x0 + 6, y1, z0, z0 + 9, brick, S.roofTar, { mat: MAT.OFFICE, seed: 961 });
+  for (let y = y0; y < y1 - 0.3; y += 0.9) mb.box(x0 - 0.1, y, z0 + 9, x0 + 6.1, y + 0.45, z0 + 9.6, sides(S.brickBrown, { t: S.brickBrown }));
+  for (const ty of [y0, (y0 + y1) / 2 - 1.5, y1 - 3]) {
+    mb.box(x0 - 0.3, ty, z0, x0 + 3, ty + 3, z0 + 13, sides(brick, { t: S.roofTar }), { mat: MAT.OFFICE });
+    for (let k = 0; k < 4; k++) mb.box(x0 - 0.3 + k * 0.85, ty, z0 + 13, x0 + 0.2 + k * 0.85, ty + 3, z0 + 13.6, sides(S.brickBrown, { t: S.brickBrown }));
+  }
+  // the drill hall: a long low brick shed under a great arched roof
+  section(C, x0 + 6, y0 + 0.5, x1, y1 - 0.5, z0, z0 + 6, brick, null, { mat: MAT.OFFICE, seed: 962 });
+  const n = 10, rx = (y1 - y0 - 1) / 2, cy = (y0 + y1) / 2, roof = S.darkMetal;
+  for (let k = 0; k < n; k++) {
+    const a0 = (k / n) * Math.PI, a1 = ((k + 1) / n) * Math.PI;
+    const p0 = [cy - Math.cos(a0) * rx, z0 + 6 + Math.sin(a0) * 4], p1 = [cy - Math.cos(a1) * rx, z0 + 6 + Math.sin(a1) * 4];
+    mb.quad([x0 + 6, p1[0], p1[1]], [x1, p1[0], p1[1]], [x1, p0[0], p0[1]], [x0 + 6, p0[0], p0[1]], [[0, 0], [(x1 - x0 - 6) * T, 0], [(x1 - x0 - 6) * T, 4 * T], [0, 4 * T]], roof, null, MAT.SNOW);
+  }
+  markHeight(W, x0, y0, x1, y1, z0 + 9);
+  W.officeDoors.push({ x: L.x0 - 0.9, y: cy, dx: x0 + 0.3, dy: cy, kind: 'office' });
+  landmark(C, 'PARK AVENUE ARMORY', L.x0 - 3, cy, 2);
+}

@@ -457,7 +457,7 @@ export class Renderer {
     gl.uniform1f(u.uBloomK, env.bloom);
     gl.uniform3fv(u.uGrade, env.grade);
     gl.uniform1f(u.uSat, env.sat);
-    gl.uniform1f(u.uVignette, 0.35);
+    gl.uniform1f(u.uVignette, 0.12);
     gl.uniform1f(u.uOutline, env.outline);
     gl.uniform1f(u.uFlash, env.flash);
     gl.uniform1f(u.uLinear, linear ? 1 : 0);

@@ -30,8 +30,8 @@ const hexv = (h) => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) 
 // Sky keyframes by sun elevation (degrees)
 const SKY_TOP = [[-18, hexv(0x070b1d)], [-8, hexv(0x16204a)], [-2, hexv(0x2f3f7a)], [2, hexv(0x4a6fb0)], [8, hexv(0x5c93d6)], [20, hexv(0x55a3ec)], [50, hexv(0x4597e6)]];
 const SKY_BOT = [[-18, hexv(0x141a38)], [-8, hexv(0x3a3266)], [-2, hexv(0xb0607a)], [2, hexv(0xf59a62)], [8, hexv(0xf6c78f)], [20, hexv(0xb9e0f6)], [50, hexv(0xc4e7fa)]];
-const SUN_COL = [[-2, [0, 0, 0]], [1, [0.55, 0.28, 0.14]], [5, [0.85, 0.55, 0.32]], [12, [0.9, 0.74, 0.55]], [25, [0.82, 0.78, 0.68]], [50, [0.8, 0.78, 0.72]]];
-const AMB = [[-18, [0.17, 0.19, 0.31]], [-8, [0.22, 0.22, 0.38]], [-2, [0.36, 0.3, 0.42]], [3, [0.5, 0.44, 0.48]], [10, [0.56, 0.56, 0.6]], [30, [0.6, 0.63, 0.7]]];
+const SUN_COL = [[-2, [0, 0, 0]], [1, [0.55, 0.28, 0.14]], [5, [0.8, 0.52, 0.3]], [12, [0.8, 0.68, 0.52]], [25, [0.7, 0.68, 0.6]], [50, [0.68, 0.67, 0.62]]];
+const AMB = [[-18, [0.19, 0.21, 0.34]], [-8, [0.24, 0.24, 0.4]], [-2, [0.4, 0.34, 0.46]], [3, [0.56, 0.5, 0.54]], [10, [0.66, 0.66, 0.7]], [30, [0.72, 0.74, 0.8]]];
 
 const RES_LIT = [[0, 0.24], [2, 0.12], [4.5, 0.06], [6.5, 0.3], [8.5, 0.16], [12, 0.1], [16.5, 0.16], [19, 0.46], [21.5, 0.55], [23, 0.4], [24, 0.24]];
 const OFF_LIT = [[0, 0.12], [5.5, 0.1], [7.5, 0.45], [9, 0.75], [17, 0.75], [19, 0.5], [21, 0.3], [24, 0.12]];
@@ -200,10 +200,10 @@ export class Environment {
     this.cloudOff[0] += dt * 0.002 * (0.4 + this.wind) * Math.cos(wd);
     this.cloudOff[1] += dt * 0.002 * (0.4 + this.wind) * Math.sin(wd);
 
-    // the sun's direction moves in small steps (every 20 sim seconds, a few times a real second)
+    // the sun's direction moves in small steps (every 2 sim minutes, about once a real second)
     // rather than every frame: a shadow map re-projected each frame makes every dithered shadow
     // edge shimmer, while held steps keep shadows still and only creep them along
-    const sun = this.sunAt(Math.round(h * 180) / 180);
+    const sun = this.sunAt(Math.round(h * 30) / 30);
     this.sunEl = sun.el;
     const elR = (sun.el * Math.PI) / 180;
     const sunDir = [Math.cos(sun.az) * Math.cos(elR), Math.sin(sun.az) * Math.cos(elR), Math.sin(elR)];
@@ -232,7 +232,8 @@ export class Environment {
     u.sunCol = sunCol;
     const amb = keyLerp(AMB, sun.el).map((v) => v * (1 + cloudK * 0.18));
     u.amb = amb;
-    u.face = [1.0, 0.88, 0.72];
+    // clean three-tone faces: tops brightest, the left walls a step down, the right walls two
+    u.face = [1.06, 0.88, 0.68];
     u.stars = smoothstep(-4, -12, sun.el) * (1 - cloudK);
     u.emis = 0.06 + 0.94 * this.darkness * this.darkness;
     u.snow = this.snowCover;
@@ -249,11 +250,11 @@ export class Environment {
     u.crown = smoothstep(-2, -7, sun.el) > 0 ? smoothstep(-1, -6, sun.el) : 0;
     u.crownA = CROWN[s][0];
     u.crownB = CROWN[s][1];
-    u.bloom = 0.25 + 0.6 * night;
-    u.sat = 1.08 - cloudK * 0.15;
+    u.bloom = 0.12 + 0.7 * night;
+    u.sat = 1.3 - cloudK * 0.2;
     u.grade = [1, 1, 1];
     if (sun.el > 0 && sun.el < 12) u.grade = [1.04, 0.99, 0.94];
-    u.outline = 0.22;
+    u.outline = 0.5;
     {
       // haze: fog days, rain and snowfall; tinted by the sky
       const f = clamp(this.fog * 0.9 + (this.snowing ? 0.18 * this.precip : 0) + (this.raining ? 0.1 * this.precip : 0), 0, 0.75);

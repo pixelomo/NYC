@@ -19,7 +19,7 @@ import { shade, mixc, hash2i, RNG, valueNoise } from '../core/math.js';
 import { PAL, stoneFill, signBoard } from './facades.js';
 import { sharedTex, markHeight, waterTower } from './buildings.js';
 import { section } from './towers.js';
-import { propTex, parkLamp, beam } from './props.js';
+import { propTex, parkLamp, beam, streetLamp, hydrant } from './props.js';
 import { landmark, flagPole, wall } from './landmarks.js';
 import { module } from './manhattan.js';
 import { clsAt, CL } from './ground.js';
@@ -89,6 +89,44 @@ function addTreeAt(C, x, y, z, sp, scale = 1) {
   C.world.trees.push({ x, y, z, species: sp, variant: C.rng.int(0, 2), scale });
 }
 
+// a road's paint: the double yellow line down the middle, a zebra crossing at every street it meets
+function markings(C, axis, c0, c1, a, b) {
+  const yel = C.atlas.shared('boro_yel', 8, 8, (p) => p.rect(0, 0, 8, 8, 0xe8c040));
+  const wht = C.atlas.shared('boro_wht', 8, 8, (p) => p.rect(0, 0, 8, 8, 0xe8e8e2));
+  const cm = (c0 + c1) / 2, z = CURB + 0.02;
+  const H = (x0, y0, x1, y1, t) => (axis === 'y' ? C.mb.hquad(x0, y0, x1, y1, z, t) : C.mb.hquad(y0, x0, y1, x1, z, t));
+  // (between the crossings)
+  for (let k = Math.ceil(a / PERIOD); k * PERIOD <= b; k++) {
+    const s0 = Math.max(a, k * PERIOD - PERIOD + STREET + 2.2), s1 = Math.min(b, k * PERIOD - 2.2);
+    if (s1 - s0 > 1) { H(cm - 0.16, s0, cm - 0.06, s1, yel); H(cm + 0.06, s0, cm + 0.16, s1, yel); }
+    // the crossing just before the next street
+    const zc = k * PERIOD - 1.9;
+    if (zc > a + 0.5 && zc + 1.4 < b) for (let q = c0 + 0.3; q < c1 - 0.3; q += 0.6) H(q, zc, q + 0.32, zc + 1.4, wht);
+    const zd = k * PERIOD + STREET + 0.5;
+    if (zd > a + 0.5 && zd + 1.4 < b) for (let q = c0 + 0.3; q < c1 - 0.3; q += 0.6) H(q, zd, q + 0.32, zd + 1.4, wht);
+  }
+}
+
+// street trees and lamps along the sidewalks round each lot, a hydrant here and there
+function furnish(C, lots) {
+  const rng = C.rng;
+  const land = (x, y) => { const c = clsAt(x, y); return c === CL.BORO || c === CL.RAISED; };
+  for (const L of lots) {
+    const z = L.z0 ?? CURB;
+    // south and east sides (the north and west ones are the neighbours' south and east)
+    for (let x = L.x0 + 2; x < L.x1 - 1; x += rng.range(3.8, 5.2)) {
+      const y = L.y1 + 1.0;
+      if (land(x, y) && rng.chance(0.75)) addTreeAt(C, x, y, z, rng.pick(['plane', 'locust', 'locust', 'oak', 'cherry']), rng.range(0.75, 1.0));
+    }
+    for (let y = L.y0 + 2; y < L.y1 - 1; y += rng.range(3.8, 5.2)) {
+      const x = L.x1 + 1.0;
+      if (land(x, y) && rng.chance(0.6)) addTreeAt(C, x, y, z, rng.pick(['plane', 'locust', 'oak']), rng.range(0.75, 1.0));
+    }
+    if (land(L.x1 + 1.2, L.y1 + 1.2) && rng.chance(0.7)) streetLamp(C, L.x1 + 1.2, L.y1 + 1.2, 1, 0);
+    if (rng.chance(0.3) && land(L.x0 + 4, L.y1 + 1.4)) hydrant(C, L.x0 + 4, L.y1 + 1.4);
+  }
+}
+
 // the borough's own streets and lots, on the same grid as Manhattan's: roads drawn over the paving
 // where the land runs along a street line, and the lots between them (keeping back from the water)
 function boroGrid(C, R, keep) {
@@ -103,7 +141,7 @@ function boroGrid(C, R, keep) {
         if (!land(xc, y + 0.5) || !land(xa - 2, y + 0.5) || !land(xb + 2, y + 0.5) || keep(xc, y + 0.5)) { y++; continue; }
         const a = y;
         while (y < Math.min(MAPY, R.y1) && land(xc, y + 0.5) && land(xa - 2, y + 0.5) && land(xb + 2, y + 0.5) && !keep(xc, y + 0.5)) y++;
-        if (y - a > 4) patch(C, xa, a, xb, y, L.road);
+        if (y - a > 4) { patch(C, xa, a, xb, y, L.road); markings(C, 'y', xa, xb, a, y); }
       }
     }
     for (let j = jMin; j <= jMax; j++) {
@@ -113,7 +151,7 @@ function boroGrid(C, R, keep) {
         if (!land(x + 0.5, yc) || !land(x + 0.5, ya - 2) || !land(x + 0.5, yb + 2) || keep(x + 0.5, yc)) { x++; continue; }
         const a = x;
         while (x < Math.min(MAPX, R.x1) && land(x + 0.5, yc) && land(x + 0.5, ya - 2) && land(x + 0.5, yb + 2) && !keep(x + 0.5, yc)) x++;
-        if (x - a > 4) patch(C, a, ya, x, yb, L.road, CURB + 0.014);
+        if (x - a > 4) { patch(C, a, ya, x, yb, L.road, CURB + 0.014); markings(C, 'x', ya, yb, a, x); }
       }
     }
   }
@@ -203,7 +241,7 @@ function newJersey(C) {
 function bronx(C) {
   const R = region('bronx'), L = looks(C), rng = C.rng;
   // Yankee Stadium, across the Harlem River from Washington Heights (161st Street)
-  const ys = { x0: 272, y0: 136, x1: 310, y1: 174 };
+  const ys = { x0: 272, y0: OY(136) + 40, x1: 310, y1: OY(136) + 78 };
   const keep = (x, y) => x > ys.x0 - 3 && x < ys.x1 + 3 && y > ys.y0 - 3 && y < ys.y1 + 3;
   // Riverdale: a green hill over Spuyten Duyvil, its rocky ridge carrying the Henry Hudson Bridge's
   // road on north
@@ -219,7 +257,9 @@ function bronx(C) {
   for (let x = R.x0 + 2; x < R.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) if (clsAt(x, y) === CL.BORO && !onRidge(x, y) && rng.chance(0.7)) addTreeAt(C, x + rng.range(-0.6, 0.6), y, CURB, rng.pick(['oak', 'elm', 'pine', 'locust']));
   // the Grand Concourse's apartment houses and the walk-up streets: whole blocks, as in Manhattan
   const lots = wholeLots(C, { ...R, y0: 34 }, keep);
-  for (const lot of lots) offIslandBlock(C, lot, rng.pick(['redbrick', 'redbrick', 'tenements', 'walkups', 'shops', 'redbrick']), lot.bx, lot.by);
+  // the Grand Concourse's art deco apartment houses, walk-ups and tenements, shopping streets
+  for (const lot of lots) offIslandBlock(C, lot, rng.pick(['redbrick', 'redbrick', 'tenements', 'walkups', 'shops', 'prewar', 'bodega', 'commercial', 'firehouse', 'redbrick']), lot.bx, lot.by);
+  furnish(C, lots);
   // the streets between them
   boroGrid(C, { ...R, y0: 30 }, keep);
   yankeeStadium(C, ys);
@@ -287,9 +327,11 @@ function brooklyn(C) {
     const front = R.x0 + 7.2 + (R.x1 - R.x0 > 40 ? 10 : 12);
     const keep = (x, y) => x < front || ys.some((by) => Math.abs(y - by) < 8);
     boroGrid(C, { ...R, x0: front + 1 }, keep);
-    for (const lot of wholeLots(C, R, keep)) {
+    const blots = wholeLots(C, R, keep);
+    furnish(C, blots);
+    for (const lot of blots) {
       const dumbo = ys.some((by) => Math.abs(lot.y0 - by) < 40);
-      offIslandBlock(C, lot, rng.pick(dumbo ? ['lofts', 'lofts', 'walkups', 'brownstones'] : ['brownstones', 'brownstones', 'walkups', 'shops', 'redbrick']), lot.bx, lot.by);
+      offIslandBlock(C, lot, rng.pick(dumbo ? ['lofts', 'lofts', 'walkups', 'brownstones', 'commercial'] : ['brownstones', 'brownstones', 'walkups', 'shops', 'redbrick', 'tenements', 'bodega', 'firehouse', 'lofts']), lot.bx, lot.by);
     }
   }
   // the Domino Sugar sign on the old refinery, just south of the Williamsburg Bridge
@@ -309,9 +351,12 @@ function queens(C) {
   C.paintGround(R.x0 + 4, R.y0, MAPX, parkY1, 'lawn');
   for (let y = R.y0 + 2; y < parkY1 - 2; y += 3.2) for (let x = R.x0 + 6; x < MAPX - 2; x += 4) if (rng.chance(0.6) && !bridgesY.some((by) => Math.abs(y - by) < 6)) C.addTree(x + rng.range(-0.8, 0.8), y, rng.pick(['oak', 'elm', 'plane']), false);
   // Astoria's streets of walk-ups and brownstones, then Long Island City's glass towers
-  for (const lot of wholeLots(C, R, keep)) {
-    if (lot.by < ROWS.lic - 1) offIslandBlock(C, lot, rng.pick(['walkups', 'brownstones', 'shops', 'walkups', 'redbrick']), lot.bx, lot.by);
-    else offIslandBlock(C, lot, rng.pick(['glass', 'glass', 'modern']), lot.bx, ROWS.lic + 1);
+  boroGrid(C, { ...R, x0: R.x0 + 4 }, keep);
+  const qlots = wholeLots(C, R, keep);
+  furnish(C, qlots);
+  for (const lot of qlots) {
+    if (lot.by < ROWS.lic - 1) offIslandBlock(C, lot, rng.pick(['walkups', 'brownstones', 'shops', 'walkups', 'redbrick', 'tenements', 'bodega', 'commercial', 'lofts']), lot.bx, lot.by);
+    else offIslandBlock(C, lot, rng.pick(['glass', 'glass', 'modern', 'office', 'lofts']), lot.bx, ROWS.lic + 1);
   }
   // Gantry Plaza: the lawn and promenade, the two gantries, the Pepsi-Cola sign
   C.paintGround(R.x0, gantry.y0, MAPX, gantry.y1, 'lawn');

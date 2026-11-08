@@ -12,7 +12,7 @@ import { MAT } from './mesh.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { shade, mixc, hash2i, RNG } from '../core/math.js';
 import { PAL, stoneFill, brickFill, smoothFill, drawWindow, signBoard } from './facades.js';
-import { sharedTex, markHeight, Frame, rowhouse } from './buildings.js';
+import { sharedTex, markHeight, Frame, rowhouse, walkup } from './buildings.js';
 import { section, band, region, beacon, lobbyDoors, plaza, loft } from './towers.js';
 import { propTex, beam, parkLamp, subwayEntrance } from './props.js';
 import { metlife } from './skyline.js';
@@ -809,8 +809,12 @@ function shore(C, BK) {
     if (gap != null) { a = gap + 6.2; continue; }
     const w = a < yb ? rng.pick([6, 7, 8]) : rng.pick([4, 4.5, 5]);
     if (a + w > y1 - 0.5) break;
-    if (a < yb) loft(C, fr, a, w, depth, { floors: rng.int(5, 8) });
+    // warehouses north of the bridge; to the south a mix of brownstones, walk-ups and old lofts
+    const k = rng.next();
+    if (a < yb || k < 0.2) loft(C, fr, a, Math.max(w, 6), depth, { floors: rng.int(4, 9) });
+    else if (k < 0.45) walkup(C, fr, a, Math.max(w, 5), Math.min(depth, 9), { floors: rng.int(4, 6), shop: rng.pick(['bodega', 'coffee', 'pizza', 'bar', null]) });
     else rowhouse(C, fr, a, w, depth, { setback: 1.2 });
+    if (k < 0.45 && a >= yb) a += Math.max(w, k < 0.2 ? 6 : 5) - w;
     a += w + (a < yb ? 0.3 : 0);
   }
   // trees on the lawn, benches and lamps along the promenade
