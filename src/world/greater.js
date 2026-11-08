@@ -10,7 +10,7 @@
 //   Ellis Island (the red-brick immigration station with its four domed towers)
 // Brooklyn's waterfront is in landmarks.js (brooklynShore), by the Brooklyn Bridge.
 
-import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS, ROWS, NBY, BLOCK_TYPES, eastShoreX, OY, OR } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS, ROWS, NBY, BLOCK_TYPES, eastShoreX, OY, OR, STREET } from './layout.js';
 import { dominoSign } from './sights.js';
 import { offIslandBlock } from './blocks.js';
 import { MAT } from './mesh.js';

@@ -6510,11 +6510,11 @@ void main() {
   function markings(C, axis, c0, c1, a, b) {
     let yel = C.atlas.shared("boro_yel", 8, 8, (p) => p.rect(0, 0, 8, 8, 15253568)), wht = C.atlas.shared("boro_wht", 8, 8, (p) => p.rect(0, 0, 8, 8, 15263970)), cm = (c0 + c1) / 2, z = 0.125 + 0.02, H = (x0, y0, x1, y1, t) => axis === "y" ? C.mb.hquad(x0, y0, x1, y1, z, t) : C.mb.hquad(y0, x0, y1, x1, z, t);
     for (let k = Math.ceil(a / 27); k * 27 <= b; k++) {
-      let s0 = Math.max(a, k * 27 - 27 + STREET + 2.2), s1 = Math.min(b, k * 27 - 2.2);
+      let s0 = Math.max(a, k * 27 - 27 + 9 + 2.2), s1 = Math.min(b, k * 27 - 2.2);
       s1 - s0 > 1 && (H(cm - 0.16, s0, cm - 0.06, s1, yel), H(cm + 0.06, s0, cm + 0.16, s1, yel));
       let zc = k * 27 - 1.9;
       if (zc > a + 0.5 && zc + 1.4 < b) for (let q = c0 + 0.3; q < c1 - 0.3; q += 0.6) H(q, zc, q + 0.32, zc + 1.4, wht);
-      let zd = k * 27 + STREET + 0.5;
+      let zd = k * 27 + 9 + 0.5;
       if (zd > a + 0.5 && zd + 1.4 < b) for (let q = c0 + 0.3; q < c1 - 0.3; q += 0.6) H(q, zd, q + 0.32, zd + 1.4, wht);
     }
   }
