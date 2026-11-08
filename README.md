@@ -24,9 +24,9 @@ npm run build
 
 ![All of Manhattan from above, with the bridges out to New Jersey, the Bronx, Queens and Brooklyn, the islands and the harbour](docs/city.png)
 
-- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 40 rows of blocks
-  (each standing for three to ten real streets, closest together in Midtown and downtown) up to ten
-  avenues wide, about 320 blocks of island, following the real shoreline — narrow in the north,
+- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 60 rows of blocks
+  (each standing for two to six real streets) up to ten avenues wide, about 460 blocks of island —
+  six times as long as it is wide, like the real one — following the real shoreline — narrow in the north,
   bulging through Midtown, the Lower East Side sticking out into the East River, tapering to the
   Battery. Riverside drives ring it. Across the
   rivers lie the **edges of greater New York**: the **Palisades** cliffs, Fort Lee, Hoboken and
@@ -35,7 +35,8 @@ npm run build
   Island City**'s glass towers and Gantry Plaza with the **Pepsi-Cola sign** in **Queens**;
   **Brooklyn**'s waterfront with whole streets of brownstones, walk-ups and DUMBO's lofts behind it
   and the **Domino Sugar** sign in Williamsburg. Their blocks are built with the same generators as
-  Manhattan's (stoops, fire escapes, shopfronts, water towers), not as plain boxes. And the islands — **Randall's**,
+  Manhattan's (stoops, fire escapes, shopfronts, water towers), not as plain boxes, and their
+  streets have lane lines, crosswalks, street trees, lamps and hydrants. And the islands — **Randall's**,
   **Roosevelt** (apartment towers, lighthouse, Four Freedoms Park), **Governors** (Castle Williams,
   Fort Jay), **Ellis** and **Liberty**.
 - **Bridges leading out**: the **George Washington Bridge** (two decks, steel lattice towers, four
@@ -58,6 +59,11 @@ npm run build
     Monument**
   - uptown: **St John the Divine**, **Gracie Mansion** in Carl Schurz Park on the East River, and
     **the Dakota**'s green roofs, gables and corner pavilions on Central Park West
+  - round Central Park every apartment house is its own: twin towers with temples on top, single
+    towers, brick slabs, art deco setbacks, limestone under slate mansards, in different stones,
+    bricks and heights; on Fifth Avenue, limestone **townhouse mansions** behind iron fences, **the
+    Frick Collection** behind its garden, **Temple Emanu-El**'s great arch, and the **Park Avenue
+    Armory**'s red-brick towers and arched drill hall
   - on the Hudson: the **Intrepid** on its pier (aircraft carrier with planes on the deck and its
     island, the submarine alongside, the shuttle pavilion), the **High Line**'s planted viaduct
     running five blocks through Chelsea over the cross streets (people walk it, up the stairs at
@@ -144,7 +150,7 @@ npm run build
   behind a ticket booth, crowded with people taking in the lights, among café tables, planters,
   carts and floodlights. A bronze statue stands at the north end and a tower with a crystal ball on
   its mast at the south end (the ball drops at midnight on winter nights, then fireworks). All the ads are made up; at night the screens wash the square in colour.
-- **Central Park**, eight blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
+- **Central Park**, eleven blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
   one from north to south: **Harlem Meer**, the North Woods with the Loch and the Great Hill, the
   **Conservatory Garden** (fountain, beds, hedges, a wisteria pergola) and a dog run; the
   **Reservoir** inside its fence and running track, a gatehouse and cherry trees on its bank; the
@@ -188,6 +194,11 @@ npm run build
   night and migrating geese in autumn.
 
 ## Time, seasons and weather
+
+- **The look**: bright, flat daylight with clean three-tone shading (tops lightest, then the left
+  walls, then the right), saturated colour with a touch of extra contrast, and a dark outline
+  wherever one thing stands in front of another. Coplanar faces are nudged apart by a sub-pixel
+  amount, so neighbouring roofs and wall decals never flicker against each other.
 
 - A full **day/night cycle** with a moving sun and real-time shadows, moonlight, stars, lit windows
   that switch on through the evening, street lamps with light pools, neon, headlights and bloom.
@@ -280,7 +291,7 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
-  `layout.js` is the 15×46 block map of Manhattan (merged regions for Central Park and Times
+  `layout.js` is the 15×66 block map of Manhattan (merged regions for Central Park and Times
   Square; the roads follow the land), with the other boroughs and the islands as regions. `ground.js`
   rasterises it into a land map (water, road, sidewalk, other boroughs) that drives the ground
   geometry, the quays and the collision grid; the ground texture is stored as tiles over the land
