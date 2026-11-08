@@ -430,7 +430,7 @@ export class AudioEngine {
   }
   // ---------------------------------------------------------------- per frame
   update(dt) {
-    if (!this.ctx || !this.enabled) return;
+    if (!this.ctx || !this.enabled || !this.app.ready) return;
     try {
       this.tick(dt);
     } catch (e) {

@@ -31,12 +31,10 @@ export class City {
     buildPropSprites(this.atlas);
     this.pal = new PaletteBank(4096);
     this.statics = new Statics(this);
-    this.coll = new Collision(world);
     this.carLayer = new CarLayer(gl, this);
     this.personLayer = new PersonLayer(gl, this);
     this.treeLayer = new TreeLayer(gl, this);
     this.decals = new DecalLayer(gl, this);
-    this.traffic = new Traffic(this);
     this.systems = [];
     this.sprites = new SpriteLayer(gl, this.atlas, this.pal);
     this.lightLayer = new LightLayer(gl);
@@ -47,6 +45,18 @@ export class City {
     });
     this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => true };
     this.time = 0;
+    // until the city is built, only its things are drawn (trees, props, lamps): no people, traffic
+    // or animals yet. startLife() wakes it up.
+    this.live = false;
+    this.player = { active: false, hud: () => null, input: {} };
+    this.people = { list: [], pick: () => null, emit() {} };
+    this.particles = {};
+    this.activities = null;
+  }
+  startLife() {
+    const world = this.world;
+    this.coll = new Collision(world);
+    this.traffic = new Traffic(this);
     this.people = new People(this);
     this.activities = new Activities(this);
     this.people.activities = this.activities;
@@ -67,6 +77,8 @@ export class City {
     this.addSystem({ update: (dt) => this.decals.update(dt) });
     this.traffic.init();
     this.people.init();
+    this.statics.wake();
+    this.live = true;
   }
   // where the life of the city is concentrated: the player when playing, otherwise the camera
   focus() {
@@ -80,6 +92,7 @@ export class City {
   }
   update(dt) {
     this.time += dt;
+    if (!this.live) return;
     this.traffic.update(dt);
     for (const s of this.systems) s.update && s.update(dt);
   }
@@ -109,12 +122,12 @@ export class City {
     L.end();
     this.personLayer.end();
     this.treeLayer.prepare(view, this.statics.treeRows);
-    this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
+    this.carLayer.prepare(!this.live ? [] : this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
     this.decals.prepare(view);
     const LL = this.lightLayer;
     LL.begin();
     this.statics.lights(LL, env, this.time);
-    this.carLayer.lights(LL, this.traffic.cars, env);
+    if (this.live) this.carLayer.lights(LL, this.traffic.cars, env);
     for (const s of this.systems) s.lights && s.lights(LL, env);
     LL.end();
   }

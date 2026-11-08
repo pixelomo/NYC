@@ -2,6 +2,9 @@
 
 import { Page, Painter } from '../core/painter.js';
 
+const OPEN = 3; // pages still taking new regions
+const FREED = new Uint8Array(0);
+
 // A painter over a region that is already painted: reads work, writes are dropped. Handed out
 // when a block variant replays the textures its first copy made.
 class ReplayPainter extends Painter {
@@ -47,7 +50,9 @@ export class Atlas {
     this.cache = new Map();
   }
   newPage() {
-    this.pages.push(new Page(this.size, this.size));
+    const pg = new Page(this.size, this.size);
+    pg.dirty = null;
+    this.pages.push(pg);
     this.packers.push(new BestFitShelves(this.size, this.size, 1));
     return this.pages.length - 1;
   }
@@ -79,7 +84,8 @@ export class Atlas {
     return out;
   }
   _alloc(w, h) {
-    for (let i = 1; i < this.pages.length; i++) {
+    // (only the last few pages take new regions: older ones are finished, uploaded and freed)
+    for (let i = Math.max(0, this.pages.length - OPEN); i < this.pages.length; i++) {
       const r = this.packers[i].alloc(w, h);
       if (r) return this._region(i, r);
     }
@@ -94,6 +100,9 @@ export class Atlas {
     return this._region(i, { x: 0, y: 0, w, h });
   }
   _region(layer, r) {
+    const pg = this.pages[layer], d = pg.dirty;
+    if (!d) pg.dirty = { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h };
+    else { d.x0 = Math.min(d.x0, r.x); d.y0 = Math.min(d.y0, r.y); d.x1 = Math.max(d.x1, r.x + r.w); d.y1 = Math.max(d.y1, r.y + r.h); }
     return { layer, x: r.x, y: r.y, w: r.w, h: r.h, p: new Painter(this.pages[layer], r.x, r.y, r.w, r.h) };
   }
   // Cached shared region (e.g. tiled brick)
@@ -107,6 +116,33 @@ export class Atlas {
     }
     return r;
   }
+  // Send what has been painted since the last flush to the texture array tex (which has room for
+  // every page), then let go of the finished pages' pixels. Returns the bytes sent.
+  flush(gl, tex) {
+    let sent = 0;
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, this.size);
+    this.pages.forEach((pg, i) => {
+      const d = pg.dirty;
+      if (d && !pg.freed) {
+        gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, d.x0);
+        gl.pixelStorei(gl.UNPACK_SKIP_ROWS, d.y0);
+        gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, d.x0, d.y0, i, d.x1 - d.x0, d.y1 - d.y0, 1, gl.RGBA, gl.UNSIGNED_BYTE, pg.data);
+        sent += (d.x1 - d.x0) * (d.y1 - d.y0) * 4;
+      }
+      pg.dirty = null;
+      if (i < this.pages.length - OPEN && !pg.freed) this.free(pg);
+    });
+    gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
+    gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
+    return sent;
+  }
+  // a page's pixels are on the GPU: drop them (reads of a replayed region then see nothing, and
+  // writes go nowhere, which is all a replay does)
+  free(pg) { pg.data = FREED; pg.freed = true; }
+  freeAll() { for (const pg of this.pages) if (!pg.freed) this.free(pg); }
   upload(gl) {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);

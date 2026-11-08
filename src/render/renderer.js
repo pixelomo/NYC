@@ -91,43 +91,90 @@ export class Renderer {
 
   setStatic(mesh, atlas, groundTiles) {
     const gl = this.gl;
-    this.atlasTex = atlas.upload(gl);
+    this.atlas = atlas;
+    this.atlasCap = 0;
+    this.ensureAtlas(Math.max(8, atlas.pages.length + 4));
+    atlas.flush(gl, this.atlasTex);
     // ground: tiles of the world-space ground texture packed into one texture, with an index
     // texture saying which tile holds each patch of the map (none: water). Halved if the GPU can't
     // hold it at full size.
     const maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE);
-    const G = groundTiles, n = Math.max(1, G.data.length);
+    const G = (this.groundTiles = groundTiles), n = Math.max(1, G.data.length);
     let size = G.size, scale = G.scale || 0.5;
     const fit = (sz) => { const per = Math.max(1, Math.min(16, Math.floor(maxTex / sz))); return { per, rows: Math.ceil(n / per) }; };
     let L = fit(size);
     while (L.rows * size > maxTex && size > 64) { size >>= 1; scale *= 0.5; L = fit(size); }
-    const k = G.size / size;
+    this.groundK = G.size / size;
     this.groundTex = makeTexture(gl, L.per * size, L.rows * size);
-    gl.bindTexture(gl.TEXTURE_2D, this.groundTex);
-    G.data.forEach((d, i) => {
-      let px = d;
-      if (k > 1) {
-        px = new Uint8Array(size * size * 4);
-        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-          const s0 = ((y * k) * G.size + x * k) * 4, d0 = (y * size + x) * 4;
-          px[d0] = d[s0]; px[d0 + 1] = d[s0 + 1]; px[d0 + 2] = d[s0 + 2]; px[d0 + 3] = d[s0 + 3];
-        }
-      }
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, (i % L.per) * size, Math.floor(i / L.per) * size, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
-    });
+    this.groundTile = size;
+    this.groundPer = L.per;
+    G.data.forEach((d, i) => this.uploadGroundTile(i));
+    G.dirty = new Uint8Array(G.data.length);
     const idx = new Uint8Array(G.ntx * G.nty * 4);
     for (let i = 0; i < G.slots.length; i++) { const v = G.slots[i] + 1; idx[i * 4] = v & 255; idx[i * 4 + 1] = v >> 8; }
     this.groundIdx = makeTexture(gl, G.ntx, G.nty, { data: idx });
     this.groundScale = scale;
-    this.groundTile = size;
-    this.groundPer = L.per;
-    // free CPU copies of the static textures
-    for (const pg of atlas.pages) pg.data = null;
-    G.data.length = 0;
-    const vao = this.meshVAO(mesh).vao;
-    this.staticVAO = vao;
-    this.staticCount = mesh.indexCount;
-    this.stats.tris = mesh.indexCount / 3;
+    this.chunks = [];
+    this.addChunk(mesh);
+  }
+  // one ground tile (by its slot) to the GPU, shrunk if the texture had to be
+  uploadGroundTile(i) {
+    const gl = this.gl, G = this.groundTiles, d = G.data[i], k = this.groundK, size = this.groundTile;
+    let px = d;
+    if (k > 1) {
+      px = new Uint8Array(size * size * 4);
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+        const s0 = ((y * k) * G.size + x * k) * 4, d0 = (y * size + x) * 4;
+        px[d0] = d[s0]; px[d0 + 1] = d[s0 + 1]; px[d0 + 2] = d[s0 + 2]; px[d0 + 3] = d[s0 + 3];
+      }
+    }
+    gl.bindTexture(gl.TEXTURE_2D, this.groundTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, (i % this.groundPer) * size, Math.floor(i / this.groundPer) * size, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+  }
+  // room in the texture array for n pages (growing it copies what is there on the GPU)
+  ensureAtlas(n) {
+    const gl = this.gl, size = this.atlas.size;
+    if (n <= this.atlasCap) return;
+    const cap = Math.max(n, this.atlasCap + 4);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, size, size, cap, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D_ARRAY, k, v);
+    if (this.atlasTex) {
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+      for (let l = 0; l < this.atlasCap; l++) {
+        gl.framebufferTextureLayer(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.atlasTex, 0, l);
+        gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, l, 0, 0, size, size);
+      }
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+      gl.deleteFramebuffer(fb);
+      gl.deleteTexture(this.atlasTex);
+    }
+    this.atlasTex = tex;
+    this.atlasCap = cap;
+  }
+  // What the city builder made since last time: a new chunk of geometry, the atlas regions painted
+  // for it, the ground tiles it painted on
+  addBuilt(mesh) {
+    const gl = this.gl;
+    if (mesh && mesh.indexCount) this.addChunk(mesh);
+    this.ensureAtlas(this.atlas.pages.length);
+    this.atlas.flush(gl, this.atlasTex);
+    const G = this.groundTiles;
+    if (G && G.dirty) for (let i = 0; i < G.dirty.length; i++) if (G.dirty[i]) { G.dirty[i] = 0; this.uploadGroundTile(i); }
+  }
+  // the city is built: no more painting, let go of the CPU copies
+  doneBuilding() {
+    this.atlas.freeAll();
+    const G = this.groundTiles;
+    if (G) { G.data.length = 0; G.dirty = null; }
+  }
+  addChunk(mesh) {
+    const c = this.meshVAO(mesh);
+    this.chunks.push(c);
+    this.stats.tris = (this.stats.tris || 0) + mesh.indexCount / 3;
+    return c;
   }
 
   // a vertex array for a mesh in the static format
@@ -161,8 +208,10 @@ export class Renderer {
     const gl = this.gl;
     if (p.u.uDown) gl.uniform4fv(p.u.uDown, this.down);
     if (p.u.uDownN) gl.uniform1i(p.u.uDownN, this.downN);
-    gl.bindVertexArray(this.staticVAO);
-    gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+    for (const c of this.chunks) {
+      gl.bindVertexArray(c.vao);
+      gl.drawElements(gl.TRIANGLES, c.count, gl.UNSIGNED_INT, 0);
+    }
     if (this.dyn) {
       if (p.u.uDownN) gl.uniform1i(p.u.uDownN, 0);
       gl.bindVertexArray(this.dyn.vao);

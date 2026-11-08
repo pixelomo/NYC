@@ -874,35 +874,66 @@ void main() {
     }
     setStatic(mesh, atlas, groundTiles) {
       let gl = this.gl;
-      this.atlasTex = atlas.upload(gl);
-      let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), G3 = groundTiles, n = Math.max(1, G3.data.length), size = G3.size, scale = G3.scale || 0.5, fit = (sz) => {
+      this.atlas = atlas, this.atlasCap = 0, this.ensureAtlas(Math.max(8, atlas.pages.length + 4)), atlas.flush(gl, this.atlasTex);
+      let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), G3 = this.groundTiles = groundTiles, n = Math.max(1, G3.data.length), size = G3.size, scale = G3.scale || 0.5, fit = (sz) => {
         let per = Math.max(1, Math.min(16, Math.floor(maxTex / sz)));
         return { per, rows: Math.ceil(n / per) };
       }, L = fit(size);
       for (; L.rows * size > maxTex && size > 64; )
         size >>= 1, scale *= 0.5, L = fit(size);
-      let k = G3.size / size;
-      this.groundTex = makeTexture(gl, L.per * size, L.rows * size), gl.bindTexture(gl.TEXTURE_2D, this.groundTex), G3.data.forEach((d, i) => {
-        let px = d;
-        if (k > 1) {
-          px = new Uint8Array(size * size * 4);
-          for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
-            let s0 = (y * k * G3.size + x * k) * 4, d0 = (y * size + x) * 4;
-            px[d0] = d[s0], px[d0 + 1] = d[s0 + 1], px[d0 + 2] = d[s0 + 2], px[d0 + 3] = d[s0 + 3];
-          }
-        }
-        gl.texSubImage2D(gl.TEXTURE_2D, 0, i % L.per * size, Math.floor(i / L.per) * size, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
-      });
+      this.groundK = G3.size / size, this.groundTex = makeTexture(gl, L.per * size, L.rows * size), this.groundTile = size, this.groundPer = L.per, G3.data.forEach((d, i) => this.uploadGroundTile(i)), G3.dirty = new Uint8Array(G3.data.length);
       let idx = new Uint8Array(G3.ntx * G3.nty * 4);
       for (let i = 0; i < G3.slots.length; i++) {
         let v = G3.slots[i] + 1;
         idx[i * 4] = v & 255, idx[i * 4 + 1] = v >> 8;
       }
-      this.groundIdx = makeTexture(gl, G3.ntx, G3.nty, { data: idx }), this.groundScale = scale, this.groundTile = size, this.groundPer = L.per;
-      for (let pg of atlas.pages) pg.data = null;
-      G3.data.length = 0;
-      let vao = this.meshVAO(mesh).vao;
-      this.staticVAO = vao, this.staticCount = mesh.indexCount, this.stats.tris = mesh.indexCount / 3;
+      this.groundIdx = makeTexture(gl, G3.ntx, G3.nty, { data: idx }), this.groundScale = scale, this.chunks = [], this.addChunk(mesh);
+    }
+    // one ground tile (by its slot) to the GPU, shrunk if the texture had to be
+    uploadGroundTile(i) {
+      let gl = this.gl, G3 = this.groundTiles, d = G3.data[i], k = this.groundK, size = this.groundTile, px = d;
+      if (k > 1) {
+        px = new Uint8Array(size * size * 4);
+        for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+          let s0 = (y * k * G3.size + x * k) * 4, d0 = (y * size + x) * 4;
+          px[d0] = d[s0], px[d0 + 1] = d[s0 + 1], px[d0 + 2] = d[s0 + 2], px[d0 + 3] = d[s0 + 3];
+        }
+      }
+      gl.bindTexture(gl.TEXTURE_2D, this.groundTex), gl.texSubImage2D(gl.TEXTURE_2D, 0, i % this.groundPer * size, Math.floor(i / this.groundPer) * size, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    }
+    // room in the texture array for n pages (growing it copies what is there on the GPU)
+    ensureAtlas(n) {
+      let gl = this.gl, size = this.atlas.size;
+      if (n <= this.atlasCap) return;
+      let cap = Math.max(n, this.atlasCap + 4), tex2 = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex2), gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, size, size, cap, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      for (let [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D_ARRAY, k, v);
+      if (this.atlasTex) {
+        let fb = gl.createFramebuffer();
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+        for (let l = 0; l < this.atlasCap; l++)
+          gl.framebufferTextureLayer(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, this.atlasTex, 0, l), gl.copyTexSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, l, 0, 0, size, size);
+        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null), gl.deleteFramebuffer(fb), gl.deleteTexture(this.atlasTex);
+      }
+      this.atlasTex = tex2, this.atlasCap = cap;
+    }
+    // What the city builder made since last time: a new chunk of geometry, the atlas regions painted
+    // for it, the ground tiles it painted on
+    addBuilt(mesh) {
+      let gl = this.gl;
+      mesh && mesh.indexCount && this.addChunk(mesh), this.ensureAtlas(this.atlas.pages.length), this.atlas.flush(gl, this.atlasTex);
+      let G3 = this.groundTiles;
+      if (G3 && G3.dirty) for (let i = 0; i < G3.dirty.length; i++) G3.dirty[i] && (G3.dirty[i] = 0, this.uploadGroundTile(i));
+    }
+    // the city is built: no more painting, let go of the CPU copies
+    doneBuilding() {
+      this.atlas.freeAll();
+      let G3 = this.groundTiles;
+      G3 && (G3.data.length = 0, G3.dirty = null);
+    }
+    addChunk(mesh) {
+      let c = this.meshVAO(mesh);
+      return this.chunks.push(c), this.stats.tris = (this.stats.tris || 0) + mesh.indexCount / 3, c;
     }
     // a vertex array for a mesh in the static format
     meshVAO(mesh) {
@@ -926,7 +957,10 @@ void main() {
     // static geometry (then the dynamic mesh) with the current program; knocked poles hidden
     drawStatic(p) {
       let gl = this.gl;
-      p.u.uDown && gl.uniform4fv(p.u.uDown, this.down), p.u.uDownN && gl.uniform1i(p.u.uDownN, this.downN), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), this.dyn && (p.u.uDownN && gl.uniform1i(p.u.uDownN, 0), gl.bindVertexArray(this.dyn.vao), gl.drawElements(gl.TRIANGLES, this.dyn.count, gl.UNSIGNED_INT, 0));
+      p.u.uDown && gl.uniform4fv(p.u.uDown, this.down), p.u.uDownN && gl.uniform1i(p.u.uDownN, this.downN);
+      for (let c of this.chunks)
+        gl.bindVertexArray(c.vao), gl.drawElements(gl.TRIANGLES, c.count, gl.UNSIGNED_INT, 0);
+      this.dyn && (p.u.uDownN && gl.uniform1i(p.u.uDownN, 0), gl.bindVertexArray(this.dyn.vao), gl.drawElements(gl.TRIANGLES, this.dyn.count, gl.UNSIGNED_INT, 0));
     }
     addLayer(layer) {
       this.layers.push(layer);
@@ -1477,7 +1511,7 @@ void main() {
   };
   var TiledPainter = class extends Painter {
     constructor(tiles, w, h) {
-      super({ w: 1, h: 1, data: null }, 0, 0, w, h), this.tiles = tiles, this.half = !0, this.shift = Math.log2(tiles.size), this.mask = tiles.size - 1;
+      super({ w: 1, h: 1, data: null }, 0, 0, w, h), this.tiles = tiles, this.half = !0, this.step = tiles.step || 2, this.fs = Math.log2(this.step), this.shift = Math.log2(tiles.size), this.mask = tiles.size - 1;
     }
     sub() {
       throw new Error("TiledPainter.sub is not supported");
@@ -1487,15 +1521,15 @@ void main() {
     }
     // [array, index] of the texel under T-space (x, y), or null over water
     at(x, y) {
-      let t = this.tiles, gx = x >> 1, gy = y >> 1, s = t.slots[(gy >> this.shift) * t.ntx + (gx >> this.shift)];
-      return s < 0 ? null : (this._i = (((gy & this.mask) << this.shift) + (gx & this.mask)) * 4, t.data[s]);
+      let t = this.tiles, gx = x >> this.fs, gy = y >> this.fs, s = t.slots[(gy >> this.shift) * t.ntx + (gx >> this.shift)];
+      return s < 0 ? null : (this._s = s, this._i = (((gy & this.mask) << this.shift) + (gx & this.mask)) * 4, t.data[s]);
     }
     set(x, y, c, a = 255) {
       if (x |= 0, y |= 0, x < 0 || y < 0 || x >= this.w || y >= this.h) return;
       let d = this.at(x, y);
       if (!d) return;
       let i = this._i;
-      d[i] = c >> 16 & 255, d[i + 1] = c >> 8 & 255, d[i + 2] = c & 255, d[i + 3] = a;
+      d[i] = c >> 16 & 255, d[i + 1] = c >> 8 & 255, d[i + 2] = c & 255, d[i + 3] = a, this.tiles.dirty && (this.tiles.dirty[this._s] = 1);
     }
     get(x, y) {
       if (x |= 0, y |= 0, x < 0 || y < 0 || x >= this.w || y >= this.h) return 0;
@@ -1512,17 +1546,17 @@ void main() {
     setA(x, y, a) {
       if (x |= 0, y |= 0, x < 0 || y < 0 || x >= this.w || y >= this.h) return;
       let d = this.at(x, y);
-      d && (d[this._i + 3] = a);
+      d && (d[this._i + 3] = a, this.tiles.dirty && (this.tiles.dirty[this._s] = 1));
     }
     rect(x, y, w, h, c, a = 255) {
       x = Math.round(x), y = Math.round(y), w = Math.round(w), h = Math.round(h);
-      let x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(this.w, x + w), y1 = Math.min(this.h, y + h);
-      for (let yy = y0 & -2; yy < y1; yy += 2) for (let xx = x0 & -2; xx < x1; xx += 2) this.set(xx, yy, c, a);
+      let x0 = Math.max(0, x), y0 = Math.max(0, y), x1 = Math.min(this.w, x + w), y1 = Math.min(this.h, y + h), st = this.step;
+      for (let yy = y0 - y0 % st; yy < y1; yy += st) for (let xx = x0 - x0 % st; xx < x1; xx += st) this.set(xx, yy, c, a);
     }
   };
 
   // src/world/atlas.js
-  var ReplayPainter = class extends Painter {
+  var OPEN = 3, FREED = new Uint8Array(0), ReplayPainter = class extends Painter {
     set() {
     }
     setA() {
@@ -1551,7 +1585,8 @@ void main() {
       this.size = size, this.pages = [], this.packers = [], this.cache = /* @__PURE__ */ new Map();
     }
     newPage() {
-      return this.pages.push(new Page(this.size, this.size)), this.packers.push(new BestFitShelves(this.size, this.size, 1)), this.pages.length - 1;
+      let pg = new Page(this.size, this.size);
+      return pg.dirty = null, this.pages.push(pg), this.packers.push(new BestFitShelves(this.size, this.size, 1)), this.pages.length - 1;
     }
     // Texture reuse between copies of the same block variant: the first copy records the regions it
     // allocates (in order); a later copy built from the same seed asks for the same sizes in the same
@@ -1577,7 +1612,7 @@ void main() {
       return this.recording && this.recording.push({ layer: out.layer, x: out.x, y: out.y, w, h }), out;
     }
     _alloc(w, h) {
-      for (let i2 = 1; i2 < this.pages.length; i2++) {
+      for (let i2 = Math.max(0, this.pages.length - OPEN); i2 < this.pages.length; i2++) {
         let r2 = this.packers[i2].alloc(w, h);
         if (r2) return this._region(i2, r2);
       }
@@ -1590,12 +1625,30 @@ void main() {
       return this.packers[i].nextY = this.size, this._region(i, { x: 0, y: 0, w, h });
     }
     _region(layer, r) {
-      return { layer, x: r.x, y: r.y, w: r.w, h: r.h, p: new Painter(this.pages[layer], r.x, r.y, r.w, r.h) };
+      let pg = this.pages[layer], d = pg.dirty;
+      return d ? (d.x0 = Math.min(d.x0, r.x), d.y0 = Math.min(d.y0, r.y), d.x1 = Math.max(d.x1, r.x + r.w), d.y1 = Math.max(d.y1, r.y + r.h)) : pg.dirty = { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, { layer, x: r.x, y: r.y, w: r.w, h: r.h, p: new Painter(this.pages[layer], r.x, r.y, r.w, r.h) };
     }
     // Cached shared region (e.g. tiled brick)
     shared(key, w, h, paint) {
       let r = this.cache.get(key);
       return r || (r = this._alloc(Math.max(1, Math.round(w)), Math.max(1, Math.round(h))), paint(r.p, r), this.cache.set(key, r)), r;
+    }
+    // Send what has been painted since the last flush to the texture array tex (which has room for
+    // every page), then let go of the finished pages' pixels. Returns the bytes sent.
+    flush(gl, tex2) {
+      let sent = 0;
+      return gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex2), gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, this.size), this.pages.forEach((pg, i) => {
+        let d = pg.dirty;
+        d && !pg.freed && (gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, d.x0), gl.pixelStorei(gl.UNPACK_SKIP_ROWS, d.y0), gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, d.x0, d.y0, i, d.x1 - d.x0, d.y1 - d.y0, 1, gl.RGBA, gl.UNSIGNED_BYTE, pg.data), sent += (d.x1 - d.x0) * (d.y1 - d.y0) * 4), pg.dirty = null, i < this.pages.length - OPEN && !pg.freed && this.free(pg);
+      }), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0), gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0), gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0), sent;
+    }
+    // a page's pixels are on the GPU: drop them (reads of a replayed region then see nothing, and
+    // writes go nowhere, which is all a replay does)
+    free(pg) {
+      pg.data = FREED, pg.freed = !0;
+    }
+    freeAll() {
+      for (let pg of this.pages) pg.freed || this.free(pg);
     }
     upload(gl) {
       let tex2 = gl.createTexture();
@@ -1644,7 +1697,7 @@ void main() {
     GATE_CLOSED: 17,
     SUMMER_OR_SPRING: 18,
     WARM: 19
-  };
+  }, QN = 0;
   function grow(arr, need) {
     if (need <= arr.length) return arr;
     let n = arr.length * 2;
@@ -1678,7 +1731,7 @@ void main() {
     quad(p0, p1, p2, p3, uvs, tex2, n, mat = 0, group = this.defaultGroup, seed = 0) {
       if (!tex2) return;
       n || (n = quadNormal(p0, p1, p3));
-      let k = this.quadN = (this.quadN || 0) + 1, e = 2e-4 + (k * 2654435761 >>> 0) % 37 * 16e-5, off = (p) => [p[0] + n[0] * e, p[1] + n[1] * e, p[2] + n[2] * e];
+      let k = ++QN, e = 2e-4 + (k * 2654435761 >>> 0) % 37 * 16e-5, off = (p) => [p[0] + n[0] * e, p[1] + n[1] * e, p[2] + n[2] * e];
       p0 = off(p0), p1 = off(p1), p2 = off(p2), p3 = off(p3), this._ensure(4, 6);
       let a = this._v(p0, uvs[0][0], uvs[0][1], tex2, n, mat, group, seed), b = this._v(p1, uvs[1][0], uvs[1][1], tex2, n, mat, group, seed), c = this._v(p2, uvs[2][0], uvs[2][1], tex2, n, mat, group, seed), d = this._v(p3, uvs[3][0], uvs[3][1], tex2, n, mat, group, seed), I = this.idx;
       I[this.ni++] = a, I[this.ni++] = b, I[this.ni++] = c, I[this.ni++] = a, I[this.ni++] = c, I[this.ni++] = d;
@@ -1691,7 +1744,7 @@ void main() {
     }
     // Axis-aligned box. faces: {px,nx,py,ny,pz} -> face spec (region or {t, mat, group, u0, v0})
     box(x0, y0, z0, x1, y1, z1, faces, opt = {}) {
-      let n = this.boxN = (this.boxN || 0) + 1, e = 3e-4 + (n * 2654435761 >>> 0) % 31 * 19e-5;
+      let n = ++QN, e = 3e-4 + (n * 2654435761 >>> 0) % 31 * 19e-5;
       x1 > x0 && (x0 -= e, x1 += e), y1 > y0 && (y0 -= e, y1 += e), z1 > z0 && (z1 += e);
       let g = opt.group ?? this.defaultGroup, seed = opt.seed ?? 0, sideMat = opt.mat ?? 0, topMat = opt.topMat ?? MAT.SNOW | MAT.WET, H = (z1 - z0) * 32, f = (spec) => spec && spec.t ? spec : spec ? { t: spec } : null, s;
       if (s = f(faces.py)) {
@@ -1791,7 +1844,7 @@ void main() {
     }
     // Vertical quad between (xa,ya) and (xb,yb), from z0 to z1. Texture u runs a->b.
     vquad(xa, ya, xb, yb, z0, z1, tex2, opt = {}) {
-      let len = Math.hypot(xb - xa, yb - ya) * 32, H = (z1 - z0) * 32, u0 = opt.u0 || 0, v0 = opt.v0 || 0, nx = yb - ya, ny = -(xb - xa), l = Math.hypot(nx, ny) || 1, ux = (xb - xa) / (l || 1), n = [-((yb - ya) / (l || 1)), ux, 0], nn = opt.n || n, k = this.boxN = (this.boxN || 0) + 1, e = 3e-4 + (k * 2654435761 >>> 0) % 31 * 19e-5;
+      let len = Math.hypot(xb - xa, yb - ya) * 32, H = (z1 - z0) * 32, u0 = opt.u0 || 0, v0 = opt.v0 || 0, nx = yb - ya, ny = -(xb - xa), l = Math.hypot(nx, ny) || 1, ux = (xb - xa) / (l || 1), n = [-((yb - ya) / (l || 1)), ux, 0], nn = opt.n || n, k = ++QN, e = 3e-4 + (k * 2654435761 >>> 0) % 31 * 19e-5;
       xa += nn[0] * e, xb += nn[0] * e, ya += nn[1] * e, yb += nn[1] * e, this.quad(
         [xa, ya, z1],
         [xb, yb, z1],
@@ -1807,7 +1860,7 @@ void main() {
     }
     // Horizontal quad (decal) at height z
     hquad(x0, y0, x1, y1, z, tex2, opt = {}) {
-      let n = this.boxN = (this.boxN || 0) + 1;
+      let n = ++QN;
       z += 3e-4 + (n * 2654435761 >>> 0) % 31 * 19e-5;
       let W = (x1 - x0) * 32, D = (y1 - y0) * 32, u0 = opt.u0 ?? 0, v0 = opt.v0 ?? 0;
       this.quad(
@@ -2064,7 +2117,7 @@ void main() {
   }
   var GTILE = 32;
   function makeGroundTiles() {
-    let { W, H, cls } = landRaster(), ntx = Math.ceil(414 / GTILE), nty = Math.ceil(1791 / GTILE), size = GTILE * 16, slots = new Int32Array(ntx * nty).fill(-1), data = [];
+    let { W, H, cls } = landRaster(), ntx = Math.ceil(414 / GTILE), nty = Math.ceil(1791 / GTILE), size = GTILE * 8, step = 32 / 8, slots = new Int32Array(ntx * nty).fill(-1), data = [];
     for (let ty = 0; ty < nty; ty++)
       for (let tx = 0; tx < ntx; tx++) {
         let x0 = tx * GTILE, y0 = ty * GTILE, x1 = Math.min(W, x0 + GTILE), y1 = Math.min(H, y0 + GTILE), need = GROUND_EXTRA.some((r) => r.x1 > x0 && r.x0 < x1 && r.y1 > y0 && r.y0 < y1);
@@ -2077,7 +2130,7 @@ void main() {
         }
         need && (slots[ty * ntx + tx] = data.length, data.push(new Uint8Array(size * size * 4)));
       }
-    return { ntx, nty, size, slots, data };
+    return { ntx, nty, size, slots, data, step, scale: 8 / 32, dirty: null };
   }
   function makeGroundPainter(tiles) {
     return new TiledPainter(tiles, 414 * 32, 1791 * 32);
@@ -2094,9 +2147,9 @@ void main() {
         if (slot < 0) continue;
         let d = tiles.data[slot];
         for (let Y = 0; Y < S2; Y++) {
-          let y = (ty * S2 + Y) * 2, row2 = (y >> 6) * cellsX, i = Y * S2 * 4;
+          let y = (ty * S2 + Y) * tiles.step, row2 = (y >> 6) * cellsX, i = Y * S2 * 4;
           for (let X = 0; X < S2; X++, i += 4) {
-            let x = (tx * S2 + X) * 2, h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11 | 0;
+            let x = (tx * S2 + X) * tiles.step, h = Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11 | 0;
             h = Math.imul(h ^ h >>> 13, 1274126177), h ^= h >>> 16;
             let r = (h >>> 0) / 4294967296, f = 0.93 + r * 0.11 + big[row2 + (x >> 6)] * 0.06;
             r > 0.992 ? f += 0.16 : r < 6e-3 && (f -= 0.12), d[i] = Math.min(255, ar * f), d[i + 1] = Math.min(255, ag * f), d[i + 2] = Math.min(255, ab * f), d[i + 3] = GC.ASPHALT;
@@ -2219,7 +2272,7 @@ void main() {
     return { manholes, prof: prof.join(", ") };
   }
   function markBand(p, x, y, w, h, code) {
-    let st = p.half ? 2 : 1;
+    let st = p.step || 1;
     for (let yy = y; yy < y + h; yy += st)
       for (let xx = x; xx < x + w; xx += st)
         p.getA(xx, yy) === GC.ASPHALT && p.setA(xx, yy, code);
@@ -2248,15 +2301,15 @@ void main() {
     return lx < 2 || ly < 2 ? c = lx === 0 || ly === 0 ? COL.sidewalkDark : shade(c, 1.05) : (lx >= 22 || ly >= 22) && (c = shade(c, 0.95)), hh > 0.995 && (c = shade(c, 0.85)), c;
   }
   function paintSidewalkRect(p, x, y, w, h, rng) {
-    let st = p.half ? 2 : 1;
+    let st = p.step || 1;
     if (p.tiles) {
-      let t = p.tiles, sh = p.shift, m = p.mask, SW = sidewalkPatch(), PP = SWP;
-      for (let GY = Math.max(0, y >> 1); GY < y + h >> 1; GY++) {
+      let t = p.tiles, sh = p.shift, m = p.mask, SW = sidewalkPatch(), PP = SWP, fs = p.fs, k = p.step >> 1;
+      for (let GY = Math.max(0, y >> fs); GY < y + h >> fs; GY++) {
         let row2 = (GY >> sh) * t.ntx, base = (GY & m) << sh;
-        for (let GX = Math.max(0, x >> 1); GX < x + w >> 1; GX++) {
+        for (let GX = Math.max(0, x >> fs); GX < x + w >> fs; GX++) {
           let slot = t.slots[row2 + (GX >> sh)];
           if (slot < 0) continue;
-          let d = t.data[slot], i = (base + (GX & m)) * 4, c = SW[GY % PP * PP + GX % PP];
+          let d = t.data[slot], i = (base + (GX & m)) * 4, c = SW[GY * k % PP * PP + GX * k % PP];
           d[i] = c >> 16 & 255, d[i + 1] = c >> 8 & 255, d[i + 2] = c & 255, d[i + 3] = GC.SIDEWALK;
         }
       }
@@ -2286,7 +2339,7 @@ void main() {
         xx * xx + yy * yy > 110 || ((xx + 40) % 4 === 0 || (yy + 40) % 4 === 0) && p.set(cx + xx, cy + yy, 4868422, GC.METAL);
     p.ring(cx, cy, 12.5, 12.5, 1.2, 7763311, GC.METAL), p.ring(cx, cy, 6, 6, 1, 6973796, GC.METAL), p.rect(cx - 2, cy - 1, 4, 2, 3026219, GC.METAL);
   }
-  function buildGroundGeometry(mb, ground, tex2, quay, boroTex) {
+  function buildGroundGeometry(mb, ground, tex2, quay2, boroTex) {
     let gm = MAT.GROUND | MAT.SNOW | MAT.WET;
     for (let [x0, y0, x1, y1] of rectsOf((c) => c === CL.ROAD)) mb.box(x0, y0, -7, x1, y1, 0, { pz: { t: ground, world: !0, mat: gm } });
     for (let [x0, y0, x1, y1] of rectsOf((c) => c === CL.RAISED)) mb.box(x0, y0, -7, x1, y1, 0.125, { pz: { t: ground, world: !0, mat: gm } });
@@ -2295,7 +2348,7 @@ void main() {
     for (let [x0, y0, x1, y1, a, b] of boundaries()) {
       let za = clsZ(a), zb = clsZ(b);
       if (za === zb) continue;
-      let hi = Math.max(za, zb), lo = Math.min(za, zb), H = (hi - lo) * 32, L = (x1 - x0 + y1 - y0) * 32, t = lo === WATER_Z ? quay : tex2.curb, uv = [[0, 0], [L, 0], [L, H], [0, H]];
+      let hi = Math.max(za, zb), lo = Math.min(za, zb), H = (hi - lo) * 32, L = (x1 - x0 + y1 - y0) * 32, t = lo === WATER_Z ? quay2 : tex2.curb, uv = [[0, 0], [L, 0], [L, H], [0, H]];
       x0 === x1 ? za > zb ? mb.quad([x0, y1, hi], [x0, y0, hi], [x0, y0, lo], [x0, y1, lo], uv, t, [1, 0, 0], 0) : mb.quad([x0, y0, hi], [x0, y1, hi], [x0, y1, lo], [x0, y0, lo], uv, t, [-1, 0, 0], 0) : za > zb ? mb.quad([x0, y0, hi], [x1, y0, hi], [x1, y0, lo], [x0, y0, lo], uv, t, [0, 1, 0], 0) : mb.quad([x1, y0, hi], [x0, y0, hi], [x0, y0, lo], [x1, y0, lo], uv, t, [0, -1, 0], 0);
     }
   }
@@ -4813,8 +4866,8 @@ void main() {
     let mid = nodes.reduce((b, n, i) => n.z > ZD && Math.abs(n.x - xmid) < Math.abs(nodes[b].x - xmid) ? i : b, 1);
     W.bridgeWalk = { nodes, edges, gates: [{ node: 0, sx: L.x0 - 1.2, sy: yb }], foot: stairFoot, sights: [mid] }, landmark(C, "BROOKLYN BRIDGE", xmid, yb + 9);
   }
-  function brooklynShore(C) {
-    for (let BK of BOROUGHS.filter((b) => b.name === "brooklyn")) shore(C, BK);
+  function brooklynShore(C, R2 = null) {
+    for (let BK of BOROUGHS.filter((b) => b.name === "brooklyn")) (!R2 || BK === R2) && shore(C, BK);
   }
   function shore(C, BK) {
     let S2 = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C), x0 = BK.x0, x1 = 414, y0b = BK.y0, y1 = BK.y1, L0 = bridgeBlock(), yb0 = L0 ? (L0.y0 + L0.y1) / 2 : -100, L = yb0 > y0b && yb0 < y1 ? L0 : null, yb = L ? yb0 : -100, rng = C.rng, depth = Math.min(x1 - x0 > 40 ? 10 : 12, x1 - x0 - 7.2);
@@ -6128,12 +6181,16 @@ void main() {
       net.nodes.push(...nodes);
       for (let [u, v] of edges) net.edges.push([base + u, base + v]);
       net.gates.push({ ...gate, node: base + gate.node });
-      let best = 0, bd = 1e9;
-      net.nodes.forEach((n, i) => {
-        if (i >= base || n.z !== zd) return;
-        let d = Math.hypot(n.x - nodes[0].x, n.y - nodes[0].y);
-        d < bd && (bd = d, best = i);
-      }), bd < 4 && net.edges.push([best, base]), net.rect.y1 = Math.max(net.rect.y1, L.y1);
+      let deck2 = nodes.filter((n) => n.z === zd);
+      for (let end of [0, deck2.length - 1]) {
+        let e = nodes.indexOf(deck2[end]), best = -1, bd = 1e9;
+        net.nodes.forEach((n, i) => {
+          if (i >= base || n.z !== zd) return;
+          let d = Math.hypot(n.x - nodes[e].x, n.y - nodes[e].y);
+          d < bd && (bd = d, best = i);
+        }), best >= 0 && bd < 4 && net.edges.push([best, base + e]);
+      }
+      net.rect.y1 = Math.max(net.rect.y1, L.y1);
     } else
       W.extraNets.push({ name: "highline", rect: { x0: L.x0, y0: ya, x1: L.x1, y1: L.y1 }, nodes, edges, gates: [gate], sights: [Math.floor(nodes.length / 3)] }), landmark(C, "THE HIGH LINE", L.x0 - 2, L.y1 + 2, 2);
   }
@@ -6830,13 +6887,7 @@ void main() {
     for (let x = R2.x0 + 1.5; x < R2.x1 - 1; x += 3) C.addTree(x, R2.y0 + 2.6, "plane", !1, { scale: 0.85 });
     landmark(C, "ELLIS ISLAND", (R2.x0 + R2.x1) / 2 + 8, R2.y1 + 4, 0);
   }
-  function greaterNewYork(C) {
-    let tm = (k, f) => {
-      let t = performance.now();
-      f(), (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t);
-    };
-    tm("nj", () => newJersey(C)), tm("bronx", () => bronx(C)), tm("queens", () => queens(C)), tm("brooklyn", () => brooklyn(C)), tm("randalls", () => randalls(C)), tm("roosevelt", () => roosevelt(C)), tm("governors", () => governors(C)), tm("ellis", () => ellis(C));
-  }
+  var GREATER = { nj: newJersey, bronx, queens, brooklyn, randalls, roosevelt, governors, ellis };
 
   // src/world/uptown.js
   var PI8 = Math.PI, sides6 = (t, top) => top ? { px: t, nx: t, py: t, ny: t, pz: top } : { px: t, nx: t, py: t, ny: t }, copper = (C) => C.atlas.shared("copper", 32, 32, (p) => {
@@ -7911,7 +7962,7 @@ void main() {
       z0: 0.125,
       ground: world.ground,
       paintGround(x0, y0, x1, y1, kind) {
-        let st = gp.half ? 2 : 1, X0 = Math.round(Math.min(x0, x1) * 32), X1 = Math.round(Math.max(x0, x1) * 32), Y0 = Math.round(Math.min(y0, y1) * 32), Y1 = Math.round(Math.max(y0, y1) * 32), sx = gp.half ? X0 & -2 : X0, sy = gp.half ? Y0 & -2 : Y0;
+        let st = gp.step || 1, X0 = Math.round(Math.min(x0, x1) * 32), X1 = Math.round(Math.max(x0, x1) * 32), Y0 = Math.round(Math.min(y0, y1) * 32), Y1 = Math.round(Math.max(y0, y1) * 32), sx = X0 - X0 % st, sy = Y0 - Y0 % st;
         for (let y = sy; y < Y1; y += st)
           for (let x = sx; x < X1; x += st) {
             let r = groundFill(kind, x, y, X0, Y0, X1, Y1);
@@ -7920,7 +7971,7 @@ void main() {
       },
       // paint texels whose centre satisfies inside(wx, wy) within a bounding box
       paintWhere(x0, y0, x1, y1, inside, kind) {
-        let st = gp.half ? 2 : 1, X0 = Math.floor(Math.min(x0, x1) * 32), X1 = Math.ceil(Math.max(x0, x1) * 32), Y0 = Math.floor(Math.min(y0, y1) * 32), Y1 = Math.ceil(Math.max(y0, y1) * 32), sx = gp.half ? X0 & -2 : X0, sy = gp.half ? Y0 & -2 : Y0;
+        let st = gp.step || 1, X0 = Math.floor(Math.min(x0, x1) * 32), X1 = Math.ceil(Math.max(x0, x1) * 32), Y0 = Math.floor(Math.min(y0, y1) * 32), Y1 = Math.ceil(Math.max(y0, y1) * 32), sx = X0 - X0 % st, sy = Y0 - Y0 % st;
         for (let y = sy; y < Y1; y += st)
           for (let x = sx; x < X1; x += st) {
             if (!inside((x + st * 0.5) / 32, (y + st * 0.5) / 32)) continue;
@@ -8093,47 +8144,69 @@ void main() {
     for (let ch of t) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
     return h >>> 0;
   };
-  function buildBlocks(C) {
-    let prof = {}, time = (name, fn) => {
-      let t = performance.now();
-      fn(), prof[name] = (prof[name] || 0) + performance.now() - t;
-    }, rng0 = C.rng;
+  function buildOneBlock(C, bx, by) {
+    let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), fn = BLOCKS[type];
+    if (!fn) return;
+    let nv = VARIANTS[type], variant = nv ? (bx * 7 + by * 13 + bx * by % 5) % nv : 0;
+    C.rng = new RNG(nv ? typeSeed(type) % 1e5 + variant * 7919 : 4e3 + bx * 97 + by * 31), nv && C.atlas.beginReplay(`${type}:${variant}`);
+    try {
+      fn(C, L, bx, by, variant);
+    } finally {
+      C.atlas.endReplay();
+    }
+  }
+  function planBlocks(C) {
+    let jobs = [], job = (key, x, y, fn, o = {}) => jobs.push({ key, x, y, fn, ...o });
     for (let by = 0; by < 66; by++)
       for (let bx = 0; bx < 15; bx++) {
         if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
-        let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), fn = BLOCKS[type];
-        if (!fn) continue;
-        let nv = VARIANTS[type], variant = nv ? (bx * 7 + by * 13 + bx * by % 5) % nv : 0;
-        C.rng = new RNG(nv ? typeSeed(type) % 1e5 + variant * 7919 : 4e3 + bx * 97 + by * 31), nv && C.atlas.beginReplay(`${type}:${variant}`), time(type, () => fn(C, L, bx, by, variant)), C.atlas.endReplay();
+        let L = blockRect(bx, by);
+        job(`b${bx},${by}`, (L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, () => {
+          buildOneBlock(C, bx, by), C.rng = new RNG(5e3 + bx * 131 + by * 17), blockFurniture(C, bx, by);
+        });
       }
-    C.rng = rng0, time("park", () => centralPark(C)), time("tsq", () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart)), time("waterfront", () => waterfront(C)), time("furniture", () => streetFurniture(C)), C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(", ") + `, replayed ${C.atlas.replayed || 0}`;
+    for (let j = 0; j <= 66; j++) job(`sig${j}`, 414 / 2, roadCenter(j), () => signalsAlong(C, j), { wide: !0 });
+    let PR = parkRect();
+    job("park", (PR.x0 + PR.x1) / 2, (PR.y0 + PR.y1) / 2, () => centralPark(C), { wide: !0 });
+    {
+      let T22 = mergeRect(TSQ);
+      job("tsq", (T22.x0 + T22.x1) / 2, (T22.y0 + T22.y1) / 2, () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart));
+    }
+    for (let [k, e] of quayEdges().entries()) job(`quay${k}`, (e[0] + e[2]) / 2, (e[1] + e[3]) / 2, () => quay(C, e));
+    buildBridges(C), brooklynBridge(C);
+    for (let R2 of BOROUGHS.filter((b) => b.name === "brooklyn")) job(`bkshore${R2.y0}`, R2.x0 + 10, (R2.y0 + R2.y1) / 2, () => brooklynShore(C, R2));
+    for (let [name, fn] of Object.entries(GREATER)) {
+      let R2 = BOROUGHS.find((b) => b.name === name) || ISLANDS.find((b) => b.name === name) || (name === "ellis" ? ELLIS : null);
+      job(`g_${name}`, R2 ? (R2.x0 + R2.x1) / 2 : 414 / 2, R2 ? (R2.y0 + Math.min(R2.y1, R2.y0 + 80)) / 2 : 1791 / 2, () => fn(C), { wide: !0 });
+    }
+    return job("liberty", LIBERTY.x, LIBERTY.y, () => statueOfLiberty(C)), job("finish", 414 / 2, 1791 / 2, () => streetFinish(C), { last: !0 }), jobs;
   }
   var blockOf = (type) => BLOCKS[type];
   function offIslandBlock(C, L, type, bx, by, z0 = 0.125) {
+    if (C.defer) {
+      C.defer(`o${type}${L.x0},${L.y0}`, (L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, () => offIslandBlockNow(C, L, type, bx, by, z0));
+      return;
+    }
+    offIslandBlockNow(C, L, type, bx, by, z0);
+  }
+  function offIslandBlockNow(C, L, type, bx, by, z0) {
     let W = C.world, fn = BLOCKS[type];
     if (!fn) return;
     let keep = { doors: W.doors.length, shops: W.shops.length, stoopSeats: W.stoopSeats.length, officeDoors: W.officeDoors.length, benches: W.benches.length, carts: W.carts.length, subways: W.subways.length }, rng0 = C.rng, zs = C.z0, nv = VARIANTS[type], variant = nv ? Math.abs(bx * 7 + by * 13 + bx * by % 5) % nv : 0;
     C.rng = new RNG(nv ? typeSeed(type) % 1e5 + variant * 7919 : 4e3 + bx * 97 + by * 31), C.z0 = z0, nv && C.atlas.beginReplay(`${type}:${variant}`), fn(C, L, bx, by, variant), C.atlas.endReplay(), C.rng = rng0, C.z0 = zs;
     for (let [k, n] of Object.entries(keep)) W[k].length = n;
   }
-  function waterfront(C) {
-    let W = C.world, mb = C.mb, P = propTex(C), iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
-    for (let [ax, ay, bx, by, n] of quayEdges()) {
-      if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) continue;
-      let ox = -n[0] * 0.12, oy = -n[1] * 0.12, x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
-      if (n[0]) {
-        for (let y = y0 + 0.5; y < y1 - 0.3; y += 1.5) mb.box(x0 - 0.04, y - 0.04, 0.125, x0 + 0.04, y + 0.04, 0.125 + 0.55, iron);
-        mb.box(x0 - 0.05, y0 + 0.3, 0.125 + 0.5, x0 + 0.05, y1 - 0.3, 0.125 + 0.58, iron);
-      } else {
-        for (let x = x0 + 0.5; x < x1 - 0.3; x += 1.5) mb.box(x - 0.04, y0 - 0.04, 0.125, x + 0.04, y0 + 0.04, 0.125 + 0.55, iron);
-        mb.box(x0 + 0.3, y0 - 0.05, 0.125 + 0.5, x1 - 0.3, y0 + 0.05, 0.125 + 0.58, iron);
-      }
+  function quay(C, [ax, ay, bx, by, n]) {
+    let mb = C.mb, P = propTex(C), iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
+    if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) return;
+    let ox = -n[0] * 0.12, oy = -n[1] * 0.12, x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
+    if (n[0]) {
+      for (let y = y0 + 0.5; y < y1 - 0.3; y += 1.5) mb.box(x0 - 0.04, y - 0.04, 0.125, x0 + 0.04, y + 0.04, 0.125 + 0.55, iron);
+      mb.box(x0 - 0.05, y0 + 0.3, 0.125 + 0.5, x0 + 0.05, y1 - 0.3, 0.125 + 0.58, iron);
+    } else {
+      for (let x = x0 + 0.5; x < x1 - 0.3; x += 1.5) mb.box(x - 0.04, y0 - 0.04, 0.125, x + 0.04, y0 + 0.04, 0.125 + 0.55, iron);
+      mb.box(x0 + 0.3, y0 - 0.05, 0.125 + 0.5, x1 - 0.3, y0 + 0.05, 0.125 + 0.58, iron);
     }
-    let tm = (k, f) => {
-      let t = performance.now();
-      f(), (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t);
-    };
-    tm("bridges", () => buildBridges(C)), tm("bkbridge", () => brooklynBridge(C)), tm("bkshore", () => brooklynShore(C)), tm("greater", () => greaterNewYork(C)), statueOfLiberty(C);
   }
   var BLOCKS = {
     brownstones: (C, L) => brownstoneBlock(C, L),
@@ -8530,59 +8603,61 @@ void main() {
     }
   }
   var NOSUBWAY = /* @__PURE__ */ new Set(["riverside", "grantstomb", "soldiers", "inwoodhill", "cloisters", "gwb", "highbridge", "bridge", "qbridge", "wbridge", "mbridge", "tbridge", "battery", "memorial"]);
-  function streetFurniture(C) {
+  function signalsAlong(C, j) {
+    for (let i = 0; i <= 15; i++) {
+      if (isParkIntersection(i, j)) continue;
+      let rx = roadCenter(i), ry = roadCenter(j);
+      for (let sx of [-1, 1])
+        for (let sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: !legOpen(i, j, sx, 0), closedY: !legOpen(i, j, 0, sy) });
+    }
+  }
+  function blockFurniture(C, bx, by) {
     let { rng } = C, W = C.world;
-    for (let i = 0; i <= 15; i++)
-      for (let j = 0; j <= 66; j++) {
-        if (isParkIntersection(i, j)) continue;
-        let rx = roadCenter(i), ry = roadCenter(j);
-        for (let sx of [-1, 1])
-          for (let sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: !legOpen(i, j, sx, 0), closedY: !legOpen(i, j, 0, sy) });
-      }
-    for (let by = 0; by < 66; by++)
-      for (let bx = 0; bx < 15; bx++) {
-        if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
-        let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), residential = ["brownstones", "walkups", "tenements", "bodega", "firehouse", "commercial", "lofts", "redbrick", "shops"].includes(type), sides7 = [
-          { ax: "x", y: L.y0 - 2 + 0.35, x0: L.x0, x1: L.x1, ny: -1, nx: 0, name: "N" },
-          { ax: "x", y: L.y1 + 2 - 0.35, x0: L.x0, x1: L.x1, ny: 1, nx: 0, name: "S" },
-          { ax: "y", x: L.x0 - 2 + 0.35, y0: L.y0, y1: L.y1, nx: -1, ny: 0, name: "W" },
-          { ax: "y", x: L.x1 + 2 - 0.35, y0: L.y0, y1: L.y1, nx: 1, ny: 0, name: "E" }
-        ];
-        for (let s of sides7) {
-          let at = (t, off = 0) => s.ax === "x" ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t], used = [];
-          for (let t of [5, 13]) {
-            let [x, y] = at(t);
-            streetLamp(C, x, y, s.nx, s.ny), type === "shops" && lampBanner(C, x, y, s.nx, s.ny, bx * 3 + by);
-          }
-          let treeTs = residential ? [2.6, 7.6, 10.4, 15.4] : type === "park" ? [3, 9, 15] : type === "court" ? [3, 15] : [3.2, 14.8];
-          for (let t of treeTs)
-            if (rng.chance(residential ? 0.9 : 0.8)) {
-              let [x, y] = at(t, 0.35);
-              if (W.canopies.some((c) => Math.hypot(c.x - x, c.y - y) < 1.1)) continue;
-              C.addTree(x, y, residential ? rng.pick(["plane", "locust", "plane", "oak"]) : "plane", !0), used.push([t, 0.5]);
-            }
-          {
-            let t = rng.range(8.2, 9.6), [x, y] = at(t, 0);
-            hydrant(C, x, y);
-          }
-          {
-            let [x, y] = at(0.8, -0.05);
-            rng.chance(0.7) && trashBasket(C, x, y);
-          }
-          if (rng.chance(0.35)) {
-            let [x, y] = at(17, 0.1);
-            mailbox(C, x, y), used.push([17, 0.4]);
-          } else if (rng.chance(0.35)) {
-            let [x, y] = at(16.6, 0.1);
-            newsBoxes(C, x, y, s.ax), used.push([17, 0.7]);
-          }
-          if (!residential && rng.chance(0.5)) {
-            let [x, y] = at(11.2, 0);
-            kiosk(C, x, y);
-          }
-          rng.chance(0.42) && sidewalkGrate(C, s, at, used, rng);
+    {
+      let type = BLOCK_TYPES[by][bx], L = blockRect(bx, by), residential = ["brownstones", "walkups", "tenements", "bodega", "firehouse", "commercial", "lofts", "redbrick", "shops"].includes(type), sides7 = [
+        { ax: "x", y: L.y0 - 2 + 0.35, x0: L.x0, x1: L.x1, ny: -1, nx: 0, name: "N" },
+        { ax: "x", y: L.y1 + 2 - 0.35, x0: L.x0, x1: L.x1, ny: 1, nx: 0, name: "S" },
+        { ax: "y", x: L.x0 - 2 + 0.35, y0: L.y0, y1: L.y1, nx: -1, ny: 0, name: "W" },
+        { ax: "y", x: L.x1 + 2 - 0.35, y0: L.y0, y1: L.y1, nx: 1, ny: 0, name: "E" }
+      ];
+      for (let s of sides7) {
+        let at = (t, off = 0) => s.ax === "x" ? [s.x0 + t, s.y - s.ny * off] : [s.x - s.nx * off, s.y0 + t], used = [];
+        for (let t of [5, 13]) {
+          let [x, y] = at(t);
+          streetLamp(C, x, y, s.nx, s.ny), type === "shops" && lampBanner(C, x, y, s.nx, s.ny, bx * 3 + by);
         }
+        let treeTs = residential ? [2.6, 7.6, 10.4, 15.4] : type === "park" ? [3, 9, 15] : type === "court" ? [3, 15] : [3.2, 14.8];
+        for (let t of treeTs)
+          if (rng.chance(residential ? 0.9 : 0.8)) {
+            let [x, y] = at(t, 0.35);
+            if (W.canopies.some((c) => Math.hypot(c.x - x, c.y - y) < 1.1)) continue;
+            C.addTree(x, y, residential ? rng.pick(["plane", "locust", "plane", "oak"]) : "plane", !0), used.push([t, 0.5]);
+          }
+        {
+          let t = rng.range(8.2, 9.6), [x, y] = at(t, 0);
+          hydrant(C, x, y);
+        }
+        {
+          let [x, y] = at(0.8, -0.05);
+          rng.chance(0.7) && trashBasket(C, x, y);
+        }
+        if (rng.chance(0.35)) {
+          let [x, y] = at(17, 0.1);
+          mailbox(C, x, y), used.push([17, 0.4]);
+        } else if (rng.chance(0.35)) {
+          let [x, y] = at(16.6, 0.1);
+          newsBoxes(C, x, y, s.ax), used.push([17, 0.7]);
+        }
+        if (!residential && rng.chance(0.5)) {
+          let [x, y] = at(11.2, 0);
+          kiosk(C, x, y);
+        }
+        rng.chance(0.42) && sidewalkGrate(C, s, at, used, rng);
       }
+    }
+  }
+  function streetFinish(C) {
+    let { rng } = C, W = C.world;
     for (let sh of W.shops) {
       let bx = Math.floor((sh.x - 9) / 27 + 0.5), by = Math.floor((sh.y - 9) / 27 + 0.5);
       ![[bx, by], [bx - 1, by], [bx, by - 1], [bx - 1, by - 1]].some(([i, j]) => i >= 0 && j >= 0 && i < 15 && j < 66 && BLOCK_TYPES[j][i] === "shops" && Math.abs(sh.x - (lotStart(i) + 9)) < 11.5 && Math.abs(sh.y - (lotStart(j) + 9)) < 11.5) || !SHOPPING.includes(sh.kind) || !rng.chance(0.45) || !sh.n || sandwichBoard(C, sh.x - sh.n[0] * 0.15, sh.y - sh.n[1] * 0.15, sh.n[0], sh.n[1], rng);
@@ -8725,11 +8800,11 @@ void main() {
   }
 
   // src/world/world.js
-  function buildWorld(seed = 1977, progress = () => {
+  function startWorld(seed = 1977, progress = () => {
   }) {
     let rng = new RNG(seed), atlas = new Atlas(2048);
     landRaster();
-    let groundTiles = makeGroundTiles(), groundReg = { layer: 0, x: 0, y: 0, w: 414 * 32, h: 1791 * 32, p: makeGroundPainter(groundTiles), tiles: groundTiles, scale: 16 / 32 }, prof = [], tick = (name) => prof.push([name, performance.now()]);
+    let groundTiles = makeGroundTiles(), groundReg = { layer: 0, x: 0, y: 0, w: 414 * 32, h: 1791 * 32, p: makeGroundPainter(groundTiles), tiles: groundTiles, scale: 8 / 32 }, prof = [], tick = (name) => prof.push([name, performance.now()]);
     tick("start"), progress("Paving streets");
     let groundInfo = paintGround(groundReg, rng);
     tick("ground");
@@ -8778,10 +8853,67 @@ void main() {
     };
     for (let by = 0; by < 66; by++)
       for (let bx = 0; bx < 15; bx++) world.blocks.push({ bx, by, type: BLOCK_TYPES[by][bx] });
-    tick("base"), progress("Raising buildings");
-    let C = makeContext(world, mb, atlas, rng);
-    return buildBlocks(C), tick("blocks"), world.mesh = mb.finish(), tick("mesh"), world.buildProfile = prof.slice(1).map(([n, t], i) => `${n} ${Math.round(t - prof[i][1])}ms`).join(", "), world;
+    tick("base");
+    let C = makeContext(world, mb, atlas, rng), jobs = planBlocks(C);
+    return world.mesh = mb.finish(), C.mb = new MeshBuilder(), tick("bridges"), world.buildProfile = prof.slice(1).map(([n, t], i) => `${n} ${Math.round(t - prof[i][1])}ms`).join(", "), { world, builder: new CityBuilder(world, C, jobs) };
   }
+  var keySeed = (k) => {
+    let h = 2166136261;
+    for (let ch of k) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+    return (h >>> 0) % 1e6;
+  }, CityBuilder = class {
+    constructor(world, C, jobs) {
+      this.world = world, this.C = C, this.jobs = jobs, this.total = jobs.length, this.done = 0, this.ms = 0, C.defer = (key, x, y, fn) => {
+        this.jobs.push({ key, x, y, fn }), this.total++;
+      };
+    }
+    get finished() {
+      return this.jobs.length === 0;
+    }
+    get progress() {
+      return this.total ? this.done / this.total : 1;
+    }
+    // how far a job is from (x, y): whole-width jobs only count the distance up or down the map
+    dist(j, x, y) {
+      let dy = j.y - y;
+      return j.wide ? dy * dy : (j.x - x) * (j.x - x) * 0.5 + dy * dy;
+    }
+    // any job left within r of (x, y)?
+    pendingNear(x, y, r) {
+      return this.jobs.some((j) => !j.last && this.dist(j, x, y) < r * r);
+    }
+    // run the jobs nearest (x, y) for up to ms milliseconds; returns how many ran
+    run(x, y, ms) {
+      let t0 = performance.now(), n = 0;
+      for (; this.jobs.length && performance.now() - t0 < ms; ) {
+        let others = this.jobs.some((j2) => !j2.last), bi = -1, bd = 1 / 0;
+        for (let i = 0; i < this.jobs.length; i++) {
+          let j2 = this.jobs[i];
+          if (j2.last && others) continue;
+          let d = this.dist(j2, x, y);
+          d < bd && (bd = d, bi = i);
+        }
+        let j = this.jobs.splice(bi, 1)[0];
+        this.runJob(j), n++;
+      }
+      return this.ms += performance.now() - t0, n;
+    }
+    runJob(j) {
+      let C = this.C, rng0 = C.rng, z0 = C.z0;
+      C.rng = new RNG(keySeed(j.key)), C.z0 = 0.125;
+      try {
+        j.fn();
+      } catch (e) {
+        console.error(`city builder: ${j.key}`, e);
+      }
+      C.rng = rng0, C.z0 = z0, this.done++;
+    }
+    // the geometry made since last time (null if none)
+    take() {
+      let mb = this.C.mb;
+      return mb.ni ? (this.C.mb = new MeshBuilder(), mb.finish()) : null;
+    }
+  };
 
   // src/sim/environment.js
   var SEASONS = [
@@ -11729,20 +11861,29 @@ void main() {
   o = vec4(1.0);
 }`, TreeLayer = class {
     constructor(gl, city) {
-      this.gl = gl, this.city = city, this.prog = createProgram(gl, VS5, FS5, "trees3d"), this.shadowProg = createProgram(gl, SHADOW_VS5, SHADOW_FS5, "trees3dShadow"), this.groups = /* @__PURE__ */ new Map();
-      let trees = city.world.trees, counts = /* @__PURE__ */ new Map();
-      for (let t of trees) {
-        let k = this.key(t);
-        counts.set(k, (counts.get(k) || 0) + 1);
-      }
-      for (let [k, n] of counts) {
-        let [sp, v] = k.split(":");
-        this.groups.set(k, { hi: this.mesh(treeMesh(sp, +v, !1), n), lo: this.mesh(treeMesh(sp, +v, !0), n), data: new Float32Array(n * IS3), n: 0 });
-      }
-      this.lo = !1;
+      this.gl = gl, this.city = city, this.prog = createProgram(gl, VS5, FS5, "trees3d"), this.shadowProg = createProgram(gl, SHADOW_VS5, SHADOW_FS5, "trees3dShadow"), this.groups = /* @__PURE__ */ new Map(), this.lo = !1;
     }
     key(t) {
       return `${SPECIES.includes(t.species) ? t.species : "plane"}:${(t.variant || 0) % 3}`;
+    }
+    group(k) {
+      let g = this.groups.get(k);
+      if (!g) {
+        let [sp, v] = k.split(":");
+        g = { hi: this.mesh(treeMesh(sp, +v, !1), 64), lo: this.mesh(treeMesh(sp, +v, !0), 64), data: new Float32Array(64 * IS3), n: 0, cap: 64 }, this.groups.set(k, g);
+      }
+      return g;
+    }
+    grow(g, cap) {
+      let gl = this.gl;
+      for (let m of [g.hi, g.lo]) {
+        gl.deleteBuffer(m.ibuf), gl.bindVertexArray(m.vao), m.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, m.ibuf), gl.bufferData(gl.ARRAY_BUFFER, cap * IS3 * 4, gl.DYNAMIC_DRAW);
+        for (let a = 0; a < 2; a++)
+          gl.enableVertexAttribArray(3 + a), gl.vertexAttribPointer(3 + a, 4, gl.FLOAT, !1, IS3 * 4, a * 16), gl.vertexAttribDivisor(3 + a, 1);
+        gl.bindVertexArray(null);
+      }
+      let d = new Float32Array(cap * IS3);
+      d.set(g.data.subarray(0, g.n * IS3)), g.data = d, g.cap = cap;
     }
     mesh(m, cap) {
       let gl = this.gl, vao = gl.createVertexArray();
@@ -11768,7 +11909,9 @@ void main() {
       for (let i = 0; i < trees.length; i++) {
         let t = trees[i];
         if (!view.visible(t.x, t.y, t.z + 2, 6)) continue;
-        let g = this.groups.get(this.key(t)), sc = t.scale ?? 1, o = g.n * IS3, d = g.data, turn = (Math.floor(t.x * 7.3) * 73856093 ^ Math.floor(t.y * 5.1) * 19349663) % 628 / 100;
+        let g = this.group(this.key(t));
+        g.n >= g.cap && this.grow(g, g.cap * 2);
+        let sc = t.scale ?? 1, o = g.n * IS3, d = g.data, turn = (Math.floor(t.x * 7.3) * 73856093 ^ Math.floor(t.y * 5.1) * 19349663) % 628 / 100;
         d[o] = t.x, d[o + 1] = t.y, d[o + 2] = t.z, d[o + 3] = turn, d[o + 4] = sc, d[o + 5] = (rows[t.species] || rows.plane)[i % 2], d[o + 6] = 0, d[o + 7] = 0, g.n++;
       }
       let gl = this.gl;
@@ -11827,14 +11970,17 @@ void main() {
         beacon: pal.alloc({ [S.C1]: [16719904, 128] })
       }, this.xmasRow = pal.alloc(), treePalette(pal, "pine", 3, !0, 4863526, this.xmasRow), this.season = -1, this.snowy = null;
       let rng = new RNG(5);
-      this.lampDelay = world.lamps.map(() => rng.range(0, 0.6)), this.lampFlicker = world.lamps.map(() => rng.chance(0.04) ? rng.range(0.5, 2) : 0), this.frames = {};
+      this.rng2 = new RNG(777), this.lampDelay = world.lamps.map(() => rng.range(0, 0.6)), this.lampFlicker = world.lamps.map(() => rng.chance(0.04) ? rng.range(0.5, 2) : 0), this.frames = {};
       for (let n of ["dish", "antenna", "deckchair", "bush", "grill", "laundry", "statue", "xmas", "snowman", "glow", "lamp2", "lamp1", "beacon", "treeBundle", "cartUmbrella", "pedWalk", "pedHand", "tsqBall", "liberty", "lion", "goldStatue", "redLantern", "angel"]) this.frames[n] = atlas.get(n);
       this.frames.sherman = this.frames.statue, this.ballRows = [15922943, 6994175, 16739032, 16767055].map((c) => pal.alloc({ [S.C1]: c, [S.C2]: 16777215 })), this.umbRows = {
         hotdog: pal.alloc({ [S.C1]: 15909424, [S.C2]: 2052e3, [S.C3]: 10132899 }),
         halal: pal.alloc({ [S.C1]: 15921902, [S.C2]: 13119532, [S.C3]: 10132899 }),
         pretzel: pal.alloc({ [S.C1]: 15909424, [S.C2]: 3115590, [S.C3]: 10132899 })
       }, this.flagFrames = { us: [0, 1, 2, 3].map((f) => atlas.get("flag_us" + f)), hotel: [0, 1, 2, 3].map((f) => atlas.get("flag_hotel" + f)) }, this.treeSellers = [];
-      let ws = world.stoopSeats.length ? world.stoopSeats[Math.floor(world.stoopSeats.length * 0.6)] : null;
+    }
+    // once the city is built: christmas tree sellers along a brownstone block
+    wake() {
+      let world = this.city.world, ws = world.stoopSeats.length ? world.stoopSeats[Math.floor(world.stoopSeats.length * 0.6)] : null;
       ws && this.treeSellers.push({ x: ws.x + ws.n[0] * 2.4, y: ws.y + ws.n[1] * 2.4, n: ws.n });
     }
     updatePalettes(env) {
@@ -11914,7 +12060,10 @@ void main() {
     }
     // light-map contributions of static lamps
     lights(LL, env, time) {
-      let world = this.city.world, dark = env.darkness, shopsOpen = env.hour >= 7 && env.hour < 22.5;
+      let world = this.city.world;
+      for (; this.lampDelay.length < world.lamps.length; )
+        this.lampDelay.push(this.rng2.range(0, 0.6)), this.lampFlicker.push(this.rng2.chance(0.04) ? this.rng2.range(0.5, 2) : 0);
+      let dark = env.darkness, shopsOpen = env.hour >= 7 && env.hour < 22.5;
       for (let i = 0; i < world.lamps.length; i++) {
         let l = world.lamps[i];
         if (l.off) continue;
@@ -15845,14 +15994,19 @@ void main() {
   // src/sim/city.js
   var City = class {
     constructor(gl, renderer, world, env, camera) {
-      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(4096), this.statics = new Statics(this), this.coll = new Collision(world), this.carLayer = new CarLayer(gl, this), this.personLayer = new PersonLayer(gl, this), this.treeLayer = new TreeLayer(gl, this), this.decals = new DecalLayer(gl, this), this.traffic = new Traffic(this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
+      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(4096), this.statics = new Statics(this), this.carLayer = new CarLayer(gl, this), this.personLayer = new PersonLayer(gl, this), this.treeLayer = new TreeLayer(gl, this), this.decals = new DecalLayer(gl, this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
         shadow: (ctx) => {
           this.carLayer.shadow(ctx), this.personLayer.shadow(ctx), this.treeLayer.shadow(ctx), this.sprites.shadow(ctx);
         },
         draw: (ctx) => {
           this.decals.draw(ctx), this.carLayer.draw(ctx), this.personLayer.draw(ctx), this.treeLayer.draw(ctx), this.sprites.draw(ctx);
         }
-      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.vehicles = new Vehicles(this), this.addSystem(this.vehicles), this.poles = this.addSystem(new Poles(this)), this.addSystem({ update: (dt) => this.decals.update(dt) }), this.traffic.init(), this.people.init();
+      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.live = !1, this.player = { active: !1, hud: () => null, input: {} }, this.people = { list: [], pick: () => null, emit() {
+      } }, this.particles = {}, this.activities = null;
+    }
+    startLife() {
+      let world = this.world;
+      this.coll = new Collision(world), this.traffic = new Traffic(this), this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.vehicles = new Vehicles(this), this.addSystem(this.vehicles), this.poles = this.addSystem(new Poles(this)), this.addSystem({ update: (dt) => this.decals.update(dt) }), this.traffic.init(), this.people.init(), this.statics.wake(), this.live = !0;
     }
     // where the life of the city is concentrated: the player when playing, otherwise the camera
     focus() {
@@ -15867,8 +16021,10 @@ void main() {
       return this.systems.push(s), s;
     }
     update(dt) {
-      this.time += dt, this.traffic.update(dt);
-      for (let s of this.systems) s.update && s.update(dt);
+      if (this.time += dt, !!this.live) {
+        this.traffic.update(dt);
+        for (let s of this.systems) s.update && s.update(dt);
+      }
     }
     computeView(canvasW, canvasH) {
       let cam = this.camera, scale = cam.scale, bw = Math.ceil(canvasW / scale) + 4, bh = Math.ceil(canvasH / scale) + 4, t = cam.project(cam.x, cam.y, 0), v = this.view;
@@ -15883,9 +16039,9 @@ void main() {
       let view = this.computeView(canvasW, canvasH), env = this.env, L = this.sprites;
       L.begin(), this.personLayer.begin(), this.statics.emit(L, env, this.camera, this.time, view);
       for (let s of this.systems) s.emit && s.emit(L, view);
-      L.end(), this.personLayer.end(), this.treeLayer.prepare(view, this.statics.treeRows), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view), this.decals.prepare(view);
+      L.end(), this.personLayer.end(), this.treeLayer.prepare(view, this.statics.treeRows), this.carLayer.prepare(this.live ? this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars : [], this.time, env, view), this.decals.prepare(view);
       let LL = this.lightLayer;
-      LL.begin(), this.statics.lights(LL, env, this.time), this.carLayer.lights(LL, this.traffic.cars, env);
+      LL.begin(), this.statics.lights(LL, env, this.time), this.live && this.carLayer.lights(LL, this.traffic.cars, env);
       for (let s of this.systems) s.lights && s.lights(LL, env);
       LL.end();
     }
@@ -15935,21 +16091,8 @@ void main() {
         let o = this.h("option", null, w === "auto" ? "WEATHER: AUTO" : w.toUpperCase());
         o.value = w, this.wxSel.append(o);
       }
-      this.wxSel.addEventListener("change", () => this.app.env.setWeather(this.wxSel.value === "auto" ? null : this.wxSel.value)), this.wxSel.addEventListener("pointerdown", (e) => e.stopPropagation()), g3.append(this.wxSel);
-      let W = this.app.world, places = [["GO TO\u2026", null]];
-      W.park && places.push(["CENTRAL PARK", [W.park.cx, W.park.cy]]);
-      for (let [name, x, y] of W.parkSights || []) places.push([name, [x, y]]);
-      W.timesSquare && places.push(["TIMES SQUARE", W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
-      for (let l of W.landmarks || []) places.push([l.name, [l.x, l.y], l.rot]);
-      W.court && places.push(["BASKETBALL COURT", [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
-      let dept = W.shops.find((sh) => sh.kind === "dept");
-      dept && places.push(["DEPARTMENT STORE", [dept.x, dept.y]]);
-      let firehouse2 = W.firehouse;
-      firehouse2 && places.push(["FIREHOUSE", [firehouse2.x, firehouse2.y]]), this.placeSel = this.h("select", "sel"), places.forEach(([name], i) => {
-        let o = this.h("option", null, name);
-        o.value = String(i), this.placeSel.append(o);
-      }), this.placeSel.addEventListener("change", () => {
-        let pl = places[+this.placeSel.value];
+      this.wxSel.addEventListener("change", () => this.app.env.setWeather(this.wxSel.value === "auto" ? null : this.wxSel.value)), this.wxSel.addEventListener("pointerdown", (e) => e.stopPropagation()), g3.append(this.wxSel), this.placeSel = this.h("select", "sel"), this.fillPlaces(), this.placeSel.addEventListener("change", () => {
+        let pl = this.places[+this.placeSel.value];
         if (pl && pl[1]) {
           this.app.camera.follow && this.unfollow(), this.app.camera.vx = this.app.camera.vy = 0, this.app.camera.glide = { x: pl[1][0], y: pl[1][1] };
           let cam = this.app.camera, d = (((pl[2] ?? 0) - cam.rot) % 4 + 4) % 4;
@@ -16011,11 +16154,30 @@ void main() {
       let env = this.app.env;
       s == null ? (env.seasonOverride = null, this.toast("Seasons change every day")) : (env.setSeason(s), this.toast(`${SEASONS[s].icon} ${SEASONS[s].name}`)), this.app.city.activities?.seed();
     }
+    fillPlaces() {
+      let W = this.app.world, places = [["GO TO\u2026", null]];
+      W.park && places.push(["CENTRAL PARK", [W.park.cx, W.park.cy]]);
+      for (let [name, x, y] of W.parkSights || []) places.push([name, [x, y]]);
+      W.timesSquare && places.push(["TIMES SQUARE", W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
+      for (let l of W.landmarks || []) places.push([l.name, [l.x, l.y], l.rot]);
+      W.court && places.push(["BASKETBALL COURT", [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
+      let dept = W.shops.find((sh) => sh.kind === "dept");
+      dept && places.push(["DEPARTMENT STORE", [dept.x, dept.y]]);
+      let firehouse2 = W.firehouse;
+      firehouse2 && places.push(["FIREHOUSE", [firehouse2.x, firehouse2.y]]), this.places = places, this.placeSel.textContent = "", places.forEach(([name], i) => {
+        let o = this.h("option", null, name);
+        o.value = String(i), this.placeSel.append(o);
+      });
+    }
     rotate(d) {
       this.app.camera.rotate(d);
     }
     togglePlay() {
       let pl = this.app.city.player, app = this.app;
+      if (!app.ready) {
+        this.toast("Still building the city\u2026");
+        return;
+      }
       if (pl.active) {
         pl.stop(), this.playAsBtn.classList.remove("on"), this.hudEl.classList.add("hidden"), this.toast("Back to watching the city");
         return;
@@ -16539,7 +16701,7 @@ void main() {
     }
     // ---------------------------------------------------------------- per frame
     update(dt) {
-      if (!(!this.ctx || !this.enabled))
+      if (!(!this.ctx || !this.enabled || !this.app.ready))
         try {
           this.tick(dt);
         } catch (e) {
@@ -16699,6 +16861,16 @@ void main() {
   function nextFrame() {
     return new Promise((r) => requestAnimationFrame(() => r()));
   }
+  var yieldCh = new MessageChannel(), yieldQ = [];
+  yieldCh.port1.onmessage = () => {
+    let r = yieldQ.shift();
+    r && r();
+  };
+  function yieldTask() {
+    return new Promise((r) => {
+      yieldQ.push(r), yieldCh.port2.postMessage(0);
+    });
+  }
   async function boot() {
     let gl;
     try {
@@ -16708,33 +16880,45 @@ void main() {
       return;
     }
     setMsg("Pouring concrete\u2026"), await nextFrame();
-    let t0 = performance.now(), world = buildWorld(1977, (m) => setMsg(m));
-    setMsg("Waking up the city\u2026"), await nextFrame();
-    let renderer = new Renderer(gl);
-    renderer.setStatic(world.mesh, world.atlas, world.groundTiles);
+    let t0 = performance.now(), { world, builder: builder2 } = startWorld(1977, (m) => setMsg(m)), renderer = new Renderer(gl);
+    renderer.setStatic(world.mesh, world.atlas, world.groundTiles), world.mesh = null;
     let q = new URLSearchParams(location.search), env = new Environment(), camera = new Camera(), dpr = window.devicePixelRatio || 1;
-    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr)), [camera.x, camera.y] = world.park ? [world.park.cx - 10, world.park.cy - 10] : [414 / 2, 1791 / 2], q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.get("view") === "bird" && (camera.mode = "bird"), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
-    let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
-    app.audio = audio, city.audio = audio, env.onEvent((ev, d) => {
-      ev === "lightning" && audio.thunder(d.dist), ev === "season" && city.activities?.seed();
+    camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr));
+    {
+      let P = parkRect();
+      [camera.x, camera.y] = [(P.x0 + P.x1) / 2 - 10, (P.y0 + P.y1) / 2 - 10];
+    }
+    q.has("zoom") && (camera.scale = camera.scaleTo = parseFloat(q.get("zoom"))), q.has("x") && (camera.x = parseFloat(q.get("x"))), q.has("y") && (camera.y = parseFloat(q.get("y"))), q.has("rot") && (camera.rot = parseInt(q.get("rot"), 10), camera.angle = camera.rot * Math.PI / 2), q.get("view") === "bird" && (camera.mode = "bird"), q.has("hour") && (env.hour = parseFloat(q.get("hour"))), q.has("season") && env.setSeason(parseInt(q.get("season"), 10)), q.has("weather") && env.setWeather(q.get("weather")), q.has("pause") && (env.paused = !0), env.compute(0);
+    let still = q.has("still"), startT = performance.now();
+    for (; builder2.pendingNear(camera.x, camera.y, 70) && performance.now() - startT < 2e4; )
+      builder2.run(camera.x, camera.y, still ? 400 : 60), renderer.addBuilt(builder2.take()), setMsg(`Raising buildings\u2026 ${Math.round(builder2.progress * 100)}%`), await yieldTask();
+    let city = new City(gl, renderer, world, env, camera), app = { gl, world, renderer, env, camera, city, ready: !1, builder: builder2, time: 0, canvas, fps: 0 }, audio = new AudioEngine(app);
+    app.audio = audio, env.onEvent((ev, d) => {
+      ev === "lightning" && audio.thunder(d.dist), ev === "season" && app.city.activities?.seed();
     }), document.addEventListener("visibilitychange", () => {
       !audio.ctx || !audio.enabled || (document.hidden ? audio.ctx.suspend() : audio.ctx.resume());
     });
     let ui = new UI(app);
-    app.ui = ui, window.__city = app, console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms (${world.buildProfile}; blocks: ${world.blockProfile}), tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
+    app.ui = ui, window.__app = app, console.log(`first view in ${(performance.now() - t0).toFixed(0)}ms (${world.buildProfile})`);
+    let chip = document.createElement("div");
+    chip.id = "build-chip", chip.style.cssText = "position:fixed;left:50%;bottom:14px;transform:translateX(-50%);padding:6px 12px;border-radius:14px;background:rgba(20,24,34,.78);color:#f2efe6;font:600 12px/1 ui-monospace,monospace;letter-spacing:.06em;pointer-events:none;z-index:20", document.body.append(chip), (async () => {
+      for (; !builder2.finished; )
+        builder2.run(camera.x, camera.y, still ? 300 : app.fps >= 50 ? 18 : app.fps >= 30 ? 12 : 8), renderer.addBuilt(builder2.take()), chip.textContent = `BUILDING THE CITY ${Math.round(builder2.progress * 100)}%`, await yieldTask();
+      renderer.addBuilt(builder2.take()), renderer.doneBuilding(), chip.textContent = "WAKING UP THE CITY\u2026", await yieldTask(), city.startLife(), city.audio = audio, app.ready = !0, ui.fillPlaces?.(), chip.remove(), window.__city = app, console.log(`world built in ${(performance.now() - t0).toFixed(0)}ms (building ${builder2.ms.toFixed(0)}ms, ${builder2.done} jobs), tris=${renderer.stats.tris}, atlas pages=${world.atlas.pages.length}`);
+    })();
     let last = performance.now(), fpsAcc = 0, fpsN = 0;
     function resize() {
       let d = window.devicePixelRatio || 1, w = Math.round(canvas.clientWidth * d), h = Math.round(canvas.clientHeight * d);
       (canvas.width !== w || canvas.height !== h) && (canvas.width = w, canvas.height = h);
     }
-    let still = q.has("still"), frameErrors = /* @__PURE__ */ new Set();
+    let frameErrors = /* @__PURE__ */ new Set();
     function step(dt) {
-      app.time += dt, resize(), env.update(dt), ui.pan(dt), camera.update(dt), city.update(dt), city.prepare(canvas.width, canvas.height), renderer.render(camera, env.u, app.time, canvas.width, canvas.height), audio.update(dt), ui.update(dt);
+      app.time += dt, resize(), env.update(dt), ui.pan(dt), camera.update(dt), app.city.update(dt), app.city.prepare(canvas.width, canvas.height), renderer.render(camera, env.u, app.time, canvas.width, canvas.height), audio.update(dt), ui.update(dt);
     }
     app.simulate = (secs, dt = 0.05) => {
       let t = performance.now();
       for (let k = 0; k < secs / dt; k++)
-        app.time += dt, env.update(dt), camera.update(dt), city.update(dt);
+        app.time += dt, env.update(dt), camera.update(dt), app.city.update(dt);
       return performance.now() - t;
     }, app.renderOnce = (dt = 0.016) => {
       let t = performance.now();

@@ -1,6 +1,6 @@
 // Block-by-block city generation + street furniture.
 
-import { T, PERIOD, CURB, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, roadEnd, WATER_Z, NBX, NBY, MAPX, MAPY, legOpen, isManhattan } from './layout.js';
+import { T, PERIOD, CURB, BLOCK_TYPES, blockRect, roadCenter, lotStart, lotEnd, parkRect, blockInPark, isParkIntersection, MERGES, TSQ, roadEnd, WATER_Z, NBX, NBY, MAPX, MAPY, legOpen, isManhattan, mergeRect, BOROUGHS, ISLANDS, ELLIS, LIBERTY } from './layout.js';
 import { quayEdges } from './ground.js';
 import { RNG } from '../core/math.js';
 import { GC, COL } from './ground.js';
@@ -16,7 +16,7 @@ import { smoothFill, stoneFill, brickFill, PAL, drawWindow, drawDoor, signBoard,
 import * as LM from './landmarks.js';
 import * as MH from './manhattan.js';
 import { buildBridges } from './bridges.js';
-import { greaterNewYork } from './greater.js';
+import { GREATER } from './greater.js';
 import * as UP from './uptown.js';
 import * as SK from './skyline.js';
 import * as SG from './sights.js';
@@ -30,10 +30,10 @@ export function makeContext(world, mb, atlas, rng) {
     mb, atlas, rng, world, z0: CURB, ground: world.ground,
     paintGround(x0, y0, x1, y1, kind) {
       // (the ground painter may be half resolution: step over the texels it really has)
-      const st = gp.half ? 2 : 1;
+      const st = gp.step || 1;
       const X0 = Math.round(Math.min(x0, x1) * T), X1 = Math.round(Math.max(x0, x1) * T);
       const Y0 = Math.round(Math.min(y0, y1) * T), Y1 = Math.round(Math.max(y0, y1) * T);
-      const sx = gp.half ? X0 & ~1 : X0, sy = gp.half ? Y0 & ~1 : Y0;
+      const sx = X0 - (X0 % st), sy = Y0 - (Y0 % st);
       for (let y = sy; y < Y1; y += st)
         for (let x = sx; x < X1; x += st) {
           const r = groundFill(kind, x, y, X0, Y0, X1, Y1);
@@ -42,10 +42,10 @@ export function makeContext(world, mb, atlas, rng) {
     },
     // paint texels whose centre satisfies inside(wx, wy) within a bounding box
     paintWhere(x0, y0, x1, y1, inside, kind) {
-      const st = gp.half ? 2 : 1;
+      const st = gp.step || 1;
       const X0 = Math.floor(Math.min(x0, x1) * T), X1 = Math.ceil(Math.max(x0, x1) * T);
       const Y0 = Math.floor(Math.min(y0, y1) * T), Y1 = Math.ceil(Math.max(y0, y1) * T);
-      const sx = gp.half ? X0 & ~1 : X0, sy = gp.half ? Y0 & ~1 : Y0;
+      const sx = X0 - (X0 % st), sy = Y0 - (Y0 % st);
       for (let y = sy; y < Y1; y += st)
         for (let x = sx; x < X1; x += st) {
           if (!inside((x + st * 0.5) / T, (y + st * 0.5) / T)) continue;
@@ -290,38 +290,63 @@ function frames(L) {
 const VARIANTS = { brownstones: 6, walkups: 7, tenements: 6, redbrick: 7, shops: 6, commercial: 4, bodega: 4, lofts: 5, billboards: 2, firehouse: 2 };
 const typeSeed = (t) => { let h = 2166136261; for (const ch of t) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h >>> 0; };
 
-export function buildBlocks(C) {
-  const prof = {};
-  const time = (name, fn) => { const t = performance.now(); fn(); prof[name] = (prof[name] || 0) + performance.now() - t; };
-  const rng0 = C.rng;
+// The city is built as a list of jobs, each with a place, so the builder can do the ones nearest the
+// camera first, a few at a time between frames (see world/world.js). A job is { key, x, y, fn }.
+export function buildOneBlock(C, bx, by) {
+  const type = BLOCK_TYPES[by][bx];
+  const L = blockRect(bx, by);
+  const fn = BLOCKS[type];
+  if (!fn) return;
+  const nv = VARIANTS[type];
+  const variant = nv ? (bx * 7 + by * 13 + ((bx * by) % 5)) % nv : 0;
+  C.rng = new RNG(nv ? typeSeed(type) % 100000 + variant * 7919 : 4000 + bx * 97 + by * 31);
+  if (nv) C.atlas.beginReplay(`${type}:${variant}`);
+  try { fn(C, L, bx, by, variant); } finally { C.atlas.endReplay(); }
+}
+export function planBlocks(C) {
+  const jobs = [];
+  const job = (key, x, y, fn, o = {}) => jobs.push({ key, x, y, fn, ...o });
   for (let by = 0; by < NBY; by++)
     for (let bx = 0; bx < NBX; bx++) {
       if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
-      const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
-      const fn = BLOCKS[type];
-      if (!fn) continue;
-      const nv = VARIANTS[type];
-      const variant = nv ? (bx * 7 + by * 13 + ((bx * by) % 5)) % nv : 0;
-      C.rng = new RNG(nv ? typeSeed(type) % 100000 + variant * 7919 : 4000 + bx * 97 + by * 31);
-      if (nv) C.atlas.beginReplay(`${type}:${variant}`);
-      time(type, () => fn(C, L, bx, by, variant));
-      C.atlas.endReplay();
+      job(`b${bx},${by}`, (L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, () => {
+        buildOneBlock(C, bx, by);
+        C.rng = new RNG(5000 + bx * 131 + by * 17);
+        blockFurniture(C, bx, by);
+      });
     }
-  C.rng = rng0;
-  time('park', () => centralPark(C));
-  time('tsq', () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart));
-  time('waterfront', () => waterfront(C));
-  time('furniture', () => streetFurniture(C));
-  C.world.blockProfile = Object.entries(prof).map(([k, v]) => `${k} ${Math.round(v)}`).join(', ') + `, replayed ${C.atlas.replayed || 0}`;
+  // the signals, a street at a time
+  for (let j = 0; j <= NBY; j++) job(`sig${j}`, MAPX / 2, roadCenter(j), () => signalsAlong(C, j), { wide: true });
+  const PR = parkRect();
+  job('park', (PR.x0 + PR.x1) / 2, (PR.y0 + PR.y1) / 2, () => centralPark(C), { wide: true });
+  { const T2 = mergeRect(TSQ); job('tsq', (T2.x0 + T2.x1) / 2, (T2.y0 + T2.y1) / 2, () => timesSquareDistrict(C, TSQ, blockRect, lotEnd, lotStart)); }
+  for (const [k, e] of quayEdges().entries()) job(`quay${k}`, (e[0] + e[2]) / 2, (e[1] + e[3]) / 2, () => quay(C, e));
+  // (the bridges first, synchronously: what lies across the rivers is placed by them)
+  buildBridges(C);
+  LM.brooklynBridge(C);
+  for (const R of BOROUGHS.filter((b) => b.name === 'brooklyn')) job(`bkshore${R.y0}`, R.x0 + 10, (R.y0 + R.y1) / 2, () => LM.brooklynShore(C, R));
+  for (const [name, fn] of Object.entries(GREATER)) {
+    const R = BOROUGHS.find((b) => b.name === name) || ISLANDS.find((b) => b.name === name) || (name === 'ellis' ? ELLIS : null);
+    job(`g_${name}`, R ? (R.x0 + R.x1) / 2 : MAPX / 2, R ? (R.y0 + Math.min(R.y1, R.y0 + 80)) / 2 : MAPY / 2, () => fn(C), { wide: true });
+  }
+  job('liberty', LIBERTY.x, LIBERTY.y, () => LM.statueOfLiberty(C));
+  // what needs the rest built first: sandwich boards outside the shops, the park's sidewalks,
+  // subway stations, food carts
+  job('finish', MAPX / 2, MAPY / 2, () => streetFinish(C), { last: true });
+  return jobs;
 }
-
 
 // A block of the given type somewhere off Manhattan (the other boroughs): built with the same
 // builders and texture variants as Manhattan's own blocks, but nobody lives or shops there as far as
 // the simulation is concerned (its doors and shops are dropped; the boroughs aren't walked).
 export const blockOf = (type) => BLOCKS[type];
 export function offIslandBlock(C, L, type, bx, by, z0 = CURB) {
+  // (a job of its own, when the city is being built job by job)
+  if (C.defer) { C.defer(`o${type}${L.x0},${L.y0}`, (L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, () => offIslandBlockNow(C, L, type, bx, by, z0)); return; }
+  offIslandBlockNow(C, L, type, bx, by, z0);
+}
+function offIslandBlockNow(C, L, type, bx, by, z0) {
   const W = C.world, fn = BLOCKS[type];
   if (!fn) return;
   const keep = { doors: W.doors.length, shops: W.shops.length, stoopSeats: W.stoopSeats.length, officeDoors: W.officeDoors.length, benches: W.benches.length, carts: W.carts.length, subways: W.subways.length };
@@ -339,30 +364,21 @@ export function offIslandBlock(C, L, type, bx, by, z0 = CURB) {
 
 // The waterfront: the water is out of bounds, an iron railing runs along every quay, the Brooklyn
 // Bridge crosses the East River to Brooklyn's shore and the Statue of Liberty stands in the harbour
-function waterfront(C) {
-  const W = C.world, mb = C.mb;
-  const P = propTex(C);
+// an iron railing along one stretch of quay
+function quay(C, [ax, ay, bx, by, n]) {
+  const mb = C.mb, P = propTex(C);
   const iron = { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black };
-  for (const [ax, ay, bx, by, n] of quayEdges()) {
-    if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) continue;
-    // (just inside the land, along the edge)
-    const ox = -n[0] * 0.12, oy = -n[1] * 0.12;
-    const x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
-    if (n[0]) {
-      for (let y = y0 + 0.5; y < y1 - 0.3; y += 1.5) mb.box(x0 - 0.04, y - 0.04, CURB, x0 + 0.04, y + 0.04, CURB + 0.55, iron);
-      mb.box(x0 - 0.05, y0 + 0.3, CURB + 0.5, x0 + 0.05, y1 - 0.3, CURB + 0.58, iron);
-    } else {
-      for (let x = x0 + 0.5; x < x1 - 0.3; x += 1.5) mb.box(x - 0.04, y0 - 0.04, CURB, x + 0.04, y0 + 0.04, CURB + 0.55, iron);
-      mb.box(x0 + 0.3, y0 - 0.05, CURB + 0.5, x1 - 0.3, y0 + 0.05, CURB + 0.58, iron);
-    }
+  if (Math.abs(bx - ax) + Math.abs(by - ay) < 1.5) return;
+  // (just inside the land, along the edge)
+  const ox = -n[0] * 0.12, oy = -n[1] * 0.12;
+  const x0 = Math.min(ax, bx) + ox, x1 = Math.max(ax, bx) + ox, y0 = Math.min(ay, by) + oy, y1 = Math.max(ay, by) + oy;
+  if (n[0]) {
+    for (let y = y0 + 0.5; y < y1 - 0.3; y += 1.5) mb.box(x0 - 0.04, y - 0.04, CURB, x0 + 0.04, y + 0.04, CURB + 0.55, iron);
+    mb.box(x0 - 0.05, y0 + 0.3, CURB + 0.5, x0 + 0.05, y1 - 0.3, CURB + 0.58, iron);
+  } else {
+    for (let x = x0 + 0.5; x < x1 - 0.3; x += 1.5) mb.box(x - 0.04, y0 - 0.04, CURB, x + 0.04, y0 + 0.04, CURB + 0.55, iron);
+    mb.box(x0 + 0.3, y0 - 0.05, CURB + 0.5, x1 - 0.3, y0 + 0.05, CURB + 0.58, iron);
   }
-  const tm = (k, f) => { const t = performance.now(); f(); (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t); };
-  tm('bridges', () => buildBridges(C));
-  tm('bkbridge', () => LM.brooklynBridge(C));
-  tm('bkshore', () => LM.brooklynShore(C));
-  tm('greater', () => greaterNewYork(C));
-  LM.statueOfLiberty(C);
-  void WATER_Z; void roadEnd;
 }
 
 const BLOCKS = {
@@ -884,21 +900,21 @@ function ringWall(C, cx, cy, r, w, h) {
 // ---------------------------------------------------------------------------
 const NOSUBWAY = new Set(['riverside', 'grantstomb', 'soldiers', 'inwoodhill', 'cloisters', 'gwb', 'highbridge', 'bridge', 'qbridge', 'wbridge', 'mbridge', 'tbridge', 'battery', 'memorial']);
 // Street furniture along every sidewalk + signals at every intersection
-function streetFurniture(C) {
-  const { rng } = C;
-  const W = C.world;
-  // signals (none inside the park; T-junctions at its edge lose the heads facing the park)
-  for (let i = 0; i <= NBX; i++)
-    for (let j = 0; j <= NBY; j++) {
+// signals along street j (none inside the park; T-junctions at its edge lose the heads facing it)
+function signalsAlong(C, j) {
+  for (let i = 0; i <= NBX; i++) {
       if (isParkIntersection(i, j)) continue;
       const rx = roadCenter(i), ry = roadCenter(j);
       for (const sx of [-1, 1])
         for (const sy of [-1, 1]) signalPole(C, rx + sx * 2.85, ry + sy * 2.85, sx, sy, i, j, { closedX: !legOpen(i, j, sx, 0), closedY: !legOpen(i, j, 0, sy) });
-    }
-  // per block-side furniture
-  for (let by = 0; by < NBY; by++)
-    for (let bx = 0; bx < NBX; bx++) {
-      if (blockInPark(bx, by) || !isManhattan(bx, by)) continue;
+  }
+}
+// lamps, trees, hydrants and the rest along a block's four sides
+function blockFurniture(C, bx, by) {
+  const { rng } = C;
+  const W = C.world;
+  {
+    {
       const type = BLOCK_TYPES[by][bx];
       const L = blockRect(bx, by);
       const residential = ['brownstones', 'walkups', 'tenements', 'bodega', 'firehouse', 'commercial', 'lofts', 'redbrick', 'shops'].includes(type);
@@ -956,6 +972,11 @@ function streetFurniture(C) {
         if (rng.chance(0.42)) sidewalkGrate(C, s, at, used, rng);
       }
     }
+  }
+}
+function streetFinish(C) {
+  const { rng } = C;
+  const W = C.world;
   // sandwich boards outside some of the shopping streets' stores
   for (const sh of W.shops) {
     const bx = Math.floor((sh.x - 9) / PERIOD + 0.5), by = Math.floor((sh.y - 9) / PERIOD + 0.5);

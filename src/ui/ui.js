@@ -85,22 +85,11 @@ export class UI {
     this.wxSel.addEventListener('change', () => this.app.env.setWeather(this.wxSel.value === 'auto' ? null : this.wxSel.value));
     this.wxSel.addEventListener('pointerdown', (e) => e.stopPropagation());
     g3.append(this.wxSel);
-    // places to jump to in the bigger city
-    const W = this.app.world;
-    const places = [['GO TO…', null]];
-    if (W.park) places.push(['CENTRAL PARK', [W.park.cx, W.park.cy]]);
-    for (const [name, x, y] of W.parkSights || []) places.push([name, [x, y]]);
-    if (W.timesSquare) places.push(['TIMES SQUARE', W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
-    for (const l of W.landmarks || []) places.push([l.name, [l.x, l.y], l.rot]);
-    if (W.court) places.push(['BASKETBALL COURT', [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
-    const dept = W.shops.find((sh) => sh.kind === 'dept');
-    if (dept) places.push(['DEPARTMENT STORE', [dept.x, dept.y]]);
-    const firehouse = W.firehouse;
-    if (firehouse) places.push(['FIREHOUSE', [firehouse.x, firehouse.y]]);
+    // places to jump to in the bigger city (filled again once the whole city is built)
     this.placeSel = this.h('select', 'sel');
-    places.forEach(([name], i) => { const o = this.h('option', null, name); o.value = String(i); this.placeSel.append(o); });
+    this.fillPlaces();
     this.placeSel.addEventListener('change', () => {
-      const pl = places[+this.placeSel.value];
+      const pl = this.places[+this.placeSel.value];
       if (pl && pl[1]) {
         if (this.app.camera.follow) this.unfollow();
         this.app.camera.vx = this.app.camera.vy = 0;
@@ -191,9 +180,26 @@ export class UI {
     else { env.setSeason(s); this.toast(`${SEASONS[s].icon} ${SEASONS[s].name}`); }
     this.app.city.activities?.seed();
   }
+  fillPlaces() {
+    const W = this.app.world;
+    const places = [['GO TO…', null]];
+    if (W.park) places.push(['CENTRAL PARK', [W.park.cx, W.park.cy]]);
+    for (const [name, x, y] of W.parkSights || []) places.push([name, [x, y]]);
+    if (W.timesSquare) places.push(['TIMES SQUARE', W.timesSquare.view || [W.timesSquare.x, W.timesSquare.y + 4]]);
+    for (const l of W.landmarks || []) places.push([l.name, [l.x, l.y], l.rot]);
+    if (W.court) places.push(['BASKETBALL COURT', [(W.court.x0 + W.court.x1) / 2, (W.court.y0 + W.court.y1) / 2 + 3]]);
+    const dept = W.shops.find((sh) => sh.kind === 'dept');
+    if (dept) places.push(['DEPARTMENT STORE', [dept.x, dept.y]]);
+    const firehouse = W.firehouse;
+    if (firehouse) places.push(['FIREHOUSE', [firehouse.x, firehouse.y]]);
+    this.places = places;
+    this.placeSel.textContent = '';
+    places.forEach(([name], i) => { const o = this.h('option', null, name); o.value = String(i); this.placeSel.append(o); });
+  }
   rotate(d) { this.app.camera.rotate(d); }
   togglePlay() {
     const pl = this.app.city.player, app = this.app;
+    if (!app.ready) { this.toast('Still building the city…'); return; }
     if (pl.active) {
       pl.stop();
       this.playAsBtn.classList.remove('on');

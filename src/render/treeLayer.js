@@ -259,18 +259,36 @@ export class TreeLayer {
     this.city = city;
     this.prog = createProgram(gl, VS, FS, 'trees3d');
     this.shadowProg = createProgram(gl, SHADOW_VS, SHADOW_FS, 'trees3dShadow');
+    // a group per species and variant, made the first time a tree of it turns up (the city is
+    // built while it's being drawn), its instance buffers grown as more do
     this.groups = new Map();
-    const trees = city.world.trees;
-    // which trees each mesh draws
-    const counts = new Map();
-    for (const t of trees) { const k = this.key(t); counts.set(k, (counts.get(k) || 0) + 1); }
-    for (const [k, n] of counts) {
-      const [sp, v] = k.split(':');
-      this.groups.set(k, { hi: this.mesh(treeMesh(sp, +v, false), n), lo: this.mesh(treeMesh(sp, +v, true), n), data: new Float32Array(n * IS), n: 0 });
-    }
     this.lo = false;
   }
   key(t) { return `${SPECIES.includes(t.species) ? t.species : 'plane'}:${(t.variant || 0) % 3}`; }
+  group(k) {
+    let g = this.groups.get(k);
+    if (!g) {
+      const [sp, v] = k.split(':');
+      g = { hi: this.mesh(treeMesh(sp, +v, false), 64), lo: this.mesh(treeMesh(sp, +v, true), 64), data: new Float32Array(64 * IS), n: 0, cap: 64 };
+      this.groups.set(k, g);
+    }
+    return g;
+  }
+  grow(g, cap) {
+    const gl = this.gl;
+    for (const m of [g.hi, g.lo]) {
+      gl.deleteBuffer(m.ibuf);
+      gl.bindVertexArray(m.vao);
+      m.ibuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, m.ibuf);
+      gl.bufferData(gl.ARRAY_BUFFER, cap * IS * 4, gl.DYNAMIC_DRAW);
+      for (let a = 0; a < 2; a++) { gl.enableVertexAttribArray(3 + a); gl.vertexAttribPointer(3 + a, 4, gl.FLOAT, false, IS * 4, a * 16); gl.vertexAttribDivisor(3 + a, 1); }
+      gl.bindVertexArray(null);
+    }
+    const d = new Float32Array(cap * IS);
+    d.set(g.data.subarray(0, g.n * IS));
+    g.data = d; g.cap = cap;
+  }
   mesh(m, cap) {
     const gl = this.gl;
     const vao = gl.createVertexArray();
@@ -303,7 +321,8 @@ export class TreeLayer {
     for (let i = 0; i < trees.length; i++) {
       const t = trees[i];
       if (!view.visible(t.x, t.y, t.z + 2, 6)) continue;
-      const g = this.groups.get(this.key(t));
+      const g = this.group(this.key(t));
+      if (g.n >= g.cap) this.grow(g, g.cap * 2);
       const sc = t.scale ?? 1;
       const o = g.n * IS, d = g.data;
       // each tree turned its own way

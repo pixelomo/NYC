@@ -1,7 +1,7 @@
 // City layout constants. 1 world unit = 2 m = 16 texels/pixels. x = east, y = south, z = up.
 
 export const T = 32; // texels (pixels) per world unit (2x pixel density)
-export const GT = 16; // ground texture texels per world unit (half of T: the big city's ground has to fit a GPU texture)
+export const GT = 8; // ground texture texels per world unit (a quarter of T: the long city's ground has to fit in memory)
 export const K = T / 16; // scale factor for pixel-art sizes authored at 16 texels/unit
 export const NBX = 15; // block columns: New Jersey, the Hudson, Manhattan (up to 10 avenues wide), the East River, Queens and Brooklyn
 export const NBY = 66; // block rows: the Bronx at the top, Inwood to the Battery (60 rows), the harbour at the bottom

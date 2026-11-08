@@ -143,9 +143,14 @@ export function highLine(C, L, bx, by) {
     const base = net.nodes.length;
     net.nodes.push(...nodes); for (const [u, v] of edges) net.edges.push([base + u, base + v]);
     net.gates.push({ ...gate, node: base + gate.node });
-    let best = 0, bd = 1e9;
-    net.nodes.forEach((n, i) => { if (i >= base || n.z !== zd) return; const d = Math.hypot(n.x - nodes[0].x, n.y - nodes[0].y); if (d < bd) { bd = d; best = i; } });
-    if (bd < 4) net.edges.push([best, base]);
+    // (blocks are built in any order: join this deck's ends to whichever neighbours are already there)
+    const deck = nodes.filter((n) => n.z === zd);
+    for (const end of [0, deck.length - 1]) {
+      const e = nodes.indexOf(deck[end]);
+      let best = -1, bd = 1e9;
+      net.nodes.forEach((n, i) => { if (i >= base || n.z !== zd) return; const d = Math.hypot(n.x - nodes[e].x, n.y - nodes[e].y); if (d < bd) { bd = d; best = i; } });
+      if (best >= 0 && bd < 4) net.edges.push([best, base + e]);
+    }
     net.rect.y1 = Math.max(net.rect.y1, L.y1);
   } else {
     W.extraNets.push({ name: 'highline', rect: { x0: L.x0, y0: ya, x1: L.x1, y1: L.y1 }, nodes, edges, gates: [gate], sights: [Math.floor(nodes.length / 3)] });

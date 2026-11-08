@@ -153,7 +153,7 @@ export const plinthRects = () => rectsOf((c) => c === CL.RAISED || c === CL.BORO
 export const GTILE = 32; // units per tile
 export function makeGroundTiles() {
   const { W, H, cls } = landRaster();
-  const ntx = Math.ceil(MAPX / GTILE), nty = Math.ceil(MAPY / GTILE), size = GTILE * GT;
+  const ntx = Math.ceil(MAPX / GTILE), nty = Math.ceil(MAPY / GTILE), size = GTILE * GT, step = T / GT;
   const slots = new Int32Array(ntx * nty).fill(-1), data = [];
   for (let ty = 0; ty < nty; ty++)
     for (let tx = 0; tx < ntx; tx++) {
@@ -164,7 +164,7 @@ export function makeGroundTiles() {
       slots[ty * ntx + tx] = data.length;
       data.push(new Uint8Array(size * size * 4));
     }
-  return { ntx, nty, size, slots, data };
+  return { ntx, nty, size, slots, data, step, scale: GT / T, dirty: null };
 }
 export function makeGroundPainter(tiles) { return new TiledPainter(tiles, MAPX * T, MAPY * T); }
 
@@ -187,10 +187,10 @@ export function paintGround(region, rng) {
       if (slot < 0) continue;
       const d = tiles.data[slot];
       for (let Y = 0; Y < S; Y++) {
-        const y = (ty * S + Y) * 2, row = (y >> 6) * cellsX;
+        const y = (ty * S + Y) * tiles.step, row = (y >> 6) * cellsX;
         let i = Y * S * 4;
         for (let X = 0; X < S; X++, i += 4) {
-          const x = (tx * S + X) * 2;
+          const x = (tx * S + X) * tiles.step;
           let h = (Math.imul(x, 374761393) + Math.imul(y, 668265263) + 11) | 0;
           h = Math.imul(h ^ (h >>> 13), 1274126177);
           h ^= h >>> 16;
@@ -349,7 +349,7 @@ export function paintGround(region, rng) {
 }
 
 function markBand(p, x, y, w, h, code) {
-  const st = p.half ? 2 : 1;
+  const st = p.step || 1;
   for (let yy = y; yy < y + h; yy += st)
     for (let xx = x; xx < x + w; xx += st) {
       const a = p.getA(xx, yy);
@@ -394,17 +394,19 @@ function sidewalkTexel(gx, gy) {
 }
 function paintSidewalkRect(p, x, y, w, h, rng) {
   const S = 24; // slab size (0.75 units)
-  const st = p.half ? 2 : 1;
+  const st = p.step || 1;
   if (p.tiles) {
     // straight into the tiles (one ground texel per two art texels), from a precomputed patch of
     // paving 48 units square
     const t = p.tiles, sh = p.shift, m = p.mask, SW = sidewalkPatch(), PP = SWP;
-    for (let GY = Math.max(0, y >> 1); GY < (y + h) >> 1; GY++) {
+    // (the patch is in half-resolution texels: k of them per ground texel)
+    const fs = p.fs, k = p.step >> 1;
+    for (let GY = Math.max(0, y >> fs); GY < (y + h) >> fs; GY++) {
       const row = (GY >> sh) * t.ntx, base = (GY & m) << sh;
-      for (let GX = Math.max(0, x >> 1); GX < (x + w) >> 1; GX++) {
+      for (let GX = Math.max(0, x >> fs); GX < (x + w) >> fs; GX++) {
         const slot = t.slots[row + (GX >> sh)];
         if (slot < 0) continue;
-        const d = t.data[slot], i = (base + (GX & m)) * 4, c = SW[(GY % PP) * PP + (GX % PP)];
+        const d = t.data[slot], i = (base + (GX & m)) * 4, c = SW[((GY * k) % PP) * PP + ((GX * k) % PP)];
         d[i] = (c >> 16) & 255; d[i + 1] = (c >> 8) & 255; d[i + 2] = c & 255; d[i + 3] = GC.SIDEWALK;
       }
     }
@@ -457,7 +459,7 @@ function manhole(p, cx, cy, rng) {
 
 // Paint a rectangular lot area with a fill function f(x,y)->[color, code]
 export function paintLot(p, x0, y0, x1, y1, fn) {
-  const st = p.half ? 2 : 1;
+  const st = p.step || 1;
   for (let y = Math.round(y0 * T); y < Math.round(y1 * T); y += st)
     for (let x = Math.round(x0 * T); x < Math.round(x1 * T); x += st) {
       const r = fn(x, y);

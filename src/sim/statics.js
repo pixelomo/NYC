@@ -48,6 +48,7 @@ export class Statics {
     this.season = -1;
     this.snowy = null;
     const rng = new RNG(5);
+    this.rng2 = new RNG(777);
     this.lampDelay = world.lamps.map(() => rng.range(0, 0.6));
     this.lampFlicker = world.lamps.map(() => (rng.chance(0.04) ? rng.range(0.5, 2) : 0));
     this.frames = {};
@@ -62,6 +63,10 @@ export class Statics {
     this.flagFrames = { us: [0, 1, 2, 3].map((f) => atlas.get('flag_us' + f)), hotel: [0, 1, 2, 3].map((f) => atlas.get('flag_hotel' + f)) };
     // christmas tree sellers (winter) along a brownstone block
     this.treeSellers = [];
+  }
+  // once the city is built: christmas tree sellers along a brownstone block
+  wake() {
+    const world = this.city.world;
     const ws = world.stoopSeats.length ? world.stoopSeats[Math.floor(world.stoopSeats.length * 0.6)] : null;
     if (ws) this.treeSellers.push({ x: ws.x + ws.n[0] * 2.4, y: ws.y + ws.n[1] * 2.4, n: ws.n });
   }
@@ -177,6 +182,8 @@ export class Statics {
   // light-map contributions of static lamps
   lights(LL, env, time) {
     const world = this.city.world;
+    // (the city is still being built: lamps keep arriving)
+    while (this.lampDelay.length < world.lamps.length) { this.lampDelay.push(this.rng2.range(0, 0.6)); this.lampFlicker.push(this.rng2.chance(0.04) ? this.rng2.range(0.5, 2) : 0); }
     const dark = env.darkness;
     const shopsOpen = env.hour >= 7 && env.hour < 22.5;
     for (let i = 0; i < world.lamps.length; i++) {

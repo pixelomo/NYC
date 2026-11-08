@@ -787,8 +787,8 @@ export function brooklynBridge(C) {
 // Brooklyn's shore across the river: a granite promenade along the water with benches facing the
 // Manhattan skyline, lawns and trees, the carousel in its glass box by the bridge; brick warehouses
 // north of the bridge, brownstones south of it; a subway station for the walk home
-export function brooklynShore(C) {
-  for (const BK of BOROUGHS.filter((b) => b.name === 'brooklyn')) shore(C, BK);
+export function brooklynShore(C, R = null) {
+  for (const BK of BOROUGHS.filter((b) => b.name === 'brooklyn')) if (!R || BK === R) shore(C, BK);
 }
 function shore(C, BK) {
   const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);

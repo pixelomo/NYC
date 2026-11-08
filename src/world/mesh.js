@@ -29,6 +29,9 @@ export const GRP = {
   CONSTRUCTION: 15, GATE_OPEN: 16, GATE_CLOSED: 17, SUMMER_OR_SPRING: 18, WARM: 19,
 };
 
+// (one count across every mesh built, so faces in different chunks never share an offset)
+let QN = 0;
+
 function grow(arr, need) {
   if (need <= arr.length) return arr;
   let n = arr.length * 2;
@@ -96,7 +99,7 @@ export class MeshBuilder {
     if (!n) n = quadNormal(p0, p1, p3);
     // every quad sits off its plane by its own tiny amount (well under a pixel), so coplanar faces
     // (neighbouring roofs at one height, decals on walls) never fight pixel by pixel as the view scrolls
-    const k = (this.quadN = (this.quadN || 0) + 1), e = 0.0002 + (((k * 2654435761) >>> 0) % 37) * 0.00016;
+    const k = ++QN, e = 0.0002 + (((k * 2654435761) >>> 0) % 37) * 0.00016;
     const off = (p) => [p[0] + n[0] * e, p[1] + n[1] * e, p[2] + n[2] * e];
     p0 = off(p0); p1 = off(p1); p2 = off(p2); p3 = off(p3);
     this._ensure(4, 6);
@@ -123,7 +126,7 @@ export class MeshBuilder {
     // every box is grown by its own tiny amount (well under a pixel), so where two boxes' faces lie
     // in the same plane (roofs of neighbouring houses at one height, a sign flush with a wall) one of
     // them always wins, instead of the two fighting pixel by pixel as the view scrolls
-    const n = (this.boxN = (this.boxN || 0) + 1), e = 0.0003 + (((n * 2654435761) >>> 0) % 31) * 0.00019;
+    const n = ++QN, e = 0.0003 + (((n * 2654435761) >>> 0) % 31) * 0.00019;
     if (x1 > x0) { x0 -= e; x1 += e; } if (y1 > y0) { y0 -= e; y1 += e; } if (z1 > z0) z1 += e;
     const g = opt.group ?? this.defaultGroup;
     const seed = opt.seed ?? 0;
@@ -187,7 +190,7 @@ export class MeshBuilder {
     const n = [-uy, ux, 0];
     void nx; void ny;
     // (nudged off its plane by its own tiny amount, like boxes, so decals laid on one another don't fight)
-    const nn = opt.n || n, k = (this.boxN = (this.boxN || 0) + 1), e = 0.0003 + (((k * 2654435761) >>> 0) % 31) * 0.00019;
+    const nn = opt.n || n, k = ++QN, e = 0.0003 + (((k * 2654435761) >>> 0) % 31) * 0.00019;
     xa += nn[0] * e; xb += nn[0] * e; ya += nn[1] * e; yb += nn[1] * e;
     this.quad([xa, ya, z1], [xb, yb, z1], [xb, yb, z0], [xa, ya, z0],
       [[u0, v0], [u0 + len, v0], [u0 + len, v0 + H], [u0, v0 + H]], tex, opt.n || n, opt.mat ?? MAT.FLAT, opt.group ?? this.defaultGroup, opt.seed || 0);
@@ -196,7 +199,7 @@ export class MeshBuilder {
   // Horizontal quad (decal) at height z
   hquad(x0, y0, x1, y1, z, tex, opt = {}) {
     // (lifted by its own tiny amount, like boxes, so flat roofs at one height don't fight)
-    const n = (this.boxN = (this.boxN || 0) + 1);
+    const n = ++QN;
     z += 0.0003 + (((n * 2654435761) >>> 0) % 31) * 0.00019;
     const W = (x1 - x0) * T, D = (y1 - y0) * T;
     const u0 = opt.u0 ?? 0, v0 = opt.v0 ?? 0;

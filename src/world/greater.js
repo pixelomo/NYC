@@ -514,15 +514,6 @@ function ellis(C) {
   landmark(C, 'ELLIS ISLAND', (R.x0 + R.x1) / 2 + 8, R.y1 + 4, 0);
 }
 
-export function greaterNewYork(C) {
-  const tm = (k, f) => { const t = performance.now(); f(); (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t); };
-  tm('nj', () => newJersey(C));
-  tm('bronx', () => bronx(C));
-  tm('queens', () => queens(C));
-  tm('brooklyn', () => brooklyn(C));
-  tm('randalls', () => randalls(C));
-  tm('roosevelt', () => roosevelt(C));
-  tm('governors', () => governors(C));
-  tm('ellis', () => ellis(C));
-  void valueNoise; void RNG; void signBoard;
-}
+// each part of greater New York, built as a job of its own (its blocks are further jobs)
+export const GREATER = { nj: newJersey, bronx, queens, brooklyn, randalls, roosevelt, governors, ellis };
+export function greaterNewYork(C) { for (const fn of Object.values(GREATER)) fn(C); }
