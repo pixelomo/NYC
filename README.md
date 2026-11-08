@@ -20,6 +20,15 @@ npm install
 npm run build
 ```
 
+## Loading
+
+The city is built in the browser in sections, nearest the camera first: the view round the start
+(Central Park) appears in a few seconds, and the rest fills in a slice at a time between frames,
+following wherever you look (a counter shows how far it has got). You can pan, zoom, rotate and
+GO TO while it builds; the trees, lamps and street furniture appear with each section, and the
+people, traffic and animals start once the whole city is there. Textures go to the GPU as they are
+painted and their CPU copies are freed, so the page needs about a quarter of a gigabyte of memory.
+
 ## What's in the city
 
 ![All of Manhattan from above, with the bridges out to New Jersey, the Bronx, Queens and Brooklyn, the islands and the harbour](docs/city.png)

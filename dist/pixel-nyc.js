@@ -13226,7 +13226,7 @@ void main() {
     }
     // stop whatever someone was doing (activity, seat, crosswalk) before something happens to them
     detachPerson(p) {
-      p.actKind && this.city.activities?.leave(p), p.seat && (p.seat.b.used[p.seat.k] = !1, p.seat = null), p.stoopSeat && (p.stoopSeat.used = !1, p.stoopSeat = null), p.crossing && this.endCross(p), p.feeding = !1, p.dodge = null, p.forceFace = !1, p.animFrame = null, p.z < -0.05 && p.state !== "vanish" && (p.z = 0.125);
+      p.actKind && this.city.activities?.leave(p), p.seat && (p.seat.b.used[p.seat.k] = !1, p.seat = null), p.stoopSeat && (p.stoopSeat.used = !1, p.stoopSeat = null), p.crossing && this.endCross(p), p.feeding = !1, p.forceFace = !1, p.animFrame = null, (p.dodge || p.state === "dodge") && (p.dodge = null, p.state === "dodge" && (p.state = "idle", p.timer = 0.3)), p.z < -0.05 && p.state !== "vanish" && (p.z = 0.125);
     }
     // shot, or hit hard by a car: down for good, a pool of blood spreading underneath
     kill(p, dx = 0, dy = 0, cause = "shot") {
@@ -13364,6 +13364,10 @@ void main() {
           break;
         case "dodge": {
           let d = p.dodge, C = this.city.coll;
+          if (!d) {
+            p.state = "idle", p.timer = 0.3;
+            break;
+          }
           d.t -= dt;
           let nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
           (!C || C.free(nx, ny, 0.18)) && (p.x = nx, p.y = ny, p.dist += 3.4 * dt), p.dx = d.x, p.dy = d.y, p.anim = "run", p.animFrame = null, d.t <= 0 && (p.state = d.back === "flee" ? "flee" : d.back === "walk" && p.path ? "walk" : "idle", p.timer = 0.3, p.dodge = null);

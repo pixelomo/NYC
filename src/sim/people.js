@@ -500,7 +500,8 @@ export class People {
     if (p.seat) { p.seat.b.used[p.seat.k] = false; p.seat = null; }
     if (p.stoopSeat) { p.stoopSeat.used = false; p.stoopSeat = null; }
     if (p.crossing) this.endCross(p);
-    p.feeding = false; p.dodge = null; p.forceFace = false; p.animFrame = null;
+    p.feeding = false; p.forceFace = false; p.animFrame = null;
+    if (p.dodge || p.state === 'dodge') { p.dodge = null; if (p.state === 'dodge') { p.state = 'idle'; p.timer = 0.3; } }
     if (p.z < -0.05 && p.state !== 'vanish') p.z = CURB;
   }
   // shot, or hit hard by a car: down for good, a pool of blood spreading underneath
@@ -672,6 +673,7 @@ export class People {
       case 'dodge': {
         // diving out of the way of a car, then carrying on
         const d = p.dodge, C = this.city.coll;
+        if (!d) { p.state = 'idle'; p.timer = 0.3; break; }
         d.t -= dt;
         const nx = p.x + d.x * 3.4 * dt, ny = p.y + d.y * 3.4 * dt;
         if (!C || C.free(nx, ny, 0.18)) { p.x = nx; p.y = ny; p.dist += 3.4 * dt; }
