@@ -10955,36 +10955,66 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     "shirtSuit"
   ], F = Object.fromEntries(FEATS.map((n, i) => [n, i]));
   function buildMesh() {
-    let pos = [], nrm = [], info = [], idx = [], box = (x0, y0, z0, x1, y1, z1, slot, bone, feat = 255) => {
-      let v = (x, y, z) => [x, y, z], faces = [
-        [[1, 0, 0], [v(x1, y0, z0), v(x1, y1, z0), v(x1, y1, z1), v(x1, y0, z1)]],
-        [[-1, 0, 0], [v(x0, y1, z0), v(x0, y0, z0), v(x0, y0, z1), v(x0, y1, z1)]],
-        [[0, 1, 0], [v(x1, y1, z0), v(x0, y1, z0), v(x0, y1, z1), v(x1, y1, z1)]],
-        [[0, -1, 0], [v(x0, y0, z0), v(x1, y0, z0), v(x1, y0, z1), v(x0, y0, z1)]],
-        [[0, 0, 1], [v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1)]],
-        [[0, 0, -1], [v(x0, y1, z0), v(x1, y1, z0), v(x1, y0, z0), v(x0, y0, z0)]]
-      ];
-      for (let [n, q] of faces) {
-        let b = pos.length / 3;
-        for (let p of q)
-          pos.push(...p), nrm.push(...n), info.push(slot, bone, feat, 0);
-        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+    let pos = [], nrm = [], info = [], idx = [], vert = (p, n, slot, bone, feat) => (pos.push(...p), nrm.push(...n), info.push(slot, bone, feat, 0), pos.length / 3 - 1), norm = (v) => {
+      let l = Math.hypot(...v) || 1;
+      return v.map((x) => x / l);
+    }, rbox = (x0, y0, z0, x1, y1, z1, r, slot, bone, feat = 255, n = 2) => {
+      let c = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], h = [(x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2], inner = h.map((v) => Math.max(0, v - r)), faces = [[0, 1, 2], [0, 2, 1], [1, 2, 0], [1, 0, 2], [2, 0, 1], [2, 1, 0]];
+      for (let f = 0; f < 6; f++) {
+        let [ax, ua, va] = faces[f], sgn = f % 2 ? -1 : 1, base = [];
+        for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+          let u = -1 + 2 * i / n, v = -1 + 2 * j / n, q = [0, 0, 0];
+          q[ax] = sgn, q[ua] = u * (sgn > 0 ? 1 : -1), q[va] = v;
+          let p = q.map((t, k) => t * h[k]), cl = p.map((t, k) => Math.max(-inner[k], Math.min(inner[k], t))), d = p.map((t, k) => t - cl[k]), dl = Math.hypot(...d);
+          d = dl > 1e-6 ? d.map((t) => t / dl) : [ax === 0 ? sgn : 0, ax === 1 ? sgn : 0, ax === 2 ? sgn : 0];
+          let rr = Math.min(r, ...h);
+          base.push(vert([c[0] + cl[0] + d[0] * rr, c[1] + cl[1] + d[1] * rr, c[2] + cl[2] + d[2] * rr], d, slot, bone, feat));
+        }
+        for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+          let a = base[j * (n + 1) + i], b = base[j * (n + 1) + i + 1], cc = base[(j + 1) * (n + 1) + i + 1], dd = base[(j + 1) * (n + 1) + i];
+          idx.push(a, b, cc, a, cc, dd);
+        }
+      }
+    }, box = (x0, y0, z0, x1, y1, z1, slot, bone, feat = 255) => rbox(x0, y0, z0, x1, y1, z1, 0, slot, bone, feat, 1), tube = (cx, cy, za, zb, ra, rb, slot, bone, feat = 255, k = 8, sx = 1, caps = !0) => {
+      let ring = (z, r) => {
+        let out = [];
+        for (let j = 0; j < k; j++) {
+          let t = j / k * 2 * Math.PI, nn = norm([Math.cos(t) / sx, Math.sin(t), (ra - rb) / Math.max(0.01, zb - za) * 0.6]);
+          out.push(vert([cx + Math.cos(t) * r * sx, cy + Math.sin(t) * r, z], nn, slot, bone, feat));
+        }
+        return out;
+      }, A = ring(za, ra), Bv = ring(zb, rb);
+      for (let j = 0; j < k; j++) {
+        let j1 = (j + 1) % k;
+        idx.push(A[j], A[j1], Bv[j1], A[j], Bv[j1], Bv[j]);
+      }
+      if (caps) for (let [z, r, up] of [[za, ra, -1], [zb, rb, 1]]) {
+        if (r < 2e-3) continue;
+        let cI = vert([cx, cy, z], [0, 0, up], slot, bone, feat), rim = [];
+        for (let j = 0; j < k; j++) {
+          let t = j / k * 2 * Math.PI;
+          rim.push(vert([cx + Math.cos(t) * r * sx, cy + Math.sin(t) * r, z], [0, 0, up], slot, bone, feat));
+        }
+        for (let j = 0; j < k; j++) idx.push(cI, rim[j], rim[(j + 1) % k]);
       }
     }, sym = (fn) => {
       fn(1, 0), fn(-1, 1);
     };
     sym((s, r) => {
-      let y = J.hip[1] * s, w = 0.04, th = r ? B2.THIGH_R : B2.THIGH_L, sh = r ? B2.SHIN_R : B2.SHIN_L;
-      box(-0.05, y - 0.042, 0, 0.1, y + 0.042, 0.055, S.SHOES, sh), box(-w, y - w, 0.05, w, y + w, J.knee[2] + 0.01, S.BOTTOM, sh, F.shinCloth), box(-w + 4e-3, y - w + 4e-3, 0.05, w - 4e-3, y + w - 4e-3, J.knee[2] + 0.01, S.SKIN, sh, F.shinSkin), box(-0.046, y - 0.046, J.knee[2] - 0.01, 0.046, y + 0.046, J.hip[2] + 0.04, S.BOTTOM, th, F.thighCloth), box(-0.042, y - 0.042, J.knee[2] - 0.01, 0.042, y + 0.042, J.hip[2] + 0.02, S.SKIN, th, F.thighSkin);
-    }), box(-0.07, -0.12, 0.48, 0.07, 0.12, 0.6, S.BOTTOM, B2.PELVIS), box(-0.085, -0.13, 0.4, 0.085, 0.13, 0.6, S.BOTTOM, B2.PELVIS, F.skirt), box(-0.1, -0.145, 0.33, 0.1, 0.145, 0.43, S.BOTTOM, B2.PELVIS, F.skirt), box(-0.088, -0.135, 0.38, 0.088, 0.135, 0.62, S.TOP, B2.PELVIS, F.dress), box(-0.104, -0.15, 0.3, 0.104, 0.15, 0.4, S.TOP, B2.PELVIS, F.dress), box(-0.068, -0.115, 0.56, 0.068, 0.115, 0.72, S.TOP, B2.TORSO), box(-0.075, -0.135, 0.7, 0.075, 0.135, 0.88, S.TOP, B2.TORSO), box(-0.078, -0.138, 0.66, 0.078, 0.138, 0.69, S.TOP2, B2.TORSO, F.stripe), box(-0.078, -0.138, 0.76, 0.078, 0.138, 0.79, S.TOP2, B2.TORSO, F.stripe), box(0.074, -0.05, 0.72, 0.079, 0.05, 0.88, S.WHITE, B2.TORSO, F.shirtSuit), box(0.077, -0.016, 0.66, 0.084, 0.016, 0.86, S.TOP2, B2.TORSO, F.tie), box(0.075, 0.05, 0.78, 0.082, 0.09, 0.82, S.ITEM, B2.TORSO, F.badge), box(-0.083, -0.144, 0.55, 0.083, 0.144, 0.885, S.COAT, B2.TORSO, F.coat), box(-0.088, -0.15, 0.33, 0.088, 0.15, 0.58, S.COAT, B2.PELVIS, F.coatLong), box(-0.098, -0.16, 0.54, 0.098, 0.16, 0.89, S.COAT, B2.TORSO, F.puffer), box(-0.1, -0.162, 0.66, 0.1, 0.162, 0.68, S.DARK, B2.TORSO, F.puffer), box(-0.1, -0.162, 0.77, 0.1, 0.162, 0.79, S.DARK, B2.TORSO, F.puffer), box(-0.088, -0.11, 0.84, 0.088, 0.11, 0.92, S.SCARF, B2.TORSO, F.scarf), box(0.06, 0.03, 0.66, 0.095, 0.07, 0.86, S.SCARF, B2.TORSO, F.scarf), box(-0.16, -0.1, 0.6, -0.075, 0.1, 0.84, S.BAG, B2.TORSO, F.bagBack), box(-0.06, 0.13, 0.5, 0.05, 0.17, 0.62, S.BAG, B2.PELVIS, F.bagShoulder), box(-0.012, 0.13, 0.6, 0.012, 0.15, 0.88, S.BAG, B2.TORSO, F.bagShoulder), box(-0.035, -0.035, 0.86, 0.035, 0.035, 0.92, S.SKIN, B2.TORSO), box(-0.085, -0.08, 0.9, 0.085, 0.08, 1.1, S.SKIN, B2.HEAD), box(0.084, 0.02, 0.985, 0.09, 0.052, 1.015, S.DARK, B2.HEAD), box(0.084, -0.052, 0.985, 0.09, -0.02, 1.015, S.DARK, B2.HEAD), box(0.084, -0.02, 0.935, 0.088, 0.02, 0.945, S.DARK, B2.HEAD), box(0.087, -0.07, 0.98, 0.094, 0.07, 1, S.DARK, B2.HEAD, F.glasses);
-    let hair = (f) => box(-0.095, -0.09, 1.04, 0.075, 0.09, 1.13, S.HAIR, B2.HEAD, f), back = (f, z0 = 0.94) => box(-0.097, -0.09, z0, -0.05, 0.09, 1.1, S.HAIR, B2.HEAD, f);
+      let y = J.hip[1] * s, th = r ? B2.THIGH_R : B2.THIGH_L, sh = r ? B2.SHIN_R : B2.SHIN_L;
+      rbox(-0.05, y - 0.04, 0, 0.11, y + 0.04, 0.065, 0.025, S.SHOES, sh), box(-0.05, y - 0.041, 0, 0.11, y + 0.041, 0.012, S.DARK, sh), tube(0, y, 0.05, J.knee[2] + 0.02, 0.036, 0.043, S.BOTTOM, sh, F.shinCloth), tube(0, y, 0.05, J.knee[2] + 0.02, 0.03, 0.037, S.SKIN, sh, F.shinSkin), tube(0, y, 0.05, 0.075, 0.034, 0.034, S.SOCK, sh, F.shinSkin), tube(0, y, J.knee[2] - 0.02, J.hip[2] + 0.04, 0.045, 0.054, S.BOTTOM, th, F.thighCloth), tube(0, y, J.knee[2] - 0.02, J.hip[2] + 0.02, 0.038, 0.047, S.SKIN, th, F.thighSkin);
+    }), rbox(-0.07, -0.12, 0.47, 0.07, 0.12, 0.61, 0.04, S.BOTTOM, B2.PELVIS), box(-0.072, -0.118, 0.585, 0.072, 0.118, 0.605, S.DARK, B2.PELVIS, F.thighCloth), tube(0, 0, 0.36, 0.61, 0.15, 0.115, S.BOTTOM, B2.PELVIS, F.skirt, 12, 0.62), tube(0, 0, 0.3, 0.64, 0.16, 0.115, S.TOP, B2.PELVIS, F.dress, 12, 0.62), rbox(-0.068, -0.115, 0.55, 0.068, 0.115, 0.74, 0.045, S.TOP, B2.TORSO), rbox(-0.077, -0.138, 0.68, 0.077, 0.138, 0.895, 0.05, S.TOP, B2.TORSO), rbox(-0.08, -0.141, 0.655, 0.08, 0.141, 0.69, 0.02, S.TOP2, B2.TORSO, F.stripe), rbox(-0.08, -0.141, 0.755, 0.08, 0.141, 0.79, 0.02, S.TOP2, B2.TORSO, F.stripe), box(0.07, -0.045, 0.74, 0.081, 0.045, 0.885, S.WHITE, B2.TORSO, F.shirtSuit), box(0.078, -0.015, 0.66, 0.086, 0.015, 0.87, S.TOP2, B2.TORSO, F.tie), box(0.075, 0.05, 0.78, 0.084, 0.09, 0.82, S.ITEM, B2.TORSO, F.badge), rbox(-0.085, -0.146, 0.54, 0.085, 0.146, 0.9, 0.05, S.COAT, B2.TORSO, F.coat), box(0.085, -4e-3, 0.56, 0.088, 4e-3, 0.86, S.DARK, B2.TORSO, F.coat), tube(0, 0, 0.32, 0.6, 0.165, 0.14, S.COAT, B2.PELVIS, F.coatLong, 12, 0.6), rbox(-0.1, -0.163, 0.53, 0.1, 0.163, 0.9, 0.07, S.COAT, B2.TORSO, F.puffer), rbox(-0.102, -0.165, 0.655, 0.102, 0.165, 0.675, 0.01, S.DARK, B2.TORSO, F.puffer), rbox(-0.102, -0.165, 0.765, 0.102, 0.165, 0.785, 0.01, S.DARK, B2.TORSO, F.puffer), rbox(-0.09, -0.11, 0.84, 0.09, 0.11, 0.93, 0.04, S.SCARF, B2.TORSO, F.scarf), rbox(0.07, 0.03, 0.65, 0.1, 0.075, 0.87, 0.015, S.SCARF, B2.TORSO, F.scarf), rbox(-0.17, -0.1, 0.58, -0.075, 0.1, 0.85, 0.035, S.BAG, B2.TORSO, F.bagBack), box(-0.168, -0.06, 0.62, -0.165, 0.06, 0.7, S.DARK, B2.TORSO, F.bagBack), rbox(-0.065, 0.13, 0.48, 0.055, 0.175, 0.62, 0.02, S.BAG, B2.PELVIS, F.bagShoulder), box(-0.012, 0.13, 0.6, 0.012, 0.15, 0.89, S.BAG, B2.TORSO, F.bagShoulder), tube(0, 0, 0.86, 0.93, 0.034, 0.032, S.SKIN, B2.TORSO, 255, 6), rbox(-0.085, -0.08, 0.895, 0.085, 0.08, 1.11, 0.05, S.SKIN, B2.HEAD, 255, 3);
+    for (let s of [1, -1])
+      rbox(-0.02, s * 0.075 - 0.016, 0.97, 0.02, s * 0.075 + 0.016, 1.03, 0.012, S.SKIN, B2.HEAD), box(0.08, s * 0.036 - 0.014, 0.99, 0.088, s * 0.036 + 0.014, 1.018, S.WHITE, B2.HEAD), box(0.082, s * 0.036 - 8e-3, 0.99, 0.09, s * 0.036 + 0.01, 1.015, S.DARK, B2.HEAD), box(0.077, s * 0.038 - 0.022, 1.03, 0.088, s * 0.038 + 0.02, 1.042, S.HAIR, B2.HEAD);
+    rbox(0.07, -0.014, 0.955, 0.1, 0.014, 0.995, 0.01, S.SKIN, B2.HEAD), box(0.078, -0.022, 0.93, 0.087, 0.022, 0.94, S.DARK, B2.HEAD), box(0.087, -0.072, 0.985, 0.095, 0.072, 1, S.DARK, B2.HEAD, F.glasses);
+    let cap = (f) => rbox(-0.098, -0.091, 1, 0.078, 0.091, 1.135, 0.05, S.HAIR, B2.HEAD, f, 3), back = (f, z0 = 0.93) => rbox(-0.1, -0.09, z0, -0.03, 0.09, 1.1, 0.04, S.HAIR, B2.HEAD, f);
     for (let f of [F.hairShort, F.hairLong, F.hairPony, F.hairBun, F.hairSpiky])
-      hair(f), back(f);
-    back(F.hairLong, 0.76), box(-0.08, 0.08, 0.84, 0.03, 0.095, 1.08, S.HAIR, B2.HEAD, F.hairLong), box(-0.08, -0.095, 0.84, 0.03, -0.08, 1.08, S.HAIR, B2.HEAD, F.hairLong), box(-0.15, -0.03, 0.92, -0.09, 0.03, 1.07, S.HAIR, B2.HEAD, F.hairPony), box(-0.1, -0.045, 1.12, -0.02, 0.045, 1.19, S.HAIR, B2.HEAD, F.hairBun), box(-0.125, -0.125, 0.95, 0.07, 0.125, 1.21, S.HAIR, B2.HEAD, F.hairAfro);
-    for (let [x, y] of [[-0.06, -0.05], [0, 0.04], [0.04, -0.04], [-0.03, 0.06]]) box(x - 0.02, y - 0.02, 1.12, x + 0.02, y + 0.02, 1.18, S.HAIR, B2.HEAD, F.hairSpiky);
-    return box(-0.092, -0.09, 1.05, 0.08, 0.09, 1.14, S.HAT, B2.HEAD, F.cap), box(0.07, -0.07, 1.05, 0.17, 0.07, 1.07, S.HAT, B2.HEAD, F.cap), box(-0.14, -0.14, 1.07, 0.14, 0.14, 1.09, S.HAT, B2.HEAD, F.fedora), box(-0.085, -0.085, 1.09, 0.085, 0.085, 1.18, S.HAT, B2.HEAD, F.fedora), box(-0.083, -0.083, 1.09, 0.083, 0.083, 1.11, S.DARK, B2.HEAD, F.fedora), box(-0.096, -0.092, 1.02, 0.088, 0.092, 1.16, S.HAT, B2.HEAD, F.beanie), box(-0.04, -0.03, 1.16, 0.02, 0.03, 1.19, S.WHITE, B2.HEAD, F.beanie), box(-0.095, -0.092, 1.05, 0.085, 0.092, 1.15, S.HAT, B2.HEAD, F.police), box(-0.1, -0.1, 1.15, 0.1, 0.1, 1.18, S.HAT, B2.HEAD, F.police), box(0.07, -0.08, 1.05, 0.15, 0.08, 1.065, S.DARK, B2.HEAD, F.police), box(0.085, -0.02, 1.09, 0.1, 0.02, 1.13, S.ITEM, B2.HEAD, F.police), box(-0.1, -0.098, 0.93, 0.07, 0.098, 1.15, S.COAT, B2.HEAD, F.hood), box(-0.16, -0.16, 1.08, 0.16, 0.16, 1.1, S.HAT, B2.HEAD, F.witch), box(-0.075, -0.075, 1.1, 0.075, 0.075, 1.2, S.HAT, B2.HEAD, F.witch), box(-0.05, -0.05, 1.2, 0.05, 0.05, 1.28, S.HAT, B2.HEAD, F.witch), box(-0.025, -0.025, 1.28, 0.025, 0.025, 1.34, S.HAT, B2.HEAD, F.witch), box(-0.1, -0.1, 1, 0.095, 0.1, 1.17, S.HAT, B2.HEAD, F.helmet), sym((s, r) => {
-      let y = J.sh[1] * s, ua = r ? B2.UARM_R : B2.UARM_L, fa = r ? B2.FARM_R : B2.FARM_L, w = 0.036;
-      box(-w, y - w, J.el[2] - 0.01, w, y + w, J.sh[2] + 0.03, S.SKIN, ua, F.upperSkin), box(-w - 4e-3, y - w - 4e-3, J.el[2] - 0.01, w + 4e-3, y + w + 4e-3, J.sh[2] + 0.035, S.TOP, ua, F.upperTop), box(-w - 0.012, y - w - 0.012, J.el[2] - 0.015, w + 0.012, y + w + 0.012, J.sh[2] + 0.04, S.COAT, ua, F.upperCoat), box(-0.032, y - 0.032, 0.5, 0.032, y + 0.032, J.el[2] + 0.01, S.SKIN, fa, F.foreSkin), box(-0.036, y - 0.036, 0.5, 0.036, y + 0.036, J.el[2] + 0.01, S.TOP, fa, F.foreTop), box(-0.045, y - 0.045, 0.5, 0.045, y + 0.045, J.el[2] + 0.015, S.COAT, fa, F.foreCoat), box(-0.03, y - 0.03, 0.445, 0.035, y + 0.03, 0.505, S.SKIN, fa), r && (box(-0.07, y - 0.025, 0.3, 0.08, y + 0.025, 0.42, S.BAG, fa, F.bagBrief), box(-5e-3, y - 0.01, 0.42, 5e-3, y + 0.01, 0.46, S.DARK, fa, F.bagBrief), box(-0.06, y - 0.04, 0.28, 0.06, y + 0.04, 0.45, S.ITEM, fa, F.bagShop), box(0, y - 0.012, 0, 0.024, y + 0.012, 0.47, S.DARK, fa, F.cane));
+      cap(f), back(f);
+    back(F.hairLong, 0.74), rbox(-0.09, 0.07, 0.82, 0.035, 0.1, 1.1, 0.02, S.HAIR, B2.HEAD, F.hairLong), rbox(-0.09, -0.1, 0.82, 0.035, -0.07, 1.1, 0.02, S.HAIR, B2.HEAD, F.hairLong), rbox(0.03, -0.085, 1.07, 0.09, 0.06, 1.12, 0.02, S.HAIR, B2.HEAD, F.hairLong), tube(-0.13, 0, 0.86, 1.06, 0.02, 0.034, S.HAIR, B2.HEAD, F.hairPony, 6), rbox(-0.1, -0.045, 1.11, -0.02, 0.045, 1.19, 0.04, S.HAIR, B2.HEAD, F.hairBun, 2), rbox(-0.13, -0.13, 0.94, 0.075, 0.13, 1.22, 0.11, S.HAIR, B2.HEAD, F.hairAfro, 3);
+    for (let [x, y] of [[-0.06, -0.05], [0, 0.04], [0.04, -0.04], [-0.03, 0.06], [-0.07, 0.03]]) tube(x, y, 1.1, 1.19, 0.03, 0, S.HAIR, B2.HEAD, F.hairSpiky, 4);
+    return rbox(-0.094, -0.092, 1.04, 0.082, 0.092, 1.15, 0.05, S.HAT, B2.HEAD, F.cap, 3), rbox(0.06, -0.07, 1.045, 0.17, 0.07, 1.065, 0.01, S.HAT, B2.HEAD, F.cap), tube(0, 0, 1.07, 1.085, 0.15, 0.15, S.HAT, B2.HEAD, F.fedora, 12, 1.05), tube(-5e-3, 0, 1.085, 1.18, 0.09, 0.075, S.HAT, B2.HEAD, F.fedora, 10, 1.05), tube(-5e-3, 0, 1.085, 1.11, 0.092, 0.092, S.DARK, B2.HEAD, F.fedora, 10, 1.05, !1), rbox(-0.098, -0.094, 1, 0.09, 0.094, 1.17, 0.07, S.HAT, B2.HEAD, F.beanie, 3), rbox(-0.1, -0.096, 1, 0.092, 0.096, 1.04, 0.015, S.HAT, B2.HEAD, F.beanie), rbox(-0.035, -0.03, 1.15, 0.025, 0.03, 1.2, 0.03, S.WHITE, B2.HEAD, F.beanie), tube(0, 0, 1.04, 1.13, 0.092, 0.1, S.HAT, B2.HEAD, F.police, 10), tube(0, 0, 1.13, 1.17, 0.11, 0.11, S.HAT, B2.HEAD, F.police, 10), rbox(0.06, -0.08, 1.04, 0.15, 0.08, 1.06, 0.01, S.DARK, B2.HEAD, F.police), box(0.095, -0.02, 1.08, 0.11, 0.02, 1.12, S.ITEM, B2.HEAD, F.police), rbox(-0.11, -0.1, 0.9, 0.07, 0.1, 1.16, 0.07, S.COAT, B2.HEAD, F.hood, 3), tube(0, 0, 1.08, 1.1, 0.17, 0.17, S.HAT, B2.HEAD, F.witch, 12), tube(-0.01, 0, 1.1, 1.36, 0.085, 0, S.HAT, B2.HEAD, F.witch, 10), rbox(-0.105, -0.105, 0.98, 0.1, 0.105, 1.19, 0.09, S.HAT, B2.HEAD, F.helmet, 3), sym((s, r) => {
+      let y = J.sh[1] * s, ua = r ? B2.UARM_R : B2.UARM_L, fa = r ? B2.FARM_R : B2.FARM_L;
+      rbox(-0.04, y - 0.04, J.sh[2] - 0.04, 0.04, y + 0.04, J.sh[2] + 0.04, 0.04, S.SKIN, ua, F.upperSkin), tube(0, y, J.el[2] - 0.015, J.sh[2], 0.031, 0.036, S.SKIN, ua, F.upperSkin), rbox(-0.046, y - 0.046, J.sh[2] - 0.045, 0.046, y + 0.046, J.sh[2] + 0.045, 0.045, S.TOP, ua, F.upperTop), tube(0, y, J.el[2] - 0.015, J.sh[2], 0.035, 0.042, S.TOP, ua, F.upperTop), rbox(-0.055, y - 0.055, J.sh[2] - 0.05, 0.055, y + 0.055, J.sh[2] + 0.05, 0.05, S.COAT, ua, F.upperCoat), tube(0, y, J.el[2] - 0.02, J.sh[2], 0.044, 0.05, S.COAT, ua, F.upperCoat), tube(0, y, 0.5, J.el[2] + 0.015, 0.026, 0.031, S.SKIN, fa, F.foreSkin), tube(0, y, 0.5, J.el[2] + 0.015, 0.031, 0.036, S.TOP, fa, F.foreTop), tube(0, y, 0.5, J.el[2] + 0.02, 0.04, 0.045, S.COAT, fa, F.foreCoat), rbox(-0.026, y - 0.024, 0.43, 0.034, y + 0.024, 0.51, 0.02, S.SKIN, fa), r && (rbox(-0.075, y - 0.025, 0.29, 0.085, y + 0.025, 0.42, 0.012, S.BAG, fa, F.bagBrief), box(-0.02, y - 8e-3, 0.42, 0.02, y + 8e-3, 0.45, S.DARK, fa, F.bagBrief), rbox(-0.065, y - 0.045, 0.27, 0.065, y + 0.045, 0.43, 0.01, S.ITEM, fa, F.bagShop), box(-0.03, y - 4e-3, 0.43, 0.03, y + 4e-3, 0.47, S.DARK, fa, F.bagShop), tube(0.012, y, 0, 0.47, 0.011, 0.011, S.DARK, fa, F.cane, 5));
     }), { pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) };
   }
   var HEAD4 = `#version 300 es
@@ -11052,7 +11082,7 @@ vec3 place(vec3 lp, inout vec3 n) {
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
 out vec3 vWorld;
-flat out vec3 vNrm;
+out vec3 vNrm;
 flat out vec4 vB;
 flat out uint vSlot;
 void main() {
@@ -11069,7 +11099,7 @@ void main() {
   gl_Position = p;
 }`, FS4 = HEAD4 + `
 in vec3 vWorld;
-flat in vec3 vNrm;
+in vec3 vNrm;
 flat in vec4 vB;
 flat in uint vSlot;
 uniform sampler2D uPal;
@@ -11247,13 +11277,13 @@ void main() { o = vec4(1.0); }`;
   // src/render/treeLayer.js
   var IS3 = 8, SPECIES = ["plane", "locust", "oak", "elm", "cherry", "pine"], PI12 = Math.PI;
   function builder() {
-    let pos = [], nrm = [], info = [], idx = [], tri = (a, b, c, slot, leaf) => {
+    let pos = [], nrm = [], info = [], idx = [], cluster = 0, tri = (a, b, c, slot, leaf, ns = null) => {
       let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...n) || 1;
       n = n.map((x) => x / l);
       let base = pos.length / 3;
-      for (let p of [a, b, c])
-        pos.push(...p), nrm.push(...n), info.push(slot, leaf, 0, 0);
-      idx.push(base, base + 1, base + 2);
+      [a, b, c].forEach((p, i) => {
+        pos.push(...p), nrm.push(...ns ? ns[i] : n), info.push(slot, leaf, cluster & 255, 0);
+      }), idx.push(base, base + 1, base + 2);
     }, limb = (a, b, ra, rb, k = 6) => {
       let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...d) || 1, w = d.map((x) => x / L), u = Math.abs(w[2]) < 0.95 ? [w[1], -w[0], 0] : [1, 0, 0], ul = Math.hypot(...u);
       u = u.map((x) => x / ul);
@@ -11262,8 +11292,11 @@ void main() { o = vec4(1.0); }`;
         return [o[0] + u[0] * c + v[0] * s, o[1] + u[1] * c + v[1] * s, o[2] + u[2] * c + v[2] * s];
       };
       for (let j = 0; j < k; j++) {
-        let a0 = ring(a, ra, j), a1 = ring(a, ra, j + 1), b0 = ring(b, rb, j), b1 = ring(b, rb, j + 1);
-        tri(a0, b0, a1, S.TRUNK, 0), tri(a1, b0, b1, S.TRUNK, 0);
+        let a0 = ring(a, ra, j), a1 = ring(a, ra, j + 1), b0 = ring(b, rb, j), b1 = ring(b, rb, j + 1), nr = (p, o) => {
+          let d2 = [p[0] - o[0], p[1] - o[1], p[2] - o[2]], l = Math.hypot(...d2) || 1;
+          return d2.map((x) => x / l);
+        };
+        tri(a0, b0, a1, S.TRUNK, 0, [nr(a0, a), nr(b0, b), nr(a1, a)]), tri(a1, b0, b1, S.TRUNK, 0, [nr(a1, a), nr(b0, b), nr(b1, b)]);
       }
     }, ICO = (() => {
       let t = (1 + Math.sqrt(5)) / 2;
@@ -11271,19 +11304,38 @@ void main() { o = vec4(1.0); }`;
         let l = Math.hypot(...p);
         return p.map((x) => x / l);
       }), f: [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]] };
+    })(), SUB = (() => {
+      let v = ICO.v.map((p) => p.slice()), f = [], mid = /* @__PURE__ */ new Map(), m = (a, b) => {
+        let k = a < b ? a * 64 + b : b * 64 + a;
+        if (!mid.has(k)) {
+          let p = [(v[a][0] + v[b][0]) / 2, (v[a][1] + v[b][1]) / 2, (v[a][2] + v[b][2]) / 2], l = Math.hypot(...p);
+          v.push(p.map((x) => x / l)), mid.set(k, v.length - 1);
+        }
+        return mid.get(k);
+      };
+      for (let [a, b, c] of ICO.f) {
+        let ab = m(a, b), bc = m(b, c), ca = m(c, a);
+        f.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]);
+      }
+      return { v, f };
     })();
-    return { limb, blob: (c, rx, rz, rng) => {
-      let vs = ICO.v.map((p) => {
-        let j = 0.82 + rng.next() * 0.3;
+    return { limb, blob: (c, rx, rz, rng, lo) => {
+      cluster++;
+      let S2 = lo ? ICO : SUB, js = S2.v.map(() => 0.84 + rng.next() * 0.26), vs = S2.v.map((p, i) => {
+        let j = js[i] * (p[2] < -0.3 ? 0.85 : 1);
         return [c[0] + p[0] * rx * j, c[1] + p[1] * rx * j, c[2] + p[2] * rz * j];
+      }), ns = S2.v.map((p) => {
+        let n = [p[0] / rx, p[1] / rx, p[2] / rz], l = Math.hypot(...n);
+        return n.map((x) => x / l);
       });
-      for (let [a, b, d] of ICO.f) tri(vs[a], vs[d], vs[b], S.LEAF_M, 1);
+      for (let [a, b, d] of S2.f) tri(vs[a], vs[d], vs[b], S.LEAF_M, 1, [ns[a], ns[d], ns[b]]);
     }, cone: (c, r, z0, z1, k, rng) => {
       let top = [c[0], c[1], z1], rim = [];
       for (let j = 0; j < k; j++) {
         let t = j / k * 2 * PI12 + rng.next() * 0.2, rr = r * (0.85 + rng.next() * 0.25);
         rim.push([c[0] + Math.cos(t) * rr, c[1] + Math.sin(t) * rr, z0 + (rng.next() - 0.5) * 0.08]);
       }
+      cluster++;
       for (let j = 0; j < k; j++) {
         let a = rim[j], b = rim[(j + 1) % k];
         tri(a, top, b, S.LEAF_M, 1), tri(b, [c[0], c[1], z0 + 0.12], a, S.LEAF_D, 1);
@@ -11291,37 +11343,39 @@ void main() { o = vec4(1.0); }`;
     }, done: () => ({ pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) }) };
   }
   var SHAPE = {
-    plane: { trunk: 1.25, cx: 1.25, cz: 1.05, cy: 2.35, blobs: 8, br: 0.5, rt: 0.13 },
-    locust: { trunk: 1.35, cx: 1.05, cz: 0.95, cy: 2.3, blobs: 11, br: 0.36, rt: 0.1, airy: !0 },
-    oak: { trunk: 1.1, cx: 1.4, cz: 1.05, cy: 2.2, blobs: 9, br: 0.55, rt: 0.15 },
-    elm: { trunk: 1.5, cx: 1.75, cz: 1.15, cy: 3.15, blobs: 11, br: 0.58, rt: 0.15, vase: !0 },
-    cherry: { trunk: 0.85, cx: 1.2, cz: 0.75, cy: 1.65, blobs: 8, br: 0.45, rt: 0.1 }
+    plane: { trunk: 1.25, cx: 1.25, cz: 1.05, cy: 2.35, blobs: 14, br: 0.5, rt: 0.13 },
+    locust: { trunk: 1.35, cx: 1.05, cz: 0.95, cy: 2.3, blobs: 18, br: 0.36, rt: 0.1, airy: !0 },
+    oak: { trunk: 1.1, cx: 1.4, cz: 1.05, cy: 2.2, blobs: 16, br: 0.55, rt: 0.15 },
+    elm: { trunk: 1.5, cx: 1.75, cz: 1.15, cy: 3.15, blobs: 18, br: 0.58, rt: 0.15, vase: !0 },
+    cherry: { trunk: 0.85, cx: 1.2, cz: 0.75, cy: 1.65, blobs: 13, br: 0.45, rt: 0.1 }
   };
   function treeMesh(sp, variant, lo) {
     let rng = new RNG(5e3 + variant * 131 + sp.length * 17), M = builder();
     if (sp === "pine") {
       let h = 3.2 + rng.next() * 0.4;
       M.limb([0, 0, 0], [0, 0, 0.9], 0.11, 0.08, 6);
-      let tiers = lo ? 2 : 4;
+      let tiers = lo ? 2 : 6;
       for (let k = 0; k < tiers; k++) {
         let t = k / tiers, z0 = 0.45 + t * (h - 1.1), r = 1 * (1 - t * 0.72);
-        M.cone([0, 0], r, z0, z0 + (h - 0.45) / tiers + 0.55, lo ? 6 : 8, rng);
+        M.cone([0, 0], r, z0, z0 + (h - 0.45) / tiers + 0.5, lo ? 6 : 10, rng);
       }
       return M.done();
     }
     let s = SHAPE[sp], top = [0, 0, s.trunk + 0.15];
-    M.limb([0, 0, 0], top, s.rt * 1.25, s.rt * 0.85, lo ? 5 : 7);
+    M.limb([0, 0, 0], top, s.rt * 1.25, s.rt * 0.85, lo ? 5 : 8), lo || M.limb([0, 0, 0], [0, 0, 0.18], s.rt * 1.9, s.rt * 1.2, 8);
     let n = lo ? 3 : s.blobs, centers = [];
     for (let i = 0; i < n; i++) {
       let a = i / n * 2 * PI12 + rng.next() * 0.6, up = i === 0 ? 1 : rng.next(), rr = i === 0 ? 0 : (s.vase ? 0.62 : 0.52) + rng.next() * 0.3, c = [Math.cos(a) * s.cx * rr, Math.sin(a) * s.cx * rr, s.cy + (up - 0.4) * s.cz * (i === 0 ? 0.55 : 0.8) - (s.vase ? 0 : rr * 0.2)];
       centers.push(c);
-      let r = (s.airy ? 0.45 : 0.6) * (lo ? 1.6 : 1) * (0.85 + rng.next() * 0.35) * (s.cx / 1.25) ** 0.6;
-      M.blob(c, r, r * 0.82, rng);
+      let r = (s.airy ? 0.38 : 0.5) * (lo ? 1.9 : 1) * (0.8 + rng.next() * 0.4) * (s.cx / 1.25) ** 0.6;
+      M.blob(c, r, r * 0.8, rng, lo);
     }
     if (!lo) {
       for (let c of centers.slice(1)) {
         let mid = [c[0] * 0.55, c[1] * 0.55, top[2] + (c[2] - top[2]) * 0.55];
         M.limb(top, mid, s.rt * 0.6, s.rt * 0.4, 4), M.limb(mid, [c[0] * 0.92, c[1] * 0.92, c[2] - 0.1], s.rt * 0.4, s.rt * 0.18, 4);
+        let tw = [c[0] * 0.8 + (rng.next() - 0.5) * 0.5, c[1] * 0.8 + (rng.next() - 0.5) * 0.5, c[2] + 0.15];
+        M.limb(mid, tw, s.rt * 0.25, s.rt * 0.08, 3);
       }
       M.limb(top, [0, 0, s.cy + 0.25], s.rt * 0.7, s.rt * 0.25, 4);
     }
@@ -11343,12 +11397,12 @@ uniform mat4 uViewProj;
 uniform vec2 uBuf;
 out vec3 vWorld;
 out vec3 vLocal;
-flat out vec3 vNrm;
-flat out uvec2 vInfo;
+out vec3 vNrm;
+flat out uvec3 vInfo;
 flat out float vRow;
 void main() {
   vec3 wp = iA.xyz + turn(aPos) * iB.x;
-  vWorld = wp; vLocal = aPos * iB.x; vNrm = turn(aNrm); vInfo = aInfo.xy; vRow = iB.y;
+  vWorld = wp; vLocal = aPos * iB.x; vNrm = turn(aNrm); vInfo = aInfo.xyz; vRow = iB.y + 0.0 * iA.w;
   vec4 cc = uViewProj * vec4(iA.xyz, 1.0);
   vec2 px = (cc.xy * 0.5 + 0.5) * uBuf;
   vec2 snap = (floor(px + 0.5) - px) / uBuf * 2.0;
@@ -11358,8 +11412,8 @@ void main() {
 }`, FS5 = HEAD5 + `
 in vec3 vWorld;
 in vec3 vLocal;
-flat in vec3 vNrm;
-flat in uvec2 vInfo;
+in vec3 vNrm;
+flat in uvec3 vInfo;
 flat in float vRow;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
@@ -11373,6 +11427,7 @@ uniform vec3 uSunDir, uSunCol, uAmb, uFace;
 uniform vec2 uRot;
 uniform vec4 uCloud;
 uniform float uFlash;
+uniform vec3 uViewDir;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oGlow;
 float bayer4(vec2 p) {
@@ -11395,14 +11450,19 @@ void main() {
   if (vInfo.y == 1u) {
     // foliage: chunky speckles of light, mid and dark leaves, lighter on top; gone in winter
     if (pal(${S.LEAF_M}u).a < 0.1) discard;
-    vec3 q = floor(vWorld * 14.0);
-    float h = hash13(q), h2 = hash13(q + 17.0);
-    float v = h * 0.7 + n.z * 0.4 + 0.12;
-    // holes at the crown's edge, so it reads as leaves rather than a solid shell
-    if (h2 > 0.93 && n.z < 0.6) discard;
-    albedo = (v > 0.66 ? pal(${S.LEAF_L}u) : v > 0.28 ? pal(${S.LEAF_M}u) : pal(${S.LEAF_D}u)).rgb;
+    // leaves: little cells, each tilted its own way, so the light breaks up into leafy speckles
+    vec3 q = floor(vWorld * 16.0);
+    float h = hash13(q), h2 = hash13(q + 17.0), h3 = hash13(q + 41.0);
+    n = normalize(n + (vec3(h, h2, h3) - 0.5) * 0.9);
+    // a ragged silhouette: leaf cells drop out where the crown turns away from view
+    float rim = 1.0 - abs(dot(normalize(vNrm), uViewDir));
+    if (h3 < rim * 0.55 - 0.12) discard;
+    float lit = dot(n, uSunDir) * 0.5 + 0.5;
+    float v = lit * 0.62 + vNrm.z * 0.18 + (h - 0.5) * 0.5 + (float(vInfo.z % 5u) - 2.0) * 0.05;
+    albedo = (v > 0.68 ? pal(${S.LEAF_L}u) : v > 0.36 ? pal(${S.LEAF_M}u) : pal(${S.LEAF_D}u)).rgb;
+    albedo *= 0.94 + float(vInfo.z % 3u) * 0.05;
     vec4 bl = pal(${S.BLOSSOM}u);
-    if (h2 > 0.84 && h2 <= 0.93 && bl.a > 0.1) albedo = bl.rgb;
+    if (h2 > 0.86 && bl.a > 0.1 && bl.rgb != pal(${S.LEAF_L}u).rgb) albedo = bl.rgb;
   } else {
     // bark, with snow (or the light top colour) on whatever faces up
     float h = hash13(floor(vLocal * vec3(18.0, 18.0, 6.0)));
@@ -11418,11 +11478,11 @@ void main() {
     if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
   } else if (ndl <= 0.0) sh = 0.0;
   // leaves let light through and scatter it: the crown is never dark on its shaded side
-  if (vInfo.y == 1u) { ndl = ndl * 0.55 + 0.45; sh = sh * 0.6 + 0.4; }
+  if (vInfo.y == 1u) { ndl = ndl * 0.7 + 0.25; sh = sh * 0.75 + 0.25; }
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
   vec3 lm = texture(uLightMap, vWorld.xy / vec2(${419 .toFixed(1)}, ${986 .toFixed(1)})).rgb * clamp(1.0 - (vWorld.z - 0.3) / 6.0, 0.0, 1.0);
-  vec3 light = uAmb * faceShade(n) * (vInfo.y == 1u ? 1.2 : 1.0) + uSunCol * max(ndl, 0.0) * sh * cl + lm * 0.8 + vec3(uFlash);
+  vec3 light = uAmb * faceShade(n) * (vInfo.y == 1u ? 1.05 : 1.0) + uSunCol * max(ndl, 0.0) * sh * cl + lm * 0.8 + vec3(uFlash);
   oColor = vec4(albedo * light, 1.0);
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
 }`, SHADOW_VS5 = HEAD5 + PLACE + `
@@ -11508,7 +11568,7 @@ void main() {
     }
     draw(ctx) {
       let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
-      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), this.each(() => {
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.uniform3fv(u.uViewDir, ctx.camera.viewDir()), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), this.each(() => {
       });
     }
   };
@@ -13851,7 +13911,7 @@ void main() {
           let t = k / n, x = hx - b.ux * tail * t, y = hy - b.uy * tail * t, z = hz - b.uz * tail * t;
           this.add({ x, y, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.09 * (1 - t) + 0.03, max: 0.12, f: t < 0.5 ? this.fr.dot2 : this.fr.dot, row: this.rows.tracer, kind: "spark" });
         }
-        this.flashes.push({ x: hx, y: hy, k: 0.5, color: [1, 0.85, 0.5], r: 1.3, decay: 30 }), b.x = hx, b.y = hy, b.z = hz, b.left -= step, b.left <= 1e-3 && this.bullets.splice(i, 1);
+        this.flashes.push({ x: hx, y: hy, k: 0.5, color: [1, 0.85, 0.5], r: 1.3, decay: 30 }), b.x = hx, b.y = hy, b.z = hz, b.left -= step, b.age = (b.age || 0) + dt, (b.left <= 1e-3 || b.age > 1) && this.bullets.splice(i, 1);
       }
     }
     shell(x, y, z, dx, dy) {

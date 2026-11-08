@@ -29,109 +29,144 @@ const F = Object.fromEntries(FEATS.map((n, i) => [n, i]));
 
 function buildMesh() {
   const pos = [], nrm = [], info = [], idx = [];
-  // an axis-aligned box on a bone, its colour slot, shown by a feature (or always)
-  const box = (x0, y0, z0, x1, y1, z1, slot, bone, feat = 255) => {
-    const v = (x, y, z) => [x, y, z];
-    const faces = [
-      [[1, 0, 0], [v(x1, y0, z0), v(x1, y1, z0), v(x1, y1, z1), v(x1, y0, z1)]],
-      [[-1, 0, 0], [v(x0, y1, z0), v(x0, y0, z0), v(x0, y0, z1), v(x0, y1, z1)]],
-      [[0, 1, 0], [v(x1, y1, z0), v(x0, y1, z0), v(x0, y1, z1), v(x1, y1, z1)]],
-      [[0, -1, 0], [v(x0, y0, z0), v(x1, y0, z0), v(x1, y0, z1), v(x0, y0, z1)]],
-      [[0, 0, 1], [v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1)]],
-      [[0, 0, -1], [v(x0, y1, z0), v(x1, y1, z0), v(x1, y0, z0), v(x0, y0, z0)]],
-    ];
-    for (const [n, q] of faces) {
-      const b = pos.length / 3;
-      for (const p of q) { pos.push(...p); nrm.push(...n); info.push(slot, bone, feat, 0); }
-      idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+  const vert = (p, n, slot, bone, feat) => { pos.push(...p); nrm.push(...n); info.push(slot, bone, feat, 0); return pos.length / 3 - 1; };
+  const norm = (v) => { const l = Math.hypot(...v) || 1; return v.map((x) => x / l); };
+  // a rounded box: a subdivided cube pulled onto a box with rounded edges of radius r (smooth normals)
+  const rbox = (x0, y0, z0, x1, y1, z1, r, slot, bone, feat = 255, n = 2) => {
+    const c = [(x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2], h = [(x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2];
+    const inner = h.map((v) => Math.max(0, v - r));
+    const faces = [[0, 1, 2], [0, 2, 1], [1, 2, 0], [1, 0, 2], [2, 0, 1], [2, 1, 0]];
+    for (let f = 0; f < 6; f++) {
+      const [ax, ua, va] = faces[f], sgn = f % 2 ? -1 : 1;
+      const base = [];
+      for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) {
+        const u = -1 + (2 * i) / n, v = -1 + (2 * j) / n;
+        const q = [0, 0, 0]; q[ax] = sgn; q[ua] = u * (sgn > 0 ? 1 : -1); q[va] = v;
+        const p = q.map((t, k) => t * h[k]);
+        const cl = p.map((t, k) => Math.max(-inner[k], Math.min(inner[k], t)));
+        let d = p.map((t, k) => t - cl[k]);
+        const dl = Math.hypot(...d);
+        d = dl > 1e-6 ? d.map((t) => t / dl) : [ax === 0 ? sgn : 0, ax === 1 ? sgn : 0, ax === 2 ? sgn : 0];
+        const rr = Math.min(r, ...h);
+        base.push(vert([c[0] + cl[0] + d[0] * rr, c[1] + cl[1] + d[1] * rr, c[2] + cl[2] + d[2] * rr], d, slot, bone, feat));
+      }
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+        const a = base[j * (n + 1) + i], b = base[j * (n + 1) + i + 1], cc = base[(j + 1) * (n + 1) + i + 1], dd = base[(j + 1) * (n + 1) + i];
+        idx.push(a, b, cc, a, cc, dd);
+      }
+    }
+  };
+  const box = (x0, y0, z0, x1, y1, z1, slot, bone, feat = 255) => rbox(x0, y0, z0, x1, y1, z1, 0, slot, bone, feat, 1);
+  // a tapered tube along z (limbs, skirts, hat crowns), elliptical (sx scales x), capped, k sides
+  const tube = (cx, cy, za, zb, ra, rb, slot, bone, feat = 255, k = 8, sx = 1, caps = true) => {
+    const ring = (z, r) => { const out = []; for (let j = 0; j < k; j++) { const t = (j / k) * 2 * Math.PI; const nn = norm([Math.cos(t) / sx, Math.sin(t), (ra - rb) / Math.max(0.01, zb - za) * 0.6]); out.push(vert([cx + Math.cos(t) * r * sx, cy + Math.sin(t) * r, z], nn, slot, bone, feat)); } return out; };
+    const A = ring(za, ra), Bv = ring(zb, rb);
+    for (let j = 0; j < k; j++) { const j1 = (j + 1) % k; idx.push(A[j], A[j1], Bv[j1], A[j], Bv[j1], Bv[j]); }
+    if (caps) for (const [z, r, up] of [[za, ra, -1], [zb, rb, 1]]) {
+      if (r < 0.002) continue;
+      const cI = vert([cx, cy, z], [0, 0, up], slot, bone, feat), rim = [];
+      for (let j = 0; j < k; j++) { const t = (j / k) * 2 * Math.PI; rim.push(vert([cx + Math.cos(t) * r * sx, cy + Math.sin(t) * r, z], [0, 0, up], slot, bone, feat)); }
+      for (let j = 0; j < k; j++) idx.push(cI, rim[j], rim[(j + 1) % k]);
     }
   };
   const sym = (fn) => { fn(1, 0); fn(-1, 1); }; // left (+y), right (-y)
   // ---- legs: shoes, shins and thighs in cloth or bare
   sym((s, r) => {
-    const y = J.hip[1] * s, w = 0.04, th = r ? B.THIGH_R : B.THIGH_L, sh = r ? B.SHIN_R : B.SHIN_L;
-    box(-0.05, y - 0.042, 0, 0.1, y + 0.042, 0.055, S.SHOES, sh);
-    box(-w, y - w, 0.05, w, y + w, J.knee[2] + 0.01, S.BOTTOM, sh, F.shinCloth);
-    box(-w + 0.004, y - w + 0.004, 0.05, w - 0.004, y + w - 0.004, J.knee[2] + 0.01, S.SKIN, sh, F.shinSkin);
-    box(-0.046, y - 0.046, J.knee[2] - 0.01, 0.046, y + 0.046, J.hip[2] + 0.04, S.BOTTOM, th, F.thighCloth);
-    box(-0.042, y - 0.042, J.knee[2] - 0.01, 0.042, y + 0.042, J.hip[2] + 0.02, S.SKIN, th, F.thighSkin);
+    const y = J.hip[1] * s, th = r ? B.THIGH_R : B.THIGH_L, sh = r ? B.SHIN_R : B.SHIN_L;
+    rbox(-0.05, y - 0.04, 0, 0.11, y + 0.04, 0.065, 0.025, S.SHOES, sh);
+    box(-0.05, y - 0.041, 0, 0.11, y + 0.041, 0.012, S.DARK, sh);
+    tube(0, y, 0.05, J.knee[2] + 0.02, 0.036, 0.043, S.BOTTOM, sh, F.shinCloth);
+    tube(0, y, 0.05, J.knee[2] + 0.02, 0.03, 0.037, S.SKIN, sh, F.shinSkin);
+    tube(0, y, 0.05, 0.075, 0.034, 0.034, S.SOCK, sh, F.shinSkin);
+    tube(0, y, J.knee[2] - 0.02, J.hip[2] + 0.04, 0.045, 0.054, S.BOTTOM, th, F.thighCloth);
+    tube(0, y, J.knee[2] - 0.02, J.hip[2] + 0.02, 0.038, 0.047, S.SKIN, th, F.thighSkin);
   });
-  // ---- hips, skirts and dresses
-  box(-0.07, -0.12, 0.48, 0.07, 0.12, 0.6, S.BOTTOM, B.PELVIS);
-  box(-0.085, -0.13, 0.4, 0.085, 0.13, 0.6, S.BOTTOM, B.PELVIS, F.skirt);
-  box(-0.1, -0.145, 0.33, 0.1, 0.145, 0.43, S.BOTTOM, B.PELVIS, F.skirt);
-  box(-0.088, -0.135, 0.38, 0.088, 0.135, 0.62, S.TOP, B.PELVIS, F.dress);
-  box(-0.104, -0.15, 0.3, 0.104, 0.15, 0.4, S.TOP, B.PELVIS, F.dress);
-  // ---- torso: waist and chest, the coat over them
-  box(-0.068, -0.115, 0.56, 0.068, 0.115, 0.72, S.TOP, B.TORSO);
-  box(-0.075, -0.135, 0.7, 0.075, 0.135, 0.88, S.TOP, B.TORSO);
-  box(-0.078, -0.138, 0.66, 0.078, 0.138, 0.69, S.TOP2, B.TORSO, F.stripe);
-  box(-0.078, -0.138, 0.76, 0.078, 0.138, 0.79, S.TOP2, B.TORSO, F.stripe);
-  box(0.074, -0.05, 0.72, 0.079, 0.05, 0.88, S.WHITE, B.TORSO, F.shirtSuit);
-  box(0.077, -0.016, 0.66, 0.084, 0.016, 0.86, S.TOP2, B.TORSO, F.tie);
-  box(0.075, 0.05, 0.78, 0.082, 0.09, 0.82, S.ITEM, B.TORSO, F.badge);
-  box(-0.083, -0.144, 0.55, 0.083, 0.144, 0.885, S.COAT, B.TORSO, F.coat);
-  box(-0.088, -0.15, 0.33, 0.088, 0.15, 0.58, S.COAT, B.PELVIS, F.coatLong);
-  box(-0.098, -0.16, 0.54, 0.098, 0.16, 0.89, S.COAT, B.TORSO, F.puffer);
-  box(-0.1, -0.162, 0.66, 0.1, 0.162, 0.68, S.DARK, B.TORSO, F.puffer);
-  box(-0.1, -0.162, 0.77, 0.1, 0.162, 0.79, S.DARK, B.TORSO, F.puffer);
-  box(-0.088, -0.11, 0.84, 0.088, 0.11, 0.92, S.SCARF, B.TORSO, F.scarf);
-  box(0.06, 0.03, 0.66, 0.095, 0.07, 0.86, S.SCARF, B.TORSO, F.scarf);
+  // ---- hips, belt, skirts and dresses
+  rbox(-0.07, -0.12, 0.47, 0.07, 0.12, 0.61, 0.04, S.BOTTOM, B.PELVIS);
+  box(-0.072, -0.118, 0.585, 0.072, 0.118, 0.605, S.DARK, B.PELVIS, F.thighCloth);
+  tube(0, 0, 0.36, 0.61, 0.15, 0.115, S.BOTTOM, B.PELVIS, F.skirt, 12, 0.62);
+  tube(0, 0, 0.3, 0.64, 0.16, 0.115, S.TOP, B.PELVIS, F.dress, 12, 0.62);
+  // ---- torso: waist and chest, collar; the coat over them
+  rbox(-0.068, -0.115, 0.55, 0.068, 0.115, 0.74, 0.045, S.TOP, B.TORSO);
+  rbox(-0.077, -0.138, 0.68, 0.077, 0.138, 0.895, 0.05, S.TOP, B.TORSO);
+  rbox(-0.08, -0.141, 0.655, 0.08, 0.141, 0.69, 0.02, S.TOP2, B.TORSO, F.stripe);
+  rbox(-0.08, -0.141, 0.755, 0.08, 0.141, 0.79, 0.02, S.TOP2, B.TORSO, F.stripe);
+  box(0.07, -0.045, 0.74, 0.081, 0.045, 0.885, S.WHITE, B.TORSO, F.shirtSuit);
+  box(0.078, -0.015, 0.66, 0.086, 0.015, 0.87, S.TOP2, B.TORSO, F.tie);
+  box(0.075, 0.05, 0.78, 0.084, 0.09, 0.82, S.ITEM, B.TORSO, F.badge);
+  rbox(-0.085, -0.146, 0.54, 0.085, 0.146, 0.9, 0.05, S.COAT, B.TORSO, F.coat);
+  box(0.085, -0.004, 0.56, 0.088, 0.004, 0.86, S.DARK, B.TORSO, F.coat);
+  tube(0, 0, 0.32, 0.6, 0.165, 0.14, S.COAT, B.PELVIS, F.coatLong, 12, 0.6);
+  rbox(-0.1, -0.163, 0.53, 0.1, 0.163, 0.9, 0.07, S.COAT, B.TORSO, F.puffer);
+  rbox(-0.102, -0.165, 0.655, 0.102, 0.165, 0.675, 0.01, S.DARK, B.TORSO, F.puffer);
+  rbox(-0.102, -0.165, 0.765, 0.102, 0.165, 0.785, 0.01, S.DARK, B.TORSO, F.puffer);
+  rbox(-0.09, -0.11, 0.84, 0.09, 0.11, 0.93, 0.04, S.SCARF, B.TORSO, F.scarf);
+  rbox(0.07, 0.03, 0.65, 0.1, 0.075, 0.87, 0.015, S.SCARF, B.TORSO, F.scarf);
   // bags
-  box(-0.16, -0.1, 0.6, -0.075, 0.1, 0.84, S.BAG, B.TORSO, F.bagBack);
-  box(-0.06, 0.13, 0.5, 0.05, 0.17, 0.62, S.BAG, B.PELVIS, F.bagShoulder);
-  box(-0.012, 0.13, 0.6, 0.012, 0.15, 0.88, S.BAG, B.TORSO, F.bagShoulder);
-  // ---- neck and head: the face, eyes, glasses
-  box(-0.035, -0.035, 0.86, 0.035, 0.035, 0.92, S.SKIN, B.TORSO);
-  box(-0.085, -0.08, 0.9, 0.085, 0.08, 1.1, S.SKIN, B.HEAD);
-  box(0.084, 0.02, 0.985, 0.09, 0.052, 1.015, S.DARK, B.HEAD);
-  box(0.084, -0.052, 0.985, 0.09, -0.02, 1.015, S.DARK, B.HEAD);
-  box(0.084, -0.02, 0.935, 0.088, 0.02, 0.945, S.DARK, B.HEAD);
-  box(0.087, -0.07, 0.98, 0.094, 0.07, 1.0, S.DARK, B.HEAD, F.glasses);
+  rbox(-0.17, -0.1, 0.58, -0.075, 0.1, 0.85, 0.035, S.BAG, B.TORSO, F.bagBack);
+  box(-0.168, -0.06, 0.62, -0.165, 0.06, 0.7, S.DARK, B.TORSO, F.bagBack);
+  rbox(-0.065, 0.13, 0.48, 0.055, 0.175, 0.62, 0.02, S.BAG, B.PELVIS, F.bagShoulder);
+  box(-0.012, 0.13, 0.6, 0.012, 0.15, 0.89, S.BAG, B.TORSO, F.bagShoulder);
+  // ---- neck and head: ears, eyes, brows, nose, mouth, glasses
+  tube(0, 0, 0.86, 0.93, 0.034, 0.032, S.SKIN, B.TORSO, 255, 6);
+  rbox(-0.085, -0.08, 0.895, 0.085, 0.08, 1.11, 0.05, S.SKIN, B.HEAD, 255, 3);
+  for (const s of [1, -1]) {
+    rbox(-0.02, s * 0.075 - 0.016, 0.97, 0.02, s * 0.075 + 0.016, 1.03, 0.012, S.SKIN, B.HEAD);
+    box(0.08, s * 0.036 - 0.014, 0.99, 0.088, s * 0.036 + 0.014, 1.018, S.WHITE, B.HEAD);
+    box(0.082, s * 0.036 - 0.008, 0.99, 0.09, s * 0.036 + 0.01, 1.015, S.DARK, B.HEAD);
+    box(0.077, s * 0.038 - 0.022, 1.03, 0.088, s * 0.038 + 0.02, 1.042, S.HAIR, B.HEAD);
+  }
+  rbox(0.07, -0.014, 0.955, 0.1, 0.014, 0.995, 0.01, S.SKIN, B.HEAD);
+  box(0.078, -0.022, 0.93, 0.087, 0.022, 0.94, S.DARK, B.HEAD);
+  box(0.087, -0.072, 0.985, 0.095, 0.072, 1.0, S.DARK, B.HEAD, F.glasses);
   // ---- hair
-  const hair = (f) => box(-0.095, -0.09, 1.04, 0.075, 0.09, 1.13, S.HAIR, B.HEAD, f);
-  const back = (f, z0 = 0.94) => box(-0.097, -0.09, z0, -0.05, 0.09, 1.1, S.HAIR, B.HEAD, f);
-  for (const f of [F.hairShort, F.hairLong, F.hairPony, F.hairBun, F.hairSpiky]) { hair(f); back(f); }
-  back(F.hairLong, 0.76);
-  box(-0.08, 0.08, 0.84, 0.03, 0.095, 1.08, S.HAIR, B.HEAD, F.hairLong);
-  box(-0.08, -0.095, 0.84, 0.03, -0.08, 1.08, S.HAIR, B.HEAD, F.hairLong);
-  box(-0.15, -0.03, 0.92, -0.09, 0.03, 1.07, S.HAIR, B.HEAD, F.hairPony);
-  box(-0.1, -0.045, 1.12, -0.02, 0.045, 1.19, S.HAIR, B.HEAD, F.hairBun);
-  box(-0.125, -0.125, 0.95, 0.07, 0.125, 1.21, S.HAIR, B.HEAD, F.hairAfro);
-  for (const [x, y] of [[-0.06, -0.05], [0, 0.04], [0.04, -0.04], [-0.03, 0.06]]) box(x - 0.02, y - 0.02, 1.12, x + 0.02, y + 0.02, 1.18, S.HAIR, B.HEAD, F.hairSpiky);
+  const cap = (f) => rbox(-0.098, -0.091, 1.0, 0.078, 0.091, 1.135, 0.05, S.HAIR, B.HEAD, f, 3);
+  const back = (f, z0 = 0.93) => rbox(-0.1, -0.09, z0, -0.03, 0.09, 1.1, 0.04, S.HAIR, B.HEAD, f);
+  for (const f of [F.hairShort, F.hairLong, F.hairPony, F.hairBun, F.hairSpiky]) { cap(f); back(f); }
+  back(F.hairLong, 0.74);
+  rbox(-0.09, 0.07, 0.82, 0.035, 0.1, 1.1, 0.02, S.HAIR, B.HEAD, F.hairLong);
+  rbox(-0.09, -0.1, 0.82, 0.035, -0.07, 1.1, 0.02, S.HAIR, B.HEAD, F.hairLong);
+  rbox(0.03, -0.085, 1.07, 0.09, 0.06, 1.12, 0.02, S.HAIR, B.HEAD, F.hairLong);
+  tube(-0.13, 0, 0.86, 1.06, 0.02, 0.034, S.HAIR, B.HEAD, F.hairPony, 6);
+  rbox(-0.1, -0.045, 1.11, -0.02, 0.045, 1.19, 0.04, S.HAIR, B.HEAD, F.hairBun, 2);
+  rbox(-0.13, -0.13, 0.94, 0.075, 0.13, 1.22, 0.11, S.HAIR, B.HEAD, F.hairAfro, 3);
+  for (const [x, y] of [[-0.06, -0.05], [0, 0.04], [0.04, -0.04], [-0.03, 0.06], [-0.07, 0.03]]) tube(x, y, 1.1, 1.19, 0.03, 0.0, S.HAIR, B.HEAD, F.hairSpiky, 4);
   // ---- hats
-  box(-0.092, -0.09, 1.05, 0.08, 0.09, 1.14, S.HAT, B.HEAD, F.cap);
-  box(0.07, -0.07, 1.05, 0.17, 0.07, 1.07, S.HAT, B.HEAD, F.cap);
-  box(-0.14, -0.14, 1.07, 0.14, 0.14, 1.09, S.HAT, B.HEAD, F.fedora);
-  box(-0.085, -0.085, 1.09, 0.085, 0.085, 1.18, S.HAT, B.HEAD, F.fedora);
-  box(-0.083, -0.083, 1.09, 0.083, 0.083, 1.11, S.DARK, B.HEAD, F.fedora);
-  box(-0.096, -0.092, 1.02, 0.088, 0.092, 1.16, S.HAT, B.HEAD, F.beanie);
-  box(-0.04, -0.03, 1.16, 0.02, 0.03, 1.19, S.WHITE, B.HEAD, F.beanie);
-  box(-0.095, -0.092, 1.05, 0.085, 0.092, 1.15, S.HAT, B.HEAD, F.police);
-  box(-0.1, -0.1, 1.15, 0.1, 0.1, 1.18, S.HAT, B.HEAD, F.police);
-  box(0.07, -0.08, 1.05, 0.15, 0.08, 1.065, S.DARK, B.HEAD, F.police);
-  box(0.085, -0.02, 1.09, 0.1, 0.02, 1.13, S.ITEM, B.HEAD, F.police);
-  box(-0.1, -0.098, 0.93, 0.07, 0.098, 1.15, S.COAT, B.HEAD, F.hood);
-  box(-0.16, -0.16, 1.08, 0.16, 0.16, 1.1, S.HAT, B.HEAD, F.witch);
-  box(-0.075, -0.075, 1.1, 0.075, 0.075, 1.2, S.HAT, B.HEAD, F.witch);
-  box(-0.05, -0.05, 1.2, 0.05, 0.05, 1.28, S.HAT, B.HEAD, F.witch);
-  box(-0.025, -0.025, 1.28, 0.025, 0.025, 1.34, S.HAT, B.HEAD, F.witch);
-  box(-0.1, -0.1, 1.0, 0.095, 0.1, 1.17, S.HAT, B.HEAD, F.helmet);
+  rbox(-0.094, -0.092, 1.04, 0.082, 0.092, 1.15, 0.05, S.HAT, B.HEAD, F.cap, 3);
+  rbox(0.06, -0.07, 1.045, 0.17, 0.07, 1.065, 0.01, S.HAT, B.HEAD, F.cap);
+  tube(0, 0, 1.07, 1.085, 0.15, 0.15, S.HAT, B.HEAD, F.fedora, 12, 1.05);
+  tube(-0.005, 0, 1.085, 1.18, 0.09, 0.075, S.HAT, B.HEAD, F.fedora, 10, 1.05);
+  tube(-0.005, 0, 1.085, 1.11, 0.092, 0.092, S.DARK, B.HEAD, F.fedora, 10, 1.05, false);
+  rbox(-0.098, -0.094, 1.0, 0.09, 0.094, 1.17, 0.07, S.HAT, B.HEAD, F.beanie, 3);
+  rbox(-0.1, -0.096, 1.0, 0.092, 0.096, 1.04, 0.015, S.HAT, B.HEAD, F.beanie);
+  rbox(-0.035, -0.03, 1.15, 0.025, 0.03, 1.2, 0.03, S.WHITE, B.HEAD, F.beanie);
+  tube(0, 0, 1.04, 1.13, 0.092, 0.1, S.HAT, B.HEAD, F.police, 10);
+  tube(0, 0, 1.13, 1.17, 0.11, 0.11, S.HAT, B.HEAD, F.police, 10);
+  rbox(0.06, -0.08, 1.04, 0.15, 0.08, 1.06, 0.01, S.DARK, B.HEAD, F.police);
+  box(0.095, -0.02, 1.08, 0.11, 0.02, 1.12, S.ITEM, B.HEAD, F.police);
+  rbox(-0.11, -0.1, 0.9, 0.07, 0.1, 1.16, 0.07, S.COAT, B.HEAD, F.hood, 3);
+  tube(0, 0, 1.08, 1.1, 0.17, 0.17, S.HAT, B.HEAD, F.witch, 12);
+  tube(-0.01, 0, 1.1, 1.36, 0.085, 0.0, S.HAT, B.HEAD, F.witch, 10);
+  rbox(-0.105, -0.105, 0.98, 0.1, 0.105, 1.19, 0.09, S.HAT, B.HEAD, F.helmet, 3);
   // ---- arms: upper arm in skin, shirt or coat; forearm likewise; the hand; things carried
   sym((s, r) => {
-    const y = J.sh[1] * s, ua = r ? B.UARM_R : B.UARM_L, fa = r ? B.FARM_R : B.FARM_L, w = 0.036;
-    box(-w, y - w, J.el[2] - 0.01, w, y + w, J.sh[2] + 0.03, S.SKIN, ua, F.upperSkin);
-    box(-w - 0.004, y - w - 0.004, J.el[2] - 0.01, w + 0.004, y + w + 0.004, J.sh[2] + 0.035, S.TOP, ua, F.upperTop);
-    box(-w - 0.012, y - w - 0.012, J.el[2] - 0.015, w + 0.012, y + w + 0.012, J.sh[2] + 0.04, S.COAT, ua, F.upperCoat);
-    box(-0.032, y - 0.032, 0.5, 0.032, y + 0.032, J.el[2] + 0.01, S.SKIN, fa, F.foreSkin);
-    box(-0.036, y - 0.036, 0.5, 0.036, y + 0.036, J.el[2] + 0.01, S.TOP, fa, F.foreTop);
-    box(-0.045, y - 0.045, 0.5, 0.045, y + 0.045, J.el[2] + 0.015, S.COAT, fa, F.foreCoat);
-    box(-0.03, y - 0.03, 0.445, 0.035, y + 0.03, 0.505, S.SKIN, fa);
+    const y = J.sh[1] * s, ua = r ? B.UARM_R : B.UARM_L, fa = r ? B.FARM_R : B.FARM_L;
+    rbox(-0.04, y - 0.04, J.sh[2] - 0.04, 0.04, y + 0.04, J.sh[2] + 0.04, 0.04, S.SKIN, ua, F.upperSkin);
+    tube(0, y, J.el[2] - 0.015, J.sh[2], 0.031, 0.036, S.SKIN, ua, F.upperSkin);
+    rbox(-0.046, y - 0.046, J.sh[2] - 0.045, 0.046, y + 0.046, J.sh[2] + 0.045, 0.045, S.TOP, ua, F.upperTop);
+    tube(0, y, J.el[2] - 0.015, J.sh[2], 0.035, 0.042, S.TOP, ua, F.upperTop);
+    rbox(-0.055, y - 0.055, J.sh[2] - 0.05, 0.055, y + 0.055, J.sh[2] + 0.05, 0.05, S.COAT, ua, F.upperCoat);
+    tube(0, y, J.el[2] - 0.02, J.sh[2], 0.044, 0.05, S.COAT, ua, F.upperCoat);
+    tube(0, y, 0.5, J.el[2] + 0.015, 0.026, 0.031, S.SKIN, fa, F.foreSkin);
+    tube(0, y, 0.5, J.el[2] + 0.015, 0.031, 0.036, S.TOP, fa, F.foreTop);
+    tube(0, y, 0.5, J.el[2] + 0.02, 0.04, 0.045, S.COAT, fa, F.foreCoat);
+    rbox(-0.026, y - 0.024, 0.43, 0.034, y + 0.024, 0.51, 0.02, S.SKIN, fa);
     if (r) {
-      box(-0.07, y - 0.025, 0.3, 0.08, y + 0.025, 0.42, S.BAG, fa, F.bagBrief);
-      box(-0.005, y - 0.01, 0.42, 0.005, y + 0.01, 0.46, S.DARK, fa, F.bagBrief);
-      box(-0.06, y - 0.04, 0.28, 0.06, y + 0.04, 0.45, S.ITEM, fa, F.bagShop);
-      box(0.0, y - 0.012, 0.0, 0.024, y + 0.012, 0.47, S.DARK, fa, F.cane);
+      rbox(-0.075, y - 0.025, 0.29, 0.085, y + 0.025, 0.42, 0.012, S.BAG, fa, F.bagBrief);
+      box(-0.02, y - 0.008, 0.42, 0.02, y + 0.008, 0.45, S.DARK, fa, F.bagBrief);
+      rbox(-0.065, y - 0.045, 0.27, 0.065, y + 0.045, 0.43, 0.01, S.ITEM, fa, F.bagShop);
+      box(-0.03, y - 0.004, 0.43, 0.03, y + 0.004, 0.47, S.DARK, fa, F.bagShop);
+      tube(0.012, y, 0.0, 0.47, 0.011, 0.011, S.DARK, fa, F.cane, 5);
     }
   });
   return { pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) };
@@ -204,7 +239,7 @@ const VS = HEAD + POSE + `
 uniform mat4 uViewProj;
 uniform vec2 uBuf;
 out vec3 vWorld;
-flat out vec3 vNrm;
+out vec3 vNrm;
 flat out vec4 vB;
 flat out uint vSlot;
 void main() {
@@ -222,7 +257,7 @@ void main() {
 }`;
 const FS = HEAD + `
 in vec3 vWorld;
-flat in vec3 vNrm;
+in vec3 vNrm;
 flat in vec4 vB;
 flat in uint vSlot;
 uniform sampler2D uPal;

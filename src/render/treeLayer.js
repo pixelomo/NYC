@@ -17,12 +17,13 @@ const PI = Math.PI;
 // ---- geometry -------------------------------------------------------------------------------------
 function builder() {
   const pos = [], nrm = [], info = [], idx = [];
-  const tri = (a, b, c, slot, leaf) => {
+  let cluster = 0;
+  const tri = (a, b, c, slot, leaf, ns = null) => {
     const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
     let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
     const l = Math.hypot(...n) || 1; n = n.map((x) => x / l);
     const base = pos.length / 3;
-    for (const p of [a, b, c]) { pos.push(...p); nrm.push(...n); info.push(slot, leaf, 0, 0); }
+    [a, b, c].forEach((p, i) => { pos.push(...p); nrm.push(...(ns ? ns[i] : n)); info.push(slot, leaf, cluster & 255, 0); });
     idx.push(base, base + 1, base + 2);
   };
   // a tapered column (trunk, branch) from a to b, radii ra -> rb, k sides
@@ -35,7 +36,8 @@ function builder() {
     const ring = (o, r, j) => { const t = (j / k) * 2 * PI, c = Math.cos(t) * r, s = Math.sin(t) * r; return [o[0] + u[0] * c + v[0] * s, o[1] + u[1] * c + v[1] * s, o[2] + u[2] * c + v[2] * s]; };
     for (let j = 0; j < k; j++) {
       const a0 = ring(a, ra, j), a1 = ring(a, ra, j + 1), b0 = ring(b, rb, j), b1 = ring(b, rb, j + 1);
-      tri(a0, b0, a1, S.TRUNK, 0); tri(a1, b0, b1, S.TRUNK, 0);
+      const nr = (p, o) => { const d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]], l = Math.hypot(...d) || 1; return d.map((x) => x / l); };
+      tri(a0, b0, a1, S.TRUNK, 0, [nr(a0, a), nr(b0, b), nr(a1, a)]); tri(a1, b0, b1, S.TRUNK, 0, [nr(a1, a), nr(b0, b), nr(b1, b)]);
     }
   };
   // a leaf cluster: an icosahedron, its corners pushed in and out a little
@@ -45,14 +47,26 @@ function builder() {
     const f = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
     return { v, f };
   })();
-  const blob = (c, rx, rz, rng) => {
-    const vs = ICO.v.map((p) => { const j = 0.82 + rng.next() * 0.3; return [c[0] + p[0] * rx * j, c[1] + p[1] * rx * j, c[2] + p[2] * rz * j]; });
-    for (const [a, b, d] of ICO.f) tri(vs[a], vs[d], vs[b], S.LEAF_M, 1);
+  // a leaf cluster: an icosphere (subdivided once), lumpy, flattened a little underneath
+  const SUB = (() => {
+    const v = ICO.v.map((p) => p.slice()), f = [], mid = new Map();
+    const m = (a, b) => { const k = a < b ? a * 64 + b : b * 64 + a; if (!mid.has(k)) { const p = [(v[a][0] + v[b][0]) / 2, (v[a][1] + v[b][1]) / 2, (v[a][2] + v[b][2]) / 2]; const l = Math.hypot(...p); v.push(p.map((x) => x / l)); mid.set(k, v.length - 1); } return mid.get(k); };
+    for (const [a, b, c] of ICO.f) { const ab = m(a, b), bc = m(b, c), ca = m(c, a); f.push([a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]); }
+    return { v, f };
+  })();
+  const blob = (c, rx, rz, rng, lo) => {
+    cluster++;
+    const S2 = lo ? ICO : SUB;
+    const js = S2.v.map(() => 0.84 + rng.next() * 0.26);
+    const vs = S2.v.map((p, i) => { const j = js[i] * (p[2] < -0.3 ? 0.85 : 1); return [c[0] + p[0] * rx * j, c[1] + p[1] * rx * j, c[2] + p[2] * rz * j]; });
+    const ns = S2.v.map((p) => { const n = [p[0] / rx, p[1] / rx, p[2] / rz], l = Math.hypot(...n); return n.map((x) => x / l); });
+    for (const [a, b, d] of S2.f) tri(vs[a], vs[d], vs[b], S.LEAF_M, 1, [ns[a], ns[d], ns[b]]);
   };
   const cone = (c, r, z0, z1, k, rng) => {
     const top = [c[0], c[1], z1];
     const rim = [];
     for (let j = 0; j < k; j++) { const t = (j / k) * 2 * PI + rng.next() * 0.2, rr = r * (0.85 + rng.next() * 0.25); rim.push([c[0] + Math.cos(t) * rr, c[1] + Math.sin(t) * rr, z0 + (rng.next() - 0.5) * 0.08]); }
+    cluster++;
     for (let j = 0; j < k; j++) { const a = rim[j], b = rim[(j + 1) % k]; tri(a, top, b, S.LEAF_M, 1); tri(b, [c[0], c[1], z0 + 0.12], a, S.LEAF_D, 1); }
   };
   const done = () => ({ pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) });
@@ -61,11 +75,11 @@ function builder() {
 
 // species shapes, in world units (a unit is 2 m)
 const SHAPE = {
-  plane: { trunk: 1.25, cx: 1.25, cz: 1.05, cy: 2.35, blobs: 8, br: 0.5, rt: 0.13 },
-  locust: { trunk: 1.35, cx: 1.05, cz: 0.95, cy: 2.3, blobs: 11, br: 0.36, rt: 0.1, airy: true },
-  oak: { trunk: 1.1, cx: 1.4, cz: 1.05, cy: 2.2, blobs: 9, br: 0.55, rt: 0.15 },
-  elm: { trunk: 1.5, cx: 1.75, cz: 1.15, cy: 3.15, blobs: 11, br: 0.58, rt: 0.15, vase: true },
-  cherry: { trunk: 0.85, cx: 1.2, cz: 0.75, cy: 1.65, blobs: 8, br: 0.45, rt: 0.1 },
+  plane: { trunk: 1.25, cx: 1.25, cz: 1.05, cy: 2.35, blobs: 14, br: 0.5, rt: 0.13 },
+  locust: { trunk: 1.35, cx: 1.05, cz: 0.95, cy: 2.3, blobs: 18, br: 0.36, rt: 0.1, airy: true },
+  oak: { trunk: 1.1, cx: 1.4, cz: 1.05, cy: 2.2, blobs: 16, br: 0.55, rt: 0.15 },
+  elm: { trunk: 1.5, cx: 1.75, cz: 1.15, cy: 3.15, blobs: 18, br: 0.58, rt: 0.15, vase: true },
+  cherry: { trunk: 0.85, cx: 1.2, cz: 0.75, cy: 1.65, blobs: 13, br: 0.45, rt: 0.1 },
 };
 function treeMesh(sp, variant, lo) {
   const rng = new RNG(5000 + variant * 131 + sp.length * 17);
@@ -73,16 +87,18 @@ function treeMesh(sp, variant, lo) {
   if (sp === 'pine') {
     const h = 3.2 + rng.next() * 0.4;
     M.limb([0, 0, 0], [0, 0, 0.9], 0.11, 0.08, 6);
-    const tiers = lo ? 2 : 4;
+    const tiers = lo ? 2 : 6;
     for (let k = 0; k < tiers; k++) {
       const t = k / tiers, z0 = 0.45 + t * (h - 1.1), r = 1.0 * (1 - t * 0.72);
-      M.cone([0, 0], r, z0, z0 + (h - 0.45) / tiers + 0.55, lo ? 6 : 8, rng);
+      M.cone([0, 0], r, z0, z0 + (h - 0.45) / tiers + 0.5, lo ? 6 : 10, rng);
     }
     return M.done();
   }
   const s = SHAPE[sp];
   const top = [0, 0, s.trunk + 0.15];
-  M.limb([0, 0, 0], top, s.rt * 1.25, s.rt * 0.85, lo ? 5 : 7);
+  M.limb([0, 0, 0], top, s.rt * 1.25, s.rt * 0.85, lo ? 5 : 8);
+  // root flare
+  if (!lo) M.limb([0, 0, 0], [0, 0, 0.18], s.rt * 1.9, s.rt * 1.2, 8);
   // the crown's clusters, around an ellipsoid; a branch from the trunk's top to each
   const n = lo ? 3 : s.blobs;
   const centers = [];
@@ -91,14 +107,17 @@ function treeMesh(sp, variant, lo) {
     const rr = i === 0 ? 0 : (s.vase ? 0.62 : 0.52) + rng.next() * 0.3;
     const c = [Math.cos(a) * s.cx * rr, Math.sin(a) * s.cx * rr, s.cy + (up - 0.4) * s.cz * (i === 0 ? 0.55 : 0.8) - (s.vase ? 0 : rr * 0.2)];
     centers.push(c);
-    const r = (s.airy ? 0.45 : 0.6) * (lo ? 1.6 : 1) * (0.85 + rng.next() * 0.35) * (s.cx / 1.25) ** 0.6;
-    M.blob(c, r, r * 0.82, rng);
+    const r = (s.airy ? 0.38 : 0.5) * (lo ? 1.9 : 1) * (0.8 + rng.next() * 0.4) * (s.cx / 1.25) ** 0.6;
+    M.blob(c, r, r * 0.8, rng, lo);
   }
   if (!lo) {
     for (const c of centers.slice(1)) {
       const mid = [c[0] * 0.55, c[1] * 0.55, top[2] + (c[2] - top[2]) * 0.55];
       M.limb(top, mid, s.rt * 0.6, s.rt * 0.4, 4);
       M.limb(mid, [c[0] * 0.92, c[1] * 0.92, c[2] - 0.1], s.rt * 0.4, s.rt * 0.18, 4);
+      // a twig off each branch
+      const tw = [c[0] * 0.8 + (rng.next() - 0.5) * 0.5, c[1] * 0.8 + (rng.next() - 0.5) * 0.5, c[2] + 0.15];
+      M.limb(mid, tw, s.rt * 0.25, s.rt * 0.08, 3);
     }
     M.limb(top, [0, 0, s.cy + 0.25], s.rt * 0.7, s.rt * 0.25, 4);
   }
@@ -124,12 +143,12 @@ uniform mat4 uViewProj;
 uniform vec2 uBuf;
 out vec3 vWorld;
 out vec3 vLocal;
-flat out vec3 vNrm;
-flat out uvec2 vInfo;
+out vec3 vNrm;
+flat out uvec3 vInfo;
 flat out float vRow;
 void main() {
   vec3 wp = iA.xyz + turn(aPos) * iB.x;
-  vWorld = wp; vLocal = aPos * iB.x; vNrm = turn(aNrm); vInfo = aInfo.xy; vRow = iB.y;
+  vWorld = wp; vLocal = aPos * iB.x; vNrm = turn(aNrm); vInfo = aInfo.xyz; vRow = iB.y + 0.0 * iA.w;
   vec4 cc = uViewProj * vec4(iA.xyz, 1.0);
   vec2 px = (cc.xy * 0.5 + 0.5) * uBuf;
   vec2 snap = (floor(px + 0.5) - px) / uBuf * 2.0;
@@ -140,8 +159,8 @@ void main() {
 const FS = HEAD + `
 in vec3 vWorld;
 in vec3 vLocal;
-flat in vec3 vNrm;
-flat in uvec2 vInfo;
+in vec3 vNrm;
+flat in uvec3 vInfo;
 flat in float vRow;
 uniform sampler2D uPal;
 uniform sampler2DShadow uShadow;
@@ -155,6 +174,7 @@ uniform vec3 uSunDir, uSunCol, uAmb, uFace;
 uniform vec2 uRot;
 uniform vec4 uCloud;
 uniform float uFlash;
+uniform vec3 uViewDir;
 layout(location=0) out vec4 oColor;
 layout(location=1) out vec4 oGlow;
 float bayer4(vec2 p) {
@@ -177,14 +197,19 @@ void main() {
   if (vInfo.y == 1u) {
     // foliage: chunky speckles of light, mid and dark leaves, lighter on top; gone in winter
     if (pal(${S.LEAF_M}u).a < 0.1) discard;
-    vec3 q = floor(vWorld * 14.0);
-    float h = hash13(q), h2 = hash13(q + 17.0);
-    float v = h * 0.7 + n.z * 0.4 + 0.12;
-    // holes at the crown's edge, so it reads as leaves rather than a solid shell
-    if (h2 > 0.93 && n.z < 0.6) discard;
-    albedo = (v > 0.66 ? pal(${S.LEAF_L}u) : v > 0.28 ? pal(${S.LEAF_M}u) : pal(${S.LEAF_D}u)).rgb;
+    // leaves: little cells, each tilted its own way, so the light breaks up into leafy speckles
+    vec3 q = floor(vWorld * 16.0);
+    float h = hash13(q), h2 = hash13(q + 17.0), h3 = hash13(q + 41.0);
+    n = normalize(n + (vec3(h, h2, h3) - 0.5) * 0.9);
+    // a ragged silhouette: leaf cells drop out where the crown turns away from view
+    float rim = 1.0 - abs(dot(normalize(vNrm), uViewDir));
+    if (h3 < rim * 0.55 - 0.12) discard;
+    float lit = dot(n, uSunDir) * 0.5 + 0.5;
+    float v = lit * 0.62 + vNrm.z * 0.18 + (h - 0.5) * 0.5 + (float(vInfo.z % 5u) - 2.0) * 0.05;
+    albedo = (v > 0.68 ? pal(${S.LEAF_L}u) : v > 0.36 ? pal(${S.LEAF_M}u) : pal(${S.LEAF_D}u)).rgb;
+    albedo *= 0.94 + float(vInfo.z % 3u) * 0.05;
     vec4 bl = pal(${S.BLOSSOM}u);
-    if (h2 > 0.84 && h2 <= 0.93 && bl.a > 0.1) albedo = bl.rgb;
+    if (h2 > 0.86 && bl.a > 0.1 && bl.rgb != pal(${S.LEAF_L}u).rgb) albedo = bl.rgb;
   } else {
     // bark, with snow (or the light top colour) on whatever faces up
     float h = hash13(floor(vLocal * vec3(18.0, 18.0, 6.0)));
@@ -200,11 +225,11 @@ void main() {
     if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
   } else if (ndl <= 0.0) sh = 0.0;
   // leaves let light through and scatter it: the crown is never dark on its shaded side
-  if (vInfo.y == 1u) { ndl = ndl * 0.55 + 0.45; sh = sh * 0.6 + 0.4; }
+  if (vInfo.y == 1u) { ndl = ndl * 0.7 + 0.25; sh = sh * 0.75 + 0.25; }
   float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
   float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
   vec3 lm = texture(uLightMap, vWorld.xy / vec2(${LIGHT_EXT_X.toFixed(1)}, ${LIGHT_EXT_Y.toFixed(1)})).rgb * clamp(1.0 - (vWorld.z - 0.3) / 6.0, 0.0, 1.0);
-  vec3 light = uAmb * faceShade(n) * (vInfo.y == 1u ? 1.2 : 1.0) + uSunCol * max(ndl, 0.0) * sh * cl + lm * 0.8 + vec3(uFlash);
+  vec3 light = uAmb * faceShade(n) * (vInfo.y == 1u ? 1.05 : 1.0) + uSunCol * max(ndl, 0.0) * sh * cl + lm * 0.8 + vec3(uFlash);
   oColor = vec4(albedo * light, 1.0);
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
 }`;
@@ -328,6 +353,7 @@ export class TreeLayer {
     gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle));
     gl.uniform4fv(u.uCloud, e.cloud);
     gl.uniform1f(u.uFlash, e.flash);
+    gl.uniform3fv(u.uViewDir, ctx.camera.viewDir());
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex); gl.uniform1i(u.uPal, 1);
     gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, r.shadowTex); gl.uniform1i(u.uShadow, 2);
     gl.activeTexture(gl.TEXTURE3); gl.bindTexture(gl.TEXTURE_2D, r.lightTex); gl.uniform1i(u.uLightMap, 3);

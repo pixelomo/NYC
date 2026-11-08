@@ -117,8 +117,8 @@ export class Particles {
         this.add({ x, y, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.09 * (1 - t) + 0.03, max: 0.12, f: t < 0.5 ? this.fr.dot2 : this.fr.dot, row: this.rows.tracer, kind: 'spark' });
       }
       this.flashes.push({ x: hx, y: hy, k: 0.5, color: [1, 0.85, 0.5], r: 1.3, decay: 30 });
-      b.x = hx; b.y = hy; b.z = hz; b.left -= step;
-      if (b.left <= 1e-3) this.bullets.splice(i, 1);
+      b.x = hx; b.y = hy; b.z = hz; b.left -= step; b.age = (b.age || 0) + dt;
+      if (b.left <= 1e-3 || b.age > 1) this.bullets.splice(i, 1);
     }
   }
   shell(x, y, z, dx, dy) {
