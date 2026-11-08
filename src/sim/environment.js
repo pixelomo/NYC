@@ -200,7 +200,10 @@ export class Environment {
     this.cloudOff[0] += dt * 0.002 * (0.4 + this.wind) * Math.cos(wd);
     this.cloudOff[1] += dt * 0.002 * (0.4 + this.wind) * Math.sin(wd);
 
-    const sun = this.sunAt(h);
+    // the sun's direction moves in small steps (every 20 sim seconds, a few times a real second)
+    // rather than every frame: a shadow map re-projected each frame makes every dithered shadow
+    // edge shimmer, while held steps keep shadows still and only creep them along
+    const sun = this.sunAt(Math.round(h * 180) / 180);
     this.sunEl = sun.el;
     const elR = (sun.el * Math.PI) / 180;
     const sunDir = [Math.cos(sun.az) * Math.cos(elR), Math.sin(sun.az) * Math.cos(elR), Math.sin(elR)];

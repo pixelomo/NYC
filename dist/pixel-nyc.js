@@ -8563,7 +8563,7 @@ void main() {
       this.snowing ? this.snowCover = Math.min(1, this.snowCover + dh * 0.35 * this.precip) : s !== 3 && (this.snowCover = Math.max(0, this.snowCover - dh * (s === 0 ? 0.25 : 0.8))), this.raining ? this.wetness = Math.min(1, this.wetness + dh * 3 * this.precip + (this.weatherOverride ? dt * 0.3 : 0)) : this.wetness = Math.max(0, this.wetness - dh * (s === 1 ? 0.5 : 0.25)), s === 3 && this.wetness > 0.3 && (this.wetness = 0.3), this.flash = Math.max(0, this.flash - dt * 4), this.storm && this.precip > 0.4 && (this.lightningTimer -= dt, this.lightningTimer <= 0 && (this.lightningTimer = this.rng.range(3, 12), this.flash = 1, this.emit("lightning", { dist: this.rng.range(0.2, 1) })));
       let wd = this.windDir;
       this.cloudOff[0] += dt * 2e-3 * (0.4 + this.wind) * Math.cos(wd), this.cloudOff[1] += dt * 2e-3 * (0.4 + this.wind) * Math.sin(wd);
-      let sun = this.sunAt(h);
+      let sun = this.sunAt(Math.round(h * 180) / 180);
       this.sunEl = sun.el;
       let elR = sun.el * Math.PI / 180, sunDir = [Math.cos(sun.az) * Math.cos(elR), Math.sin(sun.az) * Math.cos(elR), Math.sin(elR)], cloudK = clamp(this.cloudiness, 0, 1), top = keyLerp(SKY_TOP, sun.el), bot = keyLerp(SKY_BOT, sun.el), gray = sun.el > -4 ? [0.55, 0.6, 0.66] : [0.1, 0.11, 0.16], grayB = sun.el > -4 ? [0.7, 0.73, 0.76] : [0.14, 0.15, 0.2];
       u.skyTop = top.map((v, i) => lerp(v, gray[i] * (sun.el > 8 ? 1 : 0.75), cloudK * 0.75)), u.skyBottom = bot.map((v, i) => lerp(v, grayB[i] * (sun.el > 8 ? 1 : 0.75), cloudK * 0.7));
