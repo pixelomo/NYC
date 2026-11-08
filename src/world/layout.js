@@ -4,14 +4,14 @@ export const T = 32; // texels (pixels) per world unit (2x pixel density)
 export const GT = 16; // ground texture texels per world unit (half of T: the big city's ground has to fit a GPU texture)
 export const K = T / 16; // scale factor for pixel-art sizes authored at 16 texels/unit
 export const NBX = 15; // block columns: New Jersey, the Hudson, Manhattan (up to 10 avenues wide), the East River, Queens and Brooklyn
-export const NBY = 26; // block rows: the Bronx at the top, Inwood to the Battery, the harbour at the bottom
+export const NBY = 36; // block rows: the Bronx at the top, Inwood to the Battery (30 rows), the harbour at the bottom
 export const BLOCK = 18;
 export const SIDEWALK = 2;
 export const ROAD = 5;
 export const STREET = SIDEWALK * 2 + ROAD; // 9
 export const PERIOD = STREET + BLOCK; // 27
 export const MAPX = NBX * PERIOD + STREET; // 414
-export const MAPY = NBY * PERIOD + STREET; // 711
+export const MAPY = NBY * PERIOD + STREET; // 981
 // world extent covered by the lamp light map (x, y in [0, LIGHT_EXT_X] x [0, LIGHT_EXT_Y])
 export const LIGHT_EXT_X = MAPX + 5;
 export const LIGHT_EXT_Y = MAPY + 5;
@@ -28,41 +28,46 @@ export const lotStart = (b) => b * PERIOD + STREET;
 export const lotEnd = (b) => b * PERIOD + STREET + BLOCK;
 
 // BLOCK_TYPES[by][bx]: the whole of Manhattan, north at the top, squeezed along its length (each
-// row stands for about ten real streets, each column for about one avenue): Inwood and the
-// Cloisters, Washington Heights and the George Washington Bridge, Harlem and Columbia, Riverside
-// Park all down the Hudson side, Central Park between the Upper West and Upper East Sides with the
-// museums along it, Midtown with Times Square, the Village, SoHo, Chinatown and the Lower East
-// Side, and the Financial District down to the Battery. '~' is water, or land that isn't Manhattan
-// (New Jersey, the Bronx, Queens, Brooklyn and the islands: see BOROUGHS and ISLANDS).
+// row stands for six to eleven real streets, each column for about one avenue), following the real
+// shoreline: narrow at Inwood, widening through Washington Heights and Harlem (out to the Harlem
+// River), full width from 110th Street down, the Lower East Side bulging into the East River, then
+// tapering through Tribeca and the Financial District to the Battery. '~' is water, or land that
+// isn't Manhattan (New Jersey, the Bronx, Queens, Brooklyn and the islands: see BOROUGHS, ISLANDS).
 const _ = '~';
+const row = (from, ...types) => { const r = new Array(15).fill(_); types.forEach((t, k) => { r[from + k] = t; }); return r; };
 export const BLOCK_TYPES = [
-  //  0  1  2  3             4                5                6                7               8               9               10              11              12              13 14
-  [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
-  [_, _, _, _, 'inwoodhill', 'walkups', 'tenements', _, _, _, _, _, _, _, _],
-  [_, _, _, _, 'cloisters', 'redbrick', 'walkups', 'tenements', _, _, _, _, _, _, _],
-  [_, _, _, 'gwb', 'prewar', 'redbrick', 'shops', 'walkups', _, _, _, _, _, _, _],
-  [_, _, _, 'riverside', 'redbrick', 'tenements', 'bodega', 'highbridge', _, _, _, _, _, _, _],
-  [_, _, _, 'riverside', 'prewar', 'brownstones', 'walkups', 'shops', 'redbrick', _, _, _, _, _, _],
-  [_, _, _, 'riverside', 'walkups', 'brownstones', 'apollo', 'brownstones', 'commercial', 'redbrick', _, _, _, _, _],
-  [_, _, _, 'grantstomb', 'columbia', 'prewar', 'brownstones', 'shops', 'walkups', 'tenements', 'tbridge', _, _, _, _],
-  [_, _, _, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'commercial', 'redbrick', _, _, _, _],
-  [_, _, _, 'soldiers', 'brownstones', 'prewar', 'park', 'park', 'guggenheim', 'prewar', 'office', 'redbrick', _, _, _],
-  [_, _, _, 'riverside', 'prewar', 'naturalhistory', 'park', 'park', 'museum', 'prewar', 'shops', 'glass', _, _, _],
-  [_, _, _, 'riverside', 'glass', 'prewar', 'park', 'park', 'prewar', 'hotel', 'brownstones', 'modern', _, _, _],
-  [_, _, _, 'glass', 'lincoln', 'prewar', 'park', 'park', 'prewar', 'office', 'commercial', 'deco', _, _, _],
-  [_, _, _, 'glass', 'hearst', 'columbus', 'supertall', 'supertall', 'plazahotel', 'seagram', 'citigroup', 'qbridge', _, _, _],
-  [_, _, _, 'modern', 'billboards', 'tsq', 'tsq', 'rockefeller', 'stpatricks', 'glass', 'office', 'un', _, _, _],
-  [_, _, _, 'glass', 'nyt', 'tsq', 'tsq', 'library', 'vanderbilt', 'grandcentral', 'chrysler', 'glass', _, _, _],
-  [_, _, _, 'hudsonyards', 'glass', 'commercial', 'arena', 'empire', 'office', 'deco', 'glass', 'modern', _, _, _],
-  [_, _, _, 'glass', 'lofts', 'commercial', 'shops', 'flatiron', 'office', 'brownstones', 'modern', 'glass', _, _, _],
-  [_, _, _, 'lofts', 'commercial', 'shops', 'shops', 'office', 'unionsq', 'redbrick', 'redbrick', 'redbrick', _, _, _],
-  [_, _, _, 'glass', 'brownstones', 'brownstones', 'court', 'washsq', 'walkups', 'shops', 'tenements', 'tenements', 'redbrick', _, _],
-  [_, _, _, 'glass', 'lofts', 'lofts', 'lofts', 'shops', 'tenements', 'tenements', 'bodega', 'wbridge', _, _, _],
-  [_, _, _, 'lofts', 'lofts', 'leonard', 'office', 'chinatown', 'chinatown', 'tenements', 'walkups', 'mbridge', _, _, _],
-  [_, _, _, 'glass', 'wtc', 'memorial', 'cityhall', 'office', 'deco', 'spruce', 'bridge', _, _, _, _],
-  [_, _, _, 'battery', 'glass', 'exchange', 'fortywall', 'seventypine', 'modern', _, _, _, _, _, _],
-  [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
-  [_, _, _, _, _, _, _, _, _, _, _, _, _, _, _],
+  row(0),
+  row(4, 'inwoodhill', 'walkups'), //                                                   218-207 St
+  row(4, 'cloisters', 'walkups', 'tenements'), //                                        207-196
+  row(3, 'riverside', 'redbrick', 'shops', 'walkups', 'walkups'), //                      196-185
+  row(3, 'gwb', 'prewar', 'redbrick', 'shops', 'highbridge'), //                         185-174
+  row(3, 'riverside', 'redbrick', 'tenements', 'bodega', 'walkups'), //                  174-163
+  row(3, 'riverside', 'prewar', 'brownstones', 'walkups', 'shops', 'redbrick'), //       163-152
+  row(3, 'riverside', 'walkups', 'brownstones', 'shops', 'redbrick', 'tenements'), //    152-142
+  row(3, 'riverside', 'tenements', 'brownstones', 'brownstones', 'commercial', 'walkups', 'redbrick'), // 142-131
+  row(3, 'grantstomb', 'columbia', 'prewar', 'apollo', 'brownstones', 'shops', 'tenements', 'tbridge'), // 131-120
+  row(3, 'riverside', 'prewar', 'stjohn', 'brownstones', 'shops', 'walkups', 'tenements', 'redbrick'), // 120-110
+  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'commercial', 'redbrick', 'tenements'), // 110-102
+  row(3, 'soldiers', 'brownstones', 'prewar', 'park', 'park', 'guggenheim', 'prewar', 'office', 'redbrick'), // 102-93
+  row(3, 'riverside', 'prewar', 'prewar', 'park', 'park', 'prewar', 'hotel', 'shops', 'gracie'), //       93-85
+  row(3, 'riverside', 'prewar', 'naturalhistory', 'park', 'park', 'museum', 'prewar', 'brownstones', 'glass'), // 85-76
+  row(3, 'riverside', 'brownstones', 'dakota', 'park', 'park', 'prewar', 'hotel', 'redbrick', 'modern'), // 76-68
+  row(3, 'glass', 'lincoln', 'prewar', 'park', 'park', 'prewar', 'office', 'commercial', 'deco'), //      68-59
+  row(3, 'glass', 'hearst', 'columbus', 'radiocity', 'plazahotel', 'supertall', 'citigroup', 'office', 'qbridge'), // 59-52
+  row(3, 'intrepid', 'billboards', 'tsq', 'tsq', 'rockefeller', 'stpatricks', 'seagram', 'office', 'un'), // 52-46
+  row(3, 'glass', 'nyt', 'tsq', 'tsq', 'library', 'vanderbilt', 'grandcentral', 'chrysler', 'glass'), //   46-40
+  row(3, 'hudsonyards', 'glass', 'commercial', 'macys', 'empire', 'office', 'deco', 'glass', 'modern'), // 40-33
+  row(3, 'glass', 'highline', 'arena', 'commercial', 'office', 'shops', 'brownstones', 'modern', 'glass'), // 33-26
+  row(3, 'lofts', 'highline', 'shops', 'shops', 'flatiron', 'office', 'brownstones', 'redbrick', 'redbrick'), // 26-20
+  row(3, 'littleisland', 'highline', 'commercial', 'shops', 'office', 'unionsq', 'redbrick', 'redbrick', 'redbrick'), // 20-14
+  row(3, 'glass', 'brownstones', 'brownstones', 'court', 'washsq', 'walkups', 'shops', 'tenements', 'tenements', 'redbrick'), // 14-8
+  row(3, 'glass', 'lofts', 'lofts', 'lofts', 'shops', 'tenements', 'tenements', 'bodega', 'tenements', 'walkups'), // 8-Houston
+  row(3, 'lofts', 'lofts', 'lofts', 'shops', 'chinatown', 'tenements', 'walkups', 'tenements', 'tenements', 'wbridge'), // Houston-Grand
+  row(3, 'lofts', 'leonard', 'office', 'chinatown', 'chinatown', 'tenements', 'walkups', 'tenements', 'mbridge'), // Grand-Chambers
+  row(3, 'glass', 'office', 'cityhall', 'office', 'deco', 'spruce', 'bridge'), //                         Chambers-Fulton
+  row(3, 'glass', 'wtc', 'memorial', 'trinity', 'fortywall', 'seventypine', 'seaport'), //               Fulton-Wall
+  row(3, 'battery', 'bowlinggreen', 'exchange', 'deco', 'ferry'), //                                     Wall-Battery
+  row(0), row(0), row(0), row(0), row(0),
 ];
 export const isManhattan = (bx, by) => bx >= 0 && by >= 0 && bx < NBX && by < NBY && BLOCK_TYPES[by][bx] !== _;
 
@@ -70,8 +75,8 @@ export const isManhattan = (bx, by) => bx >= 0 && by >= 0 && bx < NBX && by < NB
 // landscape, 59th to 110th Street) and Times Square (four blocks of screens round a pedestrian
 // plaza made of the old streets).
 export const MERGES = [
-  { kind: 'park', bx0: 6, by0: 8, bx1: 7, by1: 12 },
-  { kind: 'tsq', bx0: 5, by0: 14, bx1: 6, by1: 15 },
+  { kind: 'park', bx0: 6, by0: 11, bx1: 7, by1: 16 },
+  { kind: 'tsq', bx0: 5, by0: 18, bx1: 6, by1: 19 },
 ];
 export const PARK = MERGES[0];
 export const TSQ = MERGES[1];
@@ -111,27 +116,33 @@ export const parkLoop = () => ({ i0: PARK.bx0, i1: PARK.bx1 + 1, j0: PARK.by0, j
 export const WATER_Z = -0.45;
 export const SHORE = 12;
 export const BROOKLYN_X = 384;
+// Brooklyn's shore comes further west below the Manhattan Bridge (DUMBO, Brooklyn Heights, Red Hook)
+export const BK_SOUTH = { x0: 340, y0: 760 };
+export const eastShoreX = (y) => (y >= BK_SOUTH.y0 ? BK_SOUTH.x0 : BROOKLYN_X);
 export const BOROUGHS = [
   { name: 'nj', x0: 0, y0: 0, x1: 22, y1: MAPY },
-  { name: 'bronx', x0: 81, y0: 0, x1: MAPX, y1: 186 },
-  { name: 'queens', x0: BROOKLYN_X, y0: 189, x1: MAPX, y1: 459, ground: true },
-  { name: 'brooklyn', x0: BROOKLYN_X, y0: 466, x1: MAPX, y1: MAPY, ground: true },
+  { name: 'bronx', x0: 81, y0: 0, x1: MAPX, y1: 240 },
+  { name: 'queens', x0: BROOKLYN_X, y0: 250, x1: MAPX, y1: 567, ground: true },
+  { name: 'brooklyn', x0: BROOKLYN_X, y0: 573, x1: MAPX, y1: BK_SOUTH.y0, ground: true },
+  { name: 'brooklyn', x0: BK_SOUTH.x0, y0: BK_SOUTH.y0, x1: MAPX, y1: MAPY, ground: true },
 ];
 export const ISLANDS = [
-  { name: 'randalls', x0: 318, y0: 192, x1: 360, y1: 230 },
-  { name: 'roosevelt', x0: 349, y0: 286, x1: 360, y1: 404 },
-  { name: 'governors', x0: 228, y0: 672, x1: 292, y1: 706 },
+  { name: 'randalls', x0: 318, y0: 252, x1: 360, y1: 302 },
+  { name: 'roosevelt', x0: 349, y0: 400, x1: 360, y1: 540 },
+  { name: 'governors', x0: 240, y0: 864, x1: 300, y1: 900 },
 ];
-export const LIBERTY = { x: 44, y: 676, rx: 9.6, ry: 6.6 };
-export const ELLIS = { x0: 34, y0: 618, x1: 52, y1: 634 };
+export const LIBERTY = { x: 50, y: 934, rx: 9.6, ry: 6.6 };
+export const ELLIS = { x0: 36, y0: 866, x1: 54, y1: 882 };
 export const GROUND_EXTRA = [
   { x0: LIBERTY.x - 11, y0: LIBERTY.y - 8, x1: LIBERTY.x + 15, y1: LIBERTY.y + 8 },
   ELLIS,
 ];
+// rows where things are across the rivers (for the boroughs' builders)
+export const ROWS = { palisadesEnd: 19, hobokenEnd: 24, harbor: 31, lic: 17, gantry: 18 };
 
 // (west to east / north to south, roughly where each line falls)
 export const AVENUE_NAMES = ['NJ', 'HUDSON', 'HUDSON', '12 AV', '11 AV', '9 AV', '8 AV', '6 AV', '5 AV', 'PARK AV', 'LEXINGTON', '1 AV', 'FDR DR', 'EAST RIVER', 'QUEENS', 'BROOKLYN'];
-export const STREET_NAMES = ['SPUYTEN DUYVIL', '207 ST', '190 ST', '175 ST', '155 ST', '140 ST', '125 ST', '110 ST', '97 ST', '86 ST', '77 ST', '68 ST', '59 ST', '50 ST', '45 ST', '38 ST', '30 ST', '23 ST', '14 ST', 'HOUSTON ST', 'CANAL ST', 'CHAMBERS ST', 'FULTON ST', 'BATTERY PL', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY'];
+export const STREET_NAMES = ['SPUYTEN DUYVIL', '218 ST', '207 ST', '196 ST', '185 ST', '174 ST', '163 ST', '152 ST', '142 ST', '131 ST', '120 ST', '110 ST', '102 ST', '93 ST', '85 ST', '76 ST', '68 ST', '59 ST', '52 ST', '46 ST', '40 ST', '33 ST', '26 ST', '20 ST', '14 ST', '8 ST', 'HOUSTON ST', 'GRAND ST', 'CHAMBERS ST', 'FULTON ST', 'WALL ST', 'BATTERY PL', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY', 'UPPER BAY'];
 
 export function blockRect(bx, by) {
   return { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };

@@ -25,9 +25,9 @@ const CROWN = 254; // texel code for the coloured crown lights at night
 const sides = (t, top) => (top ? { px: t, nx: t, py: t, ny: t, pz: top } : { px: t, nx: t, py: t, ny: t });
 
 // ---- facade modules (one storey, tiled) ------------------------------------------------------------
-const GLASS = { blue: 0x3e7ea3, teal: 0x3a8a8c, green: 0x4a8a6a, silver: 0x8aa2b4, dark: 0x2c3a4a, bronze: 0x6a5a48, sky: 0x6aa6cc, smoke: 0x5a6670 };
+export const GLASS = { blue: 0x3e7ea3, teal: 0x3a8a8c, green: 0x4a8a6a, silver: 0x8aa2b4, dark: 0x2c3a4a, bronze: 0x6a5a48, sky: 0x6aa6cc, smoke: 0x5a6670 };
 const STONE = { lime: 0xdccfb2, buff: 0xd6c09a, grey: 0xb4b0a8, granite: 0xc49e8e, white: 0xece8e0, brown: 0x9a7a62, black: 0x34343a };
-function glassModule(C, tint, pat) {
+export function glassModule(C, tint, pat) {
   return C.atlas.shared(`sk_g_${tint.toString(16)}_${pat}`, 32, 48, (p) => {
     const hi = mixc(tint, 0xe8f4fa, 0.55), mull = mixc(tint, 0xd0d8de, 0.6), mullD = shade(tint, 0.6);
     for (let y = 0; y < 48; y++) for (let x = 0; x < 32; x++) {
@@ -41,7 +41,7 @@ function glassModule(C, tint, pat) {
     else { p.hline(0, 47, 32, mullD); p.vline(0, 0, 48, mullD); } // flush: a smooth skin
   });
 }
-function stoneModule(C, color, pat) {
+export function stoneModule(C, color, pat) {
   return C.atlas.shared(`sk_s_${color.toString(16)}_${pat}`, 32, 48, (p) => {
     if (pat === 'brick') brickFill(p, 0, 0, 32, 48, [color, shade(color, 0.94), shade(color, 1.05)], 711);
     else stoneFill(p, 0, 0, 32, 48, [color], 712, 12, { blocks: 32 });
@@ -60,7 +60,7 @@ function stoneModule(C, color, pat) {
   });
 }
 // a lobby storey: big glass shopfronts between piers, or stone with bronze doors
-function lobbyModule(C, color, glass) {
+export function lobbyModule(C, color, glass) {
   return C.atlas.shared(`sk_lobby_${color.toString(16)}_${glass ? 1 : 0}`, 32, 80, (p) => {
     for (let y = 0; y < 80; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(color, 0.95 + hash2i(x, y, 721) * 0.06));
     p.rect(0, 0, 32, 8, shade(color, 1.08)); p.hline(0, 8, 32, shade(color, 0.7));
@@ -70,12 +70,12 @@ function lobbyModule(C, color, glass) {
     if (!glass) p.rect(4, 18, 24, 2, 0xc8a24a);
   });
 }
-const crownTex = (C, color) => C.atlas.shared(`sk_crown_${color.toString(16)}`, 32, 32, (p) => {
+export const crownTex = (C, color) => C.atlas.shared(`sk_crown_${color.toString(16)}`, 32, 32, (p) => {
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(color, 0.95 + hash2i(x, y, 731) * 0.06));
   for (let x = 2; x < 32; x += 6) { p.rect(x, 4, 3, 24, 0xf4f0e6, CROWN); p.vline(x + 2, 4, 24, 0xd8d0c0, CROWN); }
   p.hline(0, 1, 32, 0xf4f0e6, CROWN);
 });
-const copperTex = (C) => C.atlas.shared('copper', 32, 32, (p) => {
+export const copperTex = (C) => C.atlas.shared('copper', 32, 32, (p) => {
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++) {
     let c = shade(x % 8 === 0 ? 0x4f9a86 : x % 8 === 1 ? 0x7cc8b0 : 0x6cb8a0, 0.92 + hash2i(x, y, 4) * 0.12);
     if (hash2i(x >> 1, y >> 2, 7) > 0.86) c = mixc(c, 0x8ad8c0, 0.4);
@@ -85,7 +85,7 @@ const copperTex = (C) => C.atlas.shared('copper', 32, 32, (p) => {
 const metalTex = (C) => sharedTex(C).metal;
 
 // a frustum: the four sides sloping in from (x0..x1, y0..y1) at z0 to an inset i at z1
-function frustum(C, x0, y0, x1, y1, z0, z1, i, tex) {
+export function frustum(C, x0, y0, x1, y1, z0, z1, i, tex) {
   const mb = C.mb;
   mb.slope([x0, y1, z0], [x1, y1, z0], [x0 + i, y1 - i, z1], [x1 - i, y1 - i, z1], tex);
   mb.slope([x1, y0, z0], [x0, y0, z0], [x1 - i, y0 + i, z1], [x0 + i, y0 + i, z1], tex);
@@ -93,7 +93,7 @@ function frustum(C, x0, y0, x1, y1, z0, z1, i, tex) {
   mb.slope([x0, y0, z0], [x0, y1, z0], [x0 + i, y0 + i, z1], [x0 + i, y1 - i, z1], tex);
 }
 // a vertical prism over a convex polygon (points in order of increasing angle), with a flat top
-function prism(C, pts, z0, z1, tex, top, mat = MAT.OFFICE, seed = 0) {
+export function prism(C, pts, z0, z1, tex, top, mat = MAT.OFFICE, seed = 0) {
   const mb = C.mb, n = pts.length;
   const cx = pts.reduce((s, q) => s + q[0], 0) / n, cy = pts.reduce((s, q) => s + q[1], 0) / n;
   mb.body(() => {
@@ -107,7 +107,7 @@ function prism(C, pts, z0, z1, tex, top, mat = MAT.OFFICE, seed = 0) {
   markHeight(C.world, Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), z1);
 }
 // a rectangle with its corners cut off by c, as prism points
-const chamfered = (x0, y0, x1, y1, c) => [[x1 - c, y1], [x0 + c, y1], [x0, y1 - c], [x0, y0 + c], [x0 + c, y0], [x1 - c, y0], [x1, y0 + c], [x1, y1 - c]].reverse();
+export const chamfered = (x0, y0, x1, y1, c) => [[x1 - c, y1], [x0 + c, y1], [x0, y1 - c], [x0, y0 + c], [x0 + c, y0], [x1 - c, y0], [x1, y0 + c], [x1, y1 - c]].reverse();
 // a street-number sign on a face, for the lobby
 function addressSign(C, x0, x1, y, z, text) {
   const t = C.atlas.alloc(Math.max(48, text.length * 4 + 10), 10);
@@ -118,7 +118,7 @@ function addressSign(C, x0, x1, y, z, text) {
 }
 
 // ---- the generic tower ---------------------------------------------------------------------------
-const district = (bx, by) => (by <= 12 ? 'upper' : by <= 16 ? 'mid' : by <= 20 ? 'low' : 'down') + (bx <= 3 ? '-west' : '');
+const district = (bx, by) => (by <= 16 ? 'upper' : by <= 21 ? 'mid' : by <= 26 ? 'low' : 'down') + (bx <= 3 ? '-west' : '');
 const HEIGHT = {
   mid: { glass: [44, 74], modern: [30, 48], deco: [42, 66], office: [24, 38] },
   down: { glass: [36, 60], modern: [30, 44], deco: [44, 62], office: [24, 40] },
@@ -228,7 +228,7 @@ export function towerBlock(C, L, bx, by, kind) {
 }
 
 // the top of a tower over rectangle r at height z
-function crown(C, r, z, style, color) {
+export function crown(C, r, z, style, color) {
   const mb = C.mb, S = sharedTex(C), W = C.world, rng = C.rng;
   const cx = (r.x0 + r.x1) / 2, cy = (r.y0 + r.y1) / 2, w = r.x1 - r.x0, d = r.y1 - r.y0;
   if (style === 'flat' || style === 'mast') {

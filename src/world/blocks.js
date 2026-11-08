@@ -19,6 +19,7 @@ import { buildBridges } from './bridges.js';
 import { greaterNewYork } from './greater.js';
 import * as UP from './uptown.js';
 import * as SK from './skyline.js';
+import * as SG from './sights.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { centralPark } from './centralpark.js';
 import { billboardsBlock, timesSquareBlock, timesSquareDistrict } from './timessq.js';
@@ -316,6 +317,26 @@ export function buildBlocks(C) {
 }
 
 
+// A block of the given type somewhere off Manhattan (the other boroughs): built with the same
+// builders and texture variants as Manhattan's own blocks, but nobody lives or shops there as far as
+// the simulation is concerned (its doors and shops are dropped; the boroughs aren't walked).
+export const blockOf = (type) => BLOCKS[type];
+export function offIslandBlock(C, L, type, bx, by, z0 = CURB) {
+  const W = C.world, fn = BLOCKS[type];
+  if (!fn) return;
+  const keep = { doors: W.doors.length, shops: W.shops.length, stoopSeats: W.stoopSeats.length, officeDoors: W.officeDoors.length, benches: W.benches.length, carts: W.carts.length, subways: W.subways.length };
+  const rng0 = C.rng, zs = C.z0;
+  const nv = VARIANTS[type];
+  const variant = nv ? Math.abs(bx * 7 + by * 13 + ((bx * by) % 5)) % nv : 0;
+  C.rng = new RNG(nv ? typeSeed(type) % 100000 + variant * 7919 : 4000 + bx * 97 + by * 31);
+  C.z0 = z0;
+  if (nv) C.atlas.beginReplay(`${type}:${variant}`);
+  fn(C, L, bx, by, variant);
+  C.atlas.endReplay();
+  C.rng = rng0; C.z0 = zs;
+  for (const [k, n] of Object.entries(keep)) W[k].length = n;
+}
+
 // The waterfront: the water is out of bounds, an iron railing runs along every quay, the Brooklyn
 // Bridge crosses the East River to Brooklyn's shore and the Statue of Liberty stands in the harbour
 function waterfront(C) {
@@ -335,10 +356,11 @@ function waterfront(C) {
       mb.box(x0 + 0.3, y0 - 0.05, CURB + 0.5, x1 - 0.3, y0 + 0.05, CURB + 0.58, iron);
     }
   }
-  buildBridges(C);
-  LM.brooklynBridge(C);
-  LM.brooklynShore(C);
-  greaterNewYork(C);
+  const tm = (k, f) => { const t = performance.now(); f(); (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t); };
+  tm('bridges', () => buildBridges(C));
+  tm('bkbridge', () => LM.brooklynBridge(C));
+  tm('bkshore', () => LM.brooklynShore(C));
+  tm('greater', () => greaterNewYork(C));
   LM.statueOfLiberty(C);
   void WATER_Z; void roadEnd;
 }
@@ -386,7 +408,7 @@ const BLOCKS = {
   arena: (C, L) => LM.arena(C, L),
   flatiron: (C, L) => LM.flatiron(C, L),
   washsq: (C, L) => LM.washingtonSquare(C, L),
-  chinatown: (C, L, bx, by) => { walkupBlock(C, L, { shops: 1, shopKinds: CHINATOWN, floors: [4, 6], fireEscape: true, awning: 1 }); LM.chinatownExtras(C, L, by === 9 && bx === 8); },
+  chinatown: (C, L, bx, by) => { walkupBlock(C, L, { shops: 1, shopKinds: CHINATOWN, floors: [4, 6], fireEscape: true, awning: 1 }); LM.chinatownExtras(C, L, !C.world._ctGate && (C.world._ctGate = true)); },
   wtc: (C, L) => LM.oneWTC(C, L),
   exchange: (C, L) => LM.exchange(C, L),
   // the rest of Manhattan
@@ -416,6 +438,19 @@ const BLOCKS = {
   apollo: (C, L) => walkupBlock(C, L, { shops: 1, theater: 'APOLLO', fireEscape: true, widths: [[4.5, 9, 4.5]] }),
   unionsq: (C, L) => UP.unionSquare(C, L),
   cityhall: (C, L) => UP.cityHall(C, L),
+  // more sights
+  intrepid: (C, L, bx, by) => SG.intrepid(C, L, bx, by),
+  highline: (C, L, bx, by) => SG.highLine(C, L, bx, by),
+  littleisland: (C, L, bx, by) => SG.littleIsland(C, L, bx, by),
+  radiocity: (C, L) => SG.radioCity(C, L),
+  macys: (C, L) => SG.macys(C, L),
+  trinity: (C, L, bx, by) => SG.trinity(C, L, bx, by),
+  bowlinggreen: (C, L) => SG.bowlingGreen(C, L),
+  ferry: (C, L) => SG.ferryTerminal(C, L),
+  seaport: (C, L, bx, by) => SG.seaport(C, L, bx, by),
+  dakota: (C, L) => SG.dakota(C, L),
+  gracie: (C, L) => SG.gracie(C, L),
+  stjohn: (C, L) => MH.stPatricks(C, L, { stone: 0xb8b0a0, key: 'sjd', spires: false, name: 'ST JOHN THE DIVINE' }),
   gwb: () => {}, tbridge: () => {}, qbridge: () => {}, wbridge: () => {}, mbridge: () => {},
 };
 

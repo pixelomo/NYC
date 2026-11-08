@@ -24,20 +24,25 @@ npm run build
 
 ![All of Manhattan from above, with the bridges out to New Jersey, the Bronx, Queens and Brooklyn, the islands and the harbour](docs/city.png)
 
-- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 26 rows of blocks
-  (each standing for about ten real streets) up to ten avenues wide, about 175 blocks of island,
-  following the real shoreline — narrow in the north, bulging through Midtown, the Lower East Side
-  sticking out into the East River, tapering to the Battery. Riverside drives ring it. Across the
+- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 30 rows of blocks
+  (each standing for four to ten real streets, closer together in Midtown and downtown) up to ten
+  avenues wide, about 240 blocks of island, following the real shoreline — narrow in the north,
+  bulging through Midtown, the Lower East Side sticking out into the East River, tapering to the
+  Battery. Riverside drives ring it. Across the
   rivers lie the **edges of greater New York**: the **Palisades** cliffs, Fort Lee, Hoboken and
   Jersey City's towers in **New Jersey**; Riverdale and blocks of apartment houses round **Yankee
-  Stadium** in **the Bronx**; Astoria, **Long Island City**'s glass towers and Gantry Plaza with the
-  **Pepsi-Cola sign** in **Queens**; **Brooklyn**'s waterfront; and the islands — **Randall's**,
+  Stadium** (limestone arches, the white frieze, the scoreboard) in **the Bronx**; Astoria, **Long
+  Island City**'s glass towers and Gantry Plaza with the **Pepsi-Cola sign** in **Queens**;
+  **Brooklyn**'s waterfront with whole streets of brownstones, walk-ups and DUMBO's lofts behind it
+  and the **Domino Sugar** sign in Williamsburg. Their blocks are built with the same generators as
+  Manhattan's (stoops, fire escapes, shopfronts, water towers), not as plain boxes. And the islands — **Randall's**,
   **Roosevelt** (apartment towers, lighthouse, Four Freedoms Park), **Governors** (Castle Williams,
   Fort Jay), **Ellis** and **Liberty**.
 - **Bridges leading out**: the **George Washington Bridge** (two decks, steel lattice towers, four
   cables, the little red lighthouse underneath), the **Henry Hudson Bridge**'s arch over Spuyten
   Duyvil, **High Bridge**'s stone arcade and steel arch, the **Triborough** (lift span, viaduct over
-  Randall's Island, suspension span to Queens), the **Queensboro Bridge**'s cantilever truss over
+  Randall's Island, suspension span to Queens), the **Hell Gate Bridge**'s crimson steel arch between
+  granite towers, the **Queensboro Bridge**'s cantilever truss over
   Roosevelt Island with the **tram** beside it, the **Williamsburg**, **Manhattan** (with its arch
   and colonnade) and **Brooklyn Bridges**. Strings of lights hang along their cables at night.
 - Pick a place from the **GO TO** menu to glide there (the camera turns to that place's best
@@ -48,7 +53,19 @@ npm run build
     water tower, **Columbia**'s Low Library, the **Apollo** on 125th Street, **Riverside Park** all
     down the Hudson with **Grant's Tomb**, **Riverside Church** and the **Soldiers' and Sailors'
     Monument**
-  - downtown: **Union Square** with its greenmarket, **City Hall** and the **Woolworth Building**
+  - uptown: **St John the Divine**, **Gracie Mansion** in Carl Schurz Park on the East River, and
+    **the Dakota**'s green roofs, gables and corner pavilions on Central Park West
+  - on the Hudson: the **Intrepid** on its pier (aircraft carrier with planes on the deck and its
+    island, the submarine alongside, the shuttle pavilion), the **High Line**'s planted viaduct
+    running three blocks through Chelsea over the cross streets (people walk it, up the stairs at
+    each end), and **Little Island** on its field of concrete tulips
+  - Midtown: **Radio City Music Hall** with its neon marquee round the corner and the tall sign,
+    **Macy's** on Herald Square with its display windows, red awnings and star sign
+  - downtown: **Union Square** with its greenmarket, **City Hall** and the **Woolworth Building**,
+    **Trinity Church**'s brownstone spire and graveyard at the head of Wall Street, **Bowling
+    Green**'s oval inside its iron fence with the **Charging Bull** and the Custom House, **South
+    Street Seaport** with Pier 17 and two tall ships, and the **Staten Island Ferry** terminal with
+    orange ferries in the slips and out in the bay
   - pre-war apartment towers along the park: twin-towered with little temples on top on Central
     Park West, limestone under slate mansards on Fifth Avenue, buff brick with art deco setbacks
   - **no two ordinary towers alike**: each is generated from its block and its district. Heights
@@ -120,9 +137,8 @@ npm run build
   ticker. Its south-east corner is left open as a square of its own, where red bleacher steps rise
   behind a ticket booth, crowded with people taking in the lights, among café tables, planters,
   carts and floodlights. A bronze statue stands at the north end and a tower with a crystal ball on
-  its mast at the south end (the ball drops at midnight on winter nights, then fireworks). The city
-  opens on this view. All the ads are made up; at night the screens wash the square in colour.
-- **Central Park**, five blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
+  its mast at the south end (the ball drops at midnight on winter nights, then fireworks). All the ads are made up; at night the screens wash the square in colour.
+- **Central Park**, six blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
   one from north to south: **Harlem Meer**, the North Woods with the Loch and the Great Hill, the
   **Conservatory Garden** (fountain, beds, hedges, a wisteria pergola) and a dog run; the
   **Reservoir** inside its fence and running track, a gatehouse and cherry trees on its bank; the
@@ -134,9 +150,9 @@ npm run build
   round it all, stone walls run round the edge with a gate at every street, and thousands of trees,
   lanterns and benches fill the rest. The bus loops round it, and the walking paths, bridges and
   sights (Bethesda Terrace, the Reservoir, the castle, Bow Bridge, Harlem Meer, the Great Lawn) are
-  on the GO TO menu.
+  on the GO TO menu. The city opens over the park.
 - A **basketball court** with chain-link fence, hoops and floodlights, a playground and a handball
-  wall with a mural, in the Village.
+  wall with a mural, in the Village by Washington Square — where the real West 4th Street courts are.
 - Streets with crosswalks, working **traffic and pedestrian signals**, street lamps, hydrants,
   mailboxes, newspaper boxes, bus shelters, subway entrances with green globes, food carts, and
   steel **vent grates in the sidewalks** and manholes that puff steam (most in winter).
@@ -243,7 +259,7 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
-  `layout.js` is the 15×26 block map of Manhattan (merged regions for Central Park and Times
+  `layout.js` is the 15×36 block map of Manhattan (merged regions for Central Park and Times
   Square; the roads follow the land), with the other boroughs and the islands as regions. `ground.js`
   rasterises it into a land map (water, road, sidewalk, other boroughs) that drives the ground
   geometry, the quays and the collision grid; the ground texture is stored as tiles over the land
@@ -251,7 +267,9 @@ URL parameters are handy for jumping straight to a moment, e.g.
   `centralpark.js` builds the park, `manhattan.js` and `uptown.js` the towers, museums and plazas,
   `skyline.js` the tower generator and the real towers, `landmarks.js` the older skyscrapers, the
   Brooklyn Bridge and the statue, `bridges.js` the other bridges,
-  `greater.js` the boroughs and islands, `timessq.js` the square. To keep the big map
+  `greater.js` the boroughs and islands, `sights.js` the newer sights (Intrepid, High Line, Radio
+  City, Macy's, Trinity, Bowling Green, the ferry, the Seaport, the Dakota, Gracie Mansion, the
+  Domino sign), `timessq.js` the square. To keep the big map
   quick to build and light on memory, ordinary blocks come in a few seeded variants per type whose
   atlas art is painted once and reused, and the ground is painted at half the art resolution with
   the fine grain added back in the shader.

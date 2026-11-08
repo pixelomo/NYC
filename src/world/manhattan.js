@@ -63,7 +63,7 @@ function lobbyPainter(color, frontFace, doorKind = 'arch') {
   };
 }
 // a steep roof sloping in from all four eaves to a flat top (a mansard or a hipped roof)
-function mansard(C, x0, y0, x1, y1, z0, z1, inset, roofTex, topTex) {
+export function mansard(C, x0, y0, x1, y1, z0, z1, inset, roofTex, topTex) {
   const mb = C.mb, i = inset;
   mb.slope([x0, y1, z0], [x1, y1, z0], [x0 + i, y1 - i, z1], [x1 - i, y1 - i, z1], roofTex);
   mb.slope([x1, y0, z0], [x0, y0, z0], [x1 - i, y0 + i, z1], [x0 + i, y0 + i, z1], roofTex);
@@ -172,7 +172,7 @@ export function hotelBlock(C, L, bx, by) {
 export function supertall(C, L, bx) {
   const S = sharedTex(C), mb = C.mb, z0 = C.z0;
   const cx = (L.x0 + L.x1) / 2, cy = (L.y0 + L.y1) / 2;
-  if (bx % 2) {
+  if (bx >= 8) {
     const grid = tex(C, 'st_grid', 32, 48, (p) => {
       for (let y = 0; y < 48; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(0xeceae4, 0.96 + hash2i(x, y, 51) * 0.05));
       p.rect(5, 6, 22, 36, 0x2a3646, winCode(0.5));
@@ -204,7 +204,7 @@ export function supertall(C, L, bx) {
     beacon(C, cx, y1 - 0.8, z + 4.1);
   }
   office(C, cx, L.y1 + 0.9, cx, L.y1 - 0.4);
-  landmark(C, bx % 2 ? '432 PARK AVENUE' : '111 WEST 57TH STREET', cx, L.y1 + 3, 0);
+  landmark(C, bx >= 8 ? '432 PARK AVENUE' : '111 WEST 57TH STREET', cx, L.y1 + 3, 0);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -482,10 +482,10 @@ export function plazaHotel(C, L) {
 // ---------------------------------------------------------------------------------------------
 // St Patrick's Cathedral: a white marble Gothic church, its twin spires on Fifth Avenue, the nave
 // and transepts under steep roofs, the rose window between the towers
-export function stPatricks(C, L) {
+export function stPatricks(C, L, o = {}) {
   const S = sharedTex(C), mb = C.mb, z0 = C.z0, W = C.world;
-  const marble = 0xeee8dc;
-  const nave = tex(C, 'sp_nave', 48, 224, (p) => {
+  const marble = o.stone ?? 0xeee8dc, key = o.key ?? 'sp';
+  const nave = tex(C, `${key}_nave`, 48, 224, (p) => {
     stoneFill(p, 0, 0, 48, 224, [marble], 111, 12, { blocks: 24 });
     // a tall pointed window of stained glass, lit softly from inside at night
     const glass = [0x2a3a8a, 0x8a2a3a, 0xc8a030, 0x2a6a4a];
@@ -496,7 +496,7 @@ export function stPatricks(C, L) {
     for (const bx of [0, 46]) { p.rect(bx, 0, 2, 224, shade(marble, 0.82)); }
     p.rect(0, 210, 48, 14, shade(marble, 0.92));
   });
-  const front = tex(C, 'sp_front', 64, 288, (p) => {
+  const front = tex(C, `${key}_front`, 64, 288, (p) => {
     stoneFill(p, 0, 0, 64, 288, [marble], 112, 12, { blocks: 24 });
     // the rose window and the great door
     for (let y = 40; y < 104; y++) for (let x = 0; x < 64; x++) {
@@ -507,7 +507,7 @@ export function stPatricks(C, L) {
     for (let k = 0; k < 28; k++) { const dy = Math.round(Math.abs(k - 13.5) < 14 ? (14 - Math.abs(k - 13.5)) * 1.4 : 0); p.vline(18 + k, 196 - dy, dy, 0x5a3e1e); }
     p.rect(20, 210, 24, 78, 0x3a2a18);
   });
-  const spireTex = tex(C, 'sp_spire', 32, 64, (p) => {
+  const spireTex = tex(C, `${key}_spire`, 32, 64, (p) => {
     stoneFill(p, 0, 0, 32, 64, [marble], 113, 8, { blocks: 16 });
     for (let y = 4; y < 64; y += 8) for (let x = 0; x < 32; x += 8) p.rect(x + 2, y, 3, 2, shade(marble, 0.8));
   });
@@ -531,16 +531,18 @@ export function stPatricks(C, L) {
   for (const [sy0, sy1] of [[fy0, fy0 + 3.0], [fy1 - 3.0, fy1]]) {
     mb.box(L.x0 + 1.2, sy0, z0, nx0 + 0.4, sy1, z0 + 13.5, sides(spireTex, { t: S.limeTop }), { mat: MAT.OFFICE });
     const scx = (L.x0 + 1.2 + nx0 + 0.4) / 2, scy = (sy0 + sy1) / 2;
-    mb.cone(scx, scy, z0 + 13.5, z0 + 22.5, 1.55, 8, spireTex, { angle: PI / 8 });
+    if (o.spires !== false) {
+      mb.cone(scx, scy, z0 + 13.5, z0 + 22.5, 1.55, 8, spireTex, { angle: PI / 8 });
+      markHeight(W, L.x0 + 1.2, sy0, nx0 + 0.4, sy1, z0 + 22.5);
+    }
     for (const [ox, oy] of [[-1.3, -1.3], [1.3, -1.3], [-1.3, 1.3], [1.3, 1.3]]) mb.cone(scx + ox, scy + oy, z0 + 13.5, z0 + 15.4, 0.28, 6, spireTex);
-    markHeight(W, L.x0 + 1.2, sy0, nx0 + 0.4, sy1, z0 + 22.5);
   }
   C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
   C.paintGround(L.x0, fy0 + 3.2, L.x0 + 1.6, fy1 - 3.2, 'stairsX');
   for (const [px, py] of [[L.x1 - 1.4, L.y0 + 1.6], [L.x1 - 1.4, L.y1 - 1.6], [L.x0 + 7, L.y0 + 1.6], [L.x0 + 7, L.y1 - 1.6]]) C.addTree(px, py, 'plane', true);
   W.lamps.push({ x: L.x0 + 0.5, y: (ny0 + ny1) / 2, z: z0 + 1, r: 5, color: [1, 0.92, 0.8], k: 0.5, kind: 'flood' });
   W.officeDoors.push({ x: L.x0 - 0.9, y: (ny0 + ny1) / 2, dx: L.x0 + 1.4, dy: (ny0 + ny1) / 2, kind: 'office' });
-  landmark(C, "ST PATRICK'S CATHEDRAL", L.x1 + 1.2, (L.y0 + L.y1) / 2 + 4);
+  landmark(C, o.name ?? "ST PATRICK'S CATHEDRAL", L.x1 + 1.2, (L.y0 + L.y1) / 2 + 4);
 }
 
 // ---------------------------------------------------------------------------------------------

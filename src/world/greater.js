@@ -10,7 +10,9 @@
 //   Ellis Island (the red-brick immigration station with its four domed towers)
 // Brooklyn's waterfront is in landmarks.js (brooklynShore), by the Brooklyn Bridge.
 
-import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS, ROWS, NBY, BLOCK_TYPES, eastShoreX } from './layout.js';
+import { dominoSign } from './sights.js';
+import { offIslandBlock } from './blocks.js';
 import { MAT } from './mesh.js';
 import { winCode } from '../core/painter.js';
 import { shade, mixc, hash2i, RNG, valueNoise } from '../core/math.js';
@@ -145,64 +147,79 @@ function fillLot(C, lot, pick) {
   }
 }
 
+// whole blocks of the borough's own: the lot of block (bx, by) if all of it (and a margin) is land
+// and not kept clear
+function wholeLots(C, R, keep) {
+  const land = (x, y) => { const c = clsAt(x, y); return c === CL.BORO || c === CL.RAISED; };
+  const out = [];
+  for (let by = 0; by < NBY; by++)
+    for (let bx = 0; bx < 16; bx++) {
+      const L = { x0: lotStart(bx), y0: lotStart(by), x1: lotEnd(bx), y1: lotEnd(by) };
+      if (L.x0 < R.x0 || L.x1 > R.x1 || L.y0 < R.y0 || L.y1 > R.y1) continue;
+      let ok = true;
+      for (let y = L.y0 - 2.5; y <= L.y1 + 2.5 && ok; y += 1.5) for (let x = L.x0 - 2.5; x <= L.x1 + 2.5; x += 1.5) if (!land(x, y) || keep(x, y)) { ok = false; break; }
+      if (ok) out.push({ ...L, bx, by });
+    }
+  return out;
+}
+
 // ---- New Jersey ----------------------------------------------------------------------------------------
 function newJersey(C) {
   const R = region('nj'), L = looks(C), mb = C.mb, rng = C.rng, W = C.world;
-  const cliffEnd = 330, zp = 9.0, xe = R.x1;
+  const cliffEnd = lotStart(ROWS.palisadesEnd), zp = 9.0, xe = R.x1;
+  const gwbY = (W.bridges || []).find((b) => b.name === 'GEORGE WASHINGTON BRIDGE')?.y ?? -100;
   // the Palisades: a wall of rock along the river, the wooded plateau on top
   mb.box(R.x0, R.y0, CURB, xe, cliffEnd, zp, { px: L.rock, py: L.rock, pz: { t: L.grass, world: true } });
   W.solids.push([R.x0, R.y0, xe, cliffEnd, zp]);
   markHeight(W, R.x0, R.y0, xe, cliffEnd, zp);
   for (let y = 3; y < cliffEnd - 2; y += 2.2) {
-    if (Math.abs(y - 99) < 6) continue; // the bridge comes in here
+    if (Math.abs(y - gwbY) < 6) continue; // the bridge comes in here
     addTreeAt(C, xe - 1.4 - rng.range(0, 1.2), y + rng.range(-0.5, 0.5), zp, rng.pick(['oak', 'elm', 'locust', 'pine']), rng.range(0.9, 1.2));
     if (rng.chance(0.55)) addTreeAt(C, rng.range(1.5, xe - 4), y, zp, rng.pick(['oak', 'elm', 'pine']), rng.range(0.9, 1.2));
   }
-  // Fort Lee's apartment towers on top of the cliffs, either side of the bridge
-  for (const [y0, y1, h] of [[70, 80, 26], [84, 92, 32], [110, 119, 28], [124, 132, 22], [150, 158, 18]]) bldg(C, 3, y0, 13, y1, h, rng.chance(0.5) ? L.lime : L.brickTan, L.roofs[0], { z0: zp, seed: y0 });
-  // the shore below the cliffs, from Hoboken down
-  const lots = boroGrid(C, { x0: R.x0, y0: cliffEnd, x1: xe, y1: R.y1 }, (x, y) => y > 650);
-  for (const lot of lots) {
-    const y = (lot.y0 + lot.y1) / 2;
-    if (y < 470) fillLot(C, lot, () => ({ h: rng.range(5, 10), face: rng.pick([L.brickRed, L.brickBrown, L.brickTan]), roof: L.roofs[0], tank: rng.chance(0.3) })); // Hoboken
-    else fillLot(C, lot, (l, a) => ({ h: (l.x0 + a > 6 || l.y1 - l.y0 > 6) ? rng.range(22, 46) : rng.range(10, 18), face: rng.pick([L.glass, L.glass, L.glassDark, L.lime]), roof: L.roofs[2], glass: true })); // Jersey City
+  // Fort Lee's apartment towers on top of the cliffs either side of the bridge, Edgewater's down the row
+  for (const by of [2, 3, 5, 6, 9, 12, 15]) {
+    const Lt = { x0: 2, y0: lotStart(by), x1: 20, y1: lotEnd(by) };
+    if (Math.abs((Lt.y0 + Lt.y1) / 2 - gwbY) < 14) continue;
+    offIslandBlock(C, Lt, by < 8 ? 'modern' : 'glass', 1, by + 6, zp);
+  }
+  // below the cliffs: Hoboken's brownstones and walk-ups, Jersey City's glass towers
+  for (let by = ROWS.palisadesEnd; by < ROWS.harbor; by++) {
+    const Lb = { x0: 2, y0: lotStart(by), x1: 20, y1: lotEnd(by) };
+    if (by < ROWS.hobokenEnd) offIslandBlock(C, Lb, rng.pick(['brownstones', 'walkups', 'brownstones', 'shops', 'redbrick']), 0, by);
+    else offIslandBlock(C, Lb, rng.pick(['glass', 'glass', 'modern', 'glass']), 0, 27);
   }
   // Liberty State Park: lawns and trees at the bottom, the old rail terminal's clock tower
-  patch(C, R.x0, 650, xe, R.y1, L.grass);
-  for (let y = 653; y < R.y1 - 2; y += 3) for (let x = 2; x < xe - 2; x += 4.5) if (rng.chance(0.55)) addTreeAt(C, x + rng.range(-1, 1), y, CURB, rng.pick(['oak', 'plane', 'locust']));
-  bldg(C, 4, 654, 16, 662, 4.5, L.brickRed, sharedTex(C).roofGreen);
-  bldg(C, 13, 655, 16, 658, 9, L.brickRed, sharedTex(C).roofGreen);
-  landmark(C, 'NEW JERSEY', 12, 500, 0);
+  const lp = lotStart(ROWS.harbor);
+  patch(C, R.x0, lp, xe, R.y1, L.grass);
+  for (let y = lp + 3; y < R.y1 - 2; y += 3) for (let x = 2; x < xe - 2; x += 4.5) if (rng.chance(0.55)) addTreeAt(C, x + rng.range(-1, 1), y, CURB, rng.pick(['oak', 'plane', 'locust']));
+  bldg(C, 4, lp + 4, 16, lp + 12, 4.5, L.brickRed, sharedTex(C).roofGreen);
+  bldg(C, 13, lp + 5, 16, lp + 8, 9, L.brickRed, sharedTex(C).roofGreen);
+  landmark(C, 'NEW JERSEY', 12, lotStart(26), 0);
 }
 
 // ---- the Bronx -----------------------------------------------------------------------------------------
 function bronx(C) {
-  const R = region('bronx'), L = looks(C), rng = C.rng, mb = C.mb, W = C.world, S = sharedTex(C);
-  // Yankee Stadium, across the Harlem River from Washington Heights
-  const ys = { x0: 266, y0: 110, x1: 304, y1: 150 };
-  const keep = (x, y) => x > ys.x0 - 2 && x < ys.x1 + 2 && y > ys.y0 - 2 && y < ys.y1 + 2;
-  const lots = boroGrid(C, R, keep);
-  for (const lot of lots) {
-    const top = lot.y1 < 20;
-    if (top) {
-      // Riverdale: a green hill over Spuyten Duyvil, a few apartment towers in the trees
-      patch(C, lot.x0 - 0.4, lot.y0 - 0.4, lot.x1 + 0.4, lot.y1 + 0.4, L.grass, CURB + 0.016);
-      for (let x = lot.x0 + 1; x < lot.x1 - 1; x += 2.6) addTreeAt(C, x + rng.range(-0.6, 0.6), (lot.y0 + lot.y1) / 2 + rng.range(-2, 2), CURB, rng.pick(['oak', 'elm', 'pine', 'locust']));
-      if (rng.chance(0.35)) bldg(C, lot.x0 + 2, lot.y0 + 1, lot.x0 + 8, lot.y1 - 1, rng.range(14, 22), L.brickTan, L.roofs[0]);
-      continue;
-    }
-    const tall = rng.chance(0.12);
-    fillLot(C, lot, () => ({ h: tall ? rng.range(18, 24) : rng.range(8, 12), face: rng.pick([L.brickRed, L.brickBrown, L.brickTan, L.brickRed]), roof: L.roofs[rng.int(0, 1)], tank: !tall && rng.chance(0.25) }));
-  }
+  const R = region('bronx'), L = looks(C), rng = C.rng;
+  // Yankee Stadium, across the Harlem River from Washington Heights (161st Street)
+  const ys = { x0: 272, y0: 136, x1: 310, y1: 174 };
+  const keep = (x, y) => x > ys.x0 - 3 && x < ys.x1 + 3 && y > ys.y0 - 3 && y < ys.y1 + 3;
+  // Riverdale: a green hill over Spuyten Duyvil
+  patch(C, R.x0, R.y0, R.x1, 30, L.grass, CURB + 0.016);
+  for (let x = R.x0 + 2; x < R.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) if (clsAt(x, y) === CL.BORO && rng.chance(0.7)) addTreeAt(C, x + rng.range(-0.6, 0.6), y, CURB, rng.pick(['oak', 'elm', 'pine', 'locust']));
+  // the Grand Concourse's apartment houses and the walk-up streets: whole blocks, as in Manhattan
+  const lots = wholeLots(C, { ...R, y0: 34 }, keep);
+  for (const lot of lots) offIslandBlock(C, lot, rng.pick(['redbrick', 'redbrick', 'tenements', 'walkups', 'shops', 'redbrick']), lot.bx, lot.by);
+  // the streets between them
+  boroGrid(C, { ...R, y0: 30 }, keep);
   yankeeStadium(C, ys);
   // trees along the Harlem River
   for (let y = 4; y < R.y1; y += 3) for (let x = R.x0; x < R.x1; x += 1) {
     if (clsAt(x, y) !== CL.BORO) continue;
-    if (clsAt(x - 2, y) === CL.WATER && rng.chance(0.7)) { addTreeAt(C, x + 1.2, y, CURB, rng.pick(['oak', 'elm', 'locust'])); }
+    if (clsAt(x - 2, y) === CL.WATER && rng.chance(0.7)) addTreeAt(C, x + 1.2, y, CURB, rng.pick(['oak', 'elm', 'locust']));
     break;
   }
   landmark(C, 'THE BRONX', 330, 60, 0);
-  void mb; void W; void S;
 }
 function yankeeStadium(C, r) {
   const mb = C.mb, S = sharedTex(C), W = C.world;
@@ -228,42 +245,72 @@ function yankeeStadium(C, r) {
   const hx = cx, hy = cy + ry - 9;
   for (let k = 0; k < 6; k++) { const s = 4 - k * 0.6; mb.hquad(hx - s, hy - 4 - s * 0.4, hx + s, hy - 4 + s * 0.4 - 1, CURB + 0.97 + k * 0.001, dirt); }
   markHeight(W, r.x0, r.y0, r.x1, r.y1, z1);
+  // the white frieze round the top of the stands, the scoreboard over the bleachers
+  const frieze = C.atlas.shared('ys_frieze', 32, 12, (p) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 32; x++) p.set(x, y, 0, 0); for (let x = 0; x < 32; x++) { p.set(x, 0, 0xf2f2f0); p.set(x, 1, 0xf2f2f0); } for (let x = 0; x < 32; x += 4) for (let y = 2; y < 11; y++) { const k = (y - 2) / 9; p.set(x + Math.round(k * 2), y, 0xe8e8e6); p.set(x + 3 - Math.round(k * 2), y, 0xe8e8e6); } });
+  for (let k = 0; k < n; k++) {
+    const a = outer[k], b = outer[(k + 1) % n], ai = [a[0] + (cx - a[0]) * 0.12, a[1] + (cy - a[1]) * 0.12], bi = [b[0] + (cx - b[0]) * 0.12, b[1] + (cy - b[1]) * 0.12];
+    if (Math.sin((k / n) * 2 * PI) > 0.6) continue; // (open over the bleachers)
+    wall(C, bi, ai, z1 + 1.4, z1 + 1.8, frieze, MAT.FLAT);
+    for (const q of [ai]) mb.box(q[0] - 0.08, q[1] - 0.08, z1, q[0] + 0.08, q[1] + 0.08, z1 + 1.8, sides(propTex(C).silver));
+  }
+  const sb = C.atlas.alloc(96, 40);
+  sb.p.rect(0, 0, 96, 40, 0x1b1b1b, 255);
+  sb.p.rect(2, 2, 92, 22, 0x2a3a5a, winCode(0.0, true));
+  sb.p.text7(16, 8, 'YANKEES', 0xf2f2f0, winCode(0.0, true), 2);
+  for (let i = 0; i < 9; i++) sb.p.text7(4 + i * 10, 28, String((i * 7) % 10), 0xffd84f, winCode(0.0, true));
+  const sbx = cx, sby = r.y1 - 2.6, sw = 96 / T;
+  mb.box(sbx - 0.1, sby - 0.1, z1 - 1, sbx + 0.1, sby + 0.1, z1 + 1.5, sides(propTex(C).black));
+  mb.vquad(sbx - sw / 2, sby - 0.15, sbx + sw / 2, sby - 0.15, z1 + 1.5, z1 + 1.5 + 40 / T, sb, { mat: MAT.FLAT | MAT.NOSHADOW, n: [0, -1, 0] });
+  mb.vquad(sbx + sw / 2, sby + 0.15, sbx - sw / 2, sby + 0.15, z1 + 1.5, z1 + 1.5 + 40 / T, sb, { mat: MAT.FLAT | MAT.NOSHADOW, n: [0, 1, 0] });
   // the frieze round the top, light towers
   for (let k = 0; k < n; k += 4) { const a = outer[k]; mb.box(a[0] - 0.15, a[1] - 0.15, z1, a[0] + 0.15, a[1] + 0.15, z1 + 4, sides(propTex(C).silver)); W.lamps.push({ x: (a[0] + cx) / 2, y: (a[1] + cy) / 2, z: z1 + 3, r: 8, color: [0.95, 0.97, 1], k: 0.6, kind: 'flood' }); W.lampHeads.push({ x: a[0], y: a[1], z: z1 + 4, kind: 'flood' }); }
   landmark(C, 'YANKEE STADIUM', cx, r.y1 + 6, 0);
   void S;
 }
 
+// ---- Brooklyn: behind the waterfront's lofts and rowhouses, whole blocks of brownstones -----------------
+function brooklyn(C) {
+  const W = C.world, rng = C.rng;
+  const bbRow = BLOCK_TYPES.findIndex((r) => r.includes('bridge'));
+  const ys = [...(W.bridges || []).filter((b) => b.x1 >= MAPX - 1).map((b) => b.y), bbRow >= 0 ? (lotStart(bbRow) + lotEnd(bbRow)) / 2 : -100];
+  for (const R of BOROUGHS.filter((b) => b.name === 'brooklyn')) {
+    const front = R.x0 + 7.2 + (R.x1 - R.x0 > 40 ? 10 : 12);
+    const keep = (x, y) => x < front || ys.some((by) => Math.abs(y - by) < 8);
+    boroGrid(C, { ...R, x0: front + 1 }, keep);
+    for (const lot of wholeLots(C, R, keep)) {
+      const dumbo = ys.some((by) => Math.abs(lot.y0 - by) < 40);
+      offIslandBlock(C, lot, rng.pick(dumbo ? ['lofts', 'lofts', 'walkups', 'brownstones'] : ['brownstones', 'brownstones', 'walkups', 'shops', 'redbrick']), lot.bx, lot.by);
+    }
+  }
+  // the Domino Sugar sign on the old refinery, just south of the Williamsburg Bridge
+  const wb = (W.bridges || []).find((b) => b.name === 'WILLIAMSBURG BRIDGE');
+  if (wb) dominoSign(C, eastShoreX(wb.y + 13) + 9.5, wb.y + 13);
+}
+
 // ---- Queens ----------------------------------------------------------------------------------------------
 function queens(C) {
   const R = region('queens'), L = looks(C), rng = C.rng, W = C.world;
   const bridgesY = (W.bridges || []).filter((b) => b.y > R.y0 && b.y < R.y1 && b.x1 >= MAPX - 1).map((b) => b.y);
-  const gantry = { y0: 392, y1: 414 };
-  const keep = (x, y) => bridgesY.some((by) => Math.abs(y - by) < 7.5) || (y > gantry.y0 && y < gantry.y1) || (y > 192 && y < 240 && x < 404);
-  // the promenade along the river and Astoria Park's lawn by Hell Gate
+  const gantry = { y0: lotStart(ROWS.gantry) - 2, y1: lotEnd(ROWS.gantry) + 2 };
+  const parkY1 = 302;
+  const keep = (x, y) => bridgesY.some((by) => Math.abs(y - by) < 7.5) || (y > gantry.y0 && y < gantry.y1) || y < parkY1 + 3;
+  // the promenade along the river, Astoria Park's lawn by Hell Gate
   C.paintGround(R.x0, R.y0, R.x0 + 4, R.y1, 'plaza');
-  C.paintGround(R.x0 + 4, 192, MAPX, 240, 'lawn');
-  for (let y = 194; y < 238; y += 3.2) for (let x = R.x0 + 6; x < MAPX - 2; x += 4) if (rng.chance(0.6) && !bridgesY.some((by) => Math.abs(y - by) < 6)) C.addTree(x + rng.range(-0.8, 0.8), y, rng.pick(['oak', 'elm', 'plane']), false);
-  const lots = boroGrid(C, { ...R, x0: R.x0 + 4, y1: 330, streets: false }, keep);
-  for (const lot of lots) fillLot(C, lot, () => ({ h: rng.range(4, 9), face: rng.pick([L.brickRed, L.brickBrown, L.brickTan]), roof: L.roofs[0], tank: rng.chance(0.2) })); // Astoria
-  // Long Island City: glass towers standing apart on low podiums, facing Midtown across the river
-  for (let y = 334; y < R.y1 - 5; ) {
-    const d = rng.range(5.5, 8.5);
-    if (keep(R.x0 + 8, y + d / 2) || keep(R.x0 + 8, y) || keep(R.x0 + 8, y + d)) { y += 1.5; continue; }
-    for (const [xa, xb] of rng.chance(0.5) ? [[R.x0 + 6, R.x0 + 14.5], [R.x0 + 18, MAPX - 1.5]] : [[R.x0 + 7, MAPX - 6]]) {
-      bldg(C, xa - 0.8, y - 0.6, xb + 0.8, y + d + 0.6, 2.2, L.lime, L.roofs[1]);
-      bldg(C, xa, y, xb, y + d, rng.range(18, 44), rng.pick([L.glass, L.glassDark, L.glass]), L.roofs[2], { glass: true, z0: CURB + 2.2 });
-    }
-    y += d + rng.range(3.5, 6);
+  C.paintGround(R.x0 + 4, R.y0, MAPX, parkY1, 'lawn');
+  for (let y = R.y0 + 2; y < parkY1 - 2; y += 3.2) for (let x = R.x0 + 6; x < MAPX - 2; x += 4) if (rng.chance(0.6) && !bridgesY.some((by) => Math.abs(y - by) < 6)) C.addTree(x + rng.range(-0.8, 0.8), y, rng.pick(['oak', 'elm', 'plane']), false);
+  // Astoria's streets of walk-ups and brownstones, then Long Island City's glass towers
+  for (const lot of wholeLots(C, R, keep)) {
+    if (lot.by < ROWS.lic - 1) offIslandBlock(C, lot, rng.pick(['walkups', 'brownstones', 'shops', 'walkups', 'redbrick']), lot.bx, lot.by);
+    else offIslandBlock(C, lot, rng.pick(['glass', 'glass', 'modern']), lot.bx, ROWS.lic + 1);
   }
   // Gantry Plaza: the lawn and promenade, the two gantries, the Pepsi-Cola sign
   C.paintGround(R.x0, gantry.y0, MAPX, gantry.y1, 'lawn');
   C.paintGround(R.x0, gantry.y0, R.x0 + 4, gantry.y1, 'plaza');
-  for (const gy of [gantry.y0 + 4, gantry.y0 + 10]) gantryCrane(C, R.x0 + 1.2, gy);
+  for (const gy of [gantry.y0 + 5, gantry.y0 + 11]) gantryCrane(C, R.x0 + 1.2, gy);
   pepsiSign(C, R.x0 + 2.5, gantry.y1 - 4.5);
   for (let y = gantry.y0 + 2; y < gantry.y1 - 1; y += 3) C.addTree(R.x0 + 8 + rng.range(0, 4), y, 'locust', false);
   for (let y = R.y0 + 6; y < R.y1 - 3; y += 7) { if (bridgesY.some((by) => Math.abs(y - by) < 8)) continue; parkLamp(C, R.x0 + 3.2, y); C.addBench(R.x0 + 3.4, y + 2.5, 'y', -1); }
-  landmark(C, 'QUEENS', R.x0 + 12, 400, 0);
+  landmark(C, 'QUEENS', R.x0 + 12, lotStart(14), 0);
   landmark(C, 'PEPSI-COLA SIGN', R.x0 - 6, gantry.y1 + 2, 0);
 }
 function gantryCrane(C, x, y) {
@@ -413,12 +460,14 @@ function ellis(C) {
 }
 
 export function greaterNewYork(C) {
-  newJersey(C);
-  bronx(C);
-  queens(C);
-  randalls(C);
-  roosevelt(C);
-  governors(C);
-  ellis(C);
+  const tm = (k, f) => { const t = performance.now(); f(); (C.world._wfTimes || (C.world._wfTimes = {}))[k] = Math.round(performance.now() - t); };
+  tm('nj', () => newJersey(C));
+  tm('bronx', () => bronx(C));
+  tm('queens', () => queens(C));
+  tm('brooklyn', () => brooklyn(C));
+  tm('randalls', () => randalls(C));
+  tm('roosevelt', () => roosevelt(C));
+  tm('governors', () => governors(C));
+  tm('ellis', () => ellis(C));
   void valueNoise; void RNG; void signBoard;
 }

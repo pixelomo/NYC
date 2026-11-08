@@ -407,6 +407,7 @@ export function buildBridges(C) {
     for (let x = edge + 14; x < 358; x += 5) C.mb.box(x - 0.4, a.y - hw + 0.4, CURB, x + 0.4, a.y + hw - 0.4, zd - 0.5, sides(X.plate));
     suspension(C, { name: 'TRIBOROUGH BRIDGE', y: a.y, x0: 362, x1: MAPX, t0: 364, t1: BROOKLYN_X + 4, zd, zt: 21, hw, style: 'deco', color: 0x7a8a7a, leg: 1.2, anchors: [358, MAPX + 4], farOnLand: true, rot: 0 });
   }
+  hellGate(C);
   // Queensboro Bridge, over Roosevelt Island, and the tram beside it
   const qb = findBlock('qbridge');
   if (qb) {
@@ -434,6 +435,50 @@ export function buildBridges(C) {
 }
 
 // the little red lighthouse on its rock under the bridge
+// the Hell Gate Bridge: the railroad's crimson steel arch from Randall's Island to Astoria, the deck
+// hung from it between two great granite towers, a viaduct on concrete piers either side
+function hellGate(C) {
+  const RI = BOROUGHS.find((b) => b.name === 'queens');
+  if (!RI) return;
+  const mb = C.mb, W = C.world, X = texes(C, 0x8a3a36), S = sharedTex(C);
+  const y = RI.y0 + 38, hw = 1.5, zd = 8.4, xa = 338, xb = RI.x0 + 14, t0 = 357.5, t1 = RI.x0 + 1.5;
+  const rail = C.atlas.shared('hg_rail', 32, 32, (p) => {
+    for (let yy = 0; yy < 32; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, shade(0x6a6258, 0.9 + hash2i(xx, yy, 331) * 0.14));
+    for (let xx = 0; xx < 32; xx += 4) for (let yy = 4; yy < 28; yy++) p.set(xx, yy, 0x4a3a2a);
+    for (const yy of [9, 13, 19, 23]) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, 0xa8aab0);
+  });
+  mb.box(xa, y - hw, zd - 0.7, xb, y + hw, zd, { py: X.truss, ny: X.truss, pz: { t: rail, world: true } });
+  // the viaduct's piers
+  for (let x = xa + 2; x < xb; x += 4.5) if (x < t0 - 2.5 || x > t1 + 2.5) mb.box(x - 0.6, y - hw + 0.2, CURB, x + 0.6, y + hw - 0.2, zd - 0.7, sides(S.concrete));
+  // the towers: granite, with arched openings for the tracks
+  const tH = zd + 7;
+  for (const tx of [t0, t1]) {
+    for (const sy of [-1, 1]) mb.box(tx - 1.6, y + sy * hw, WATER_Z - 0.1, tx + 1.6, y + sy * (hw + 1.4), tH, { ...sides(X.granite), pz: { t: X.granite } });
+    mb.box(tx - 1.6, y - hw, zd + 4.6, tx + 1.6, y + hw, tH, { ...sides(X.granite), pz: { t: X.granite } });
+    mb.box(tx - 1.9, y - hw - 1.7, tH, tx + 1.9, y + hw + 1.7, tH + 0.5, sides(X.granite, { t: X.granite }));
+    markHeight(W, tx - 1.6, y - hw - 1.4, tx + 1.6, y + hw + 1.4, tH);
+  }
+  // the arch: a lower chord springing below the deck and rising through it, a flatter upper chord
+  // over it, posts and diagonals between them, the deck hung from the lower chord
+  const n = 20, x0 = t0 + 1.6, x1 = t1 - 1.6;
+  const lo = (t) => zd - 3.2 + 14 * Math.sin(PI * t), up = (t) => zd + 6 + 9.4 * Math.sin(PI * t);
+  for (const sd of [-1, 1]) {
+    const yy = y + sd * (hw + 0.15);
+    for (let k = 0; k < n; k++) {
+      const ta = k / n, tb = (k + 1) / n, xa1 = x0 + (x1 - x0) * ta, xb1 = x0 + (x1 - x0) * tb;
+      beam(C, [xa1, yy, lo(ta)], [xb1, yy, lo(tb)], 0.42, X.plate);
+      beam(C, [xa1, yy, up(ta)], [xb1, yy, up(tb)], 0.3, X.plate);
+      beam(C, [xa1, yy, lo(ta)], [xa1, yy, up(ta)], 0.14, X.plate);
+      beam(C, [xa1, yy, lo(ta)], [xb1, yy, up(tb)], 0.1, X.plate);
+      if (lo(ta) > zd + 0.4) beam(C, [xa1, yy, zd], [xa1, yy, lo(ta)], 0.06, X.plate);
+    }
+  }
+  for (let k = 2; k < n - 1; k += 3) { const t = k / n, x = x0 + (x1 - x0) * t; beam(C, [x, y - hw - 0.15, up(t)], [x, y + hw + 0.15, up(t)], 0.14, X.plate); }
+  W.solids.push([x0, y - hw, x1, y + hw, zd]);
+  W.bridges.push({ name: 'HELL GATE BRIDGE', y, x0: xa, x1: xb, z: zd, hw, rail: true });
+  landmark(C, 'HELL GATE BRIDGE', (x0 + x1) / 2, y + 12, 0);
+}
+
 function lighthouse(C, x, y) {
   const mb = C.mb;
   const red = C.atlas.shared('lighthouse', 16, 32, (p) => { for (let yy = 0; yy < 32; yy++) for (let xx = 0; xx < 16; xx++) p.set(xx, yy, shade(0xc8302c, xx < 5 ? 1.12 : xx > 11 ? 0.8 : 1)); p.rect(6, 8, 3, 4, 0x2a2a2e); });

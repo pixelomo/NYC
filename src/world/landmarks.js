@@ -7,7 +7,7 @@
 // arch and fountain, Chinatown, the Brooklyn Bridge over the East River to Brooklyn's shore, and the
 // Statue of Liberty on her island in the harbour.
 
-import { T, CURB, WATER_Z, MAPX, MAPY, BROOKLYN_X, NBX, NBY, BLOCK_TYPES, blockRect, BOROUGHS, LIBERTY, STREET } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, MAPY, eastShoreX, NBX, NBY, BLOCK_TYPES, blockRect, BOROUGHS, LIBERTY, STREET } from './layout.js';
 import { MAT } from './mesh.js';
 import { winCode, textWidth } from '../core/painter.js';
 import { shade, mixc, hash2i, RNG } from '../core/math.js';
@@ -646,6 +646,7 @@ export function brooklynBridge(C) {
   const yb = (L.y0 + L.y1) / 2, ZD = BRIDGE.ZD, ZT = ZD + 13;
   const xa = L.x1 - 7.6, x1 = MAPX;
   const EAST_X = L.x1 + STREET;
+  const BROOKLYN_X = eastShoreX(yb);
   const xm = EAST_X + 6.5, xbk = BROOKLYN_X - 6.5, xmid = (xm + xbk) / 2;
   const granite = C.atlas.shared('bb_granite', 64, 64, (p) => {
     for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
@@ -787,15 +788,18 @@ export function brooklynBridge(C) {
 // Manhattan skyline, lawns and trees, the carousel in its glass box by the bridge; brick warehouses
 // north of the bridge, brownstones south of it; a subway station for the walk home
 export function brooklynShore(C) {
+  for (const BK of BOROUGHS.filter((b) => b.name === 'brooklyn')) shore(C, BK);
+}
+function shore(C, BK) {
   const S = sharedTex(C), mb = C.mb, W = C.world, P = propTex(C);
-  const BK = BOROUGHS.find((b) => b.name === 'brooklyn');
-  const x0 = BROOKLYN_X, x1 = MAPX, y0b = BK.y0, y1 = BK.y1;
-  const L = bridgeBlock(), yb = L ? (L.y0 + L.y1) / 2 : -100;
+  const x0 = BK.x0, x1 = MAPX, y0b = BK.y0, y1 = BK.y1;
+  const L0 = bridgeBlock(), yb0 = L0 ? (L0.y0 + L0.y1) / 2 : -100;
+  const L = yb0 > y0b && yb0 < y1 ? L0 : null, yb = L ? yb0 : -100;
   const rng = C.rng;
-  C.paintGround(x0, 0, x1, y1, 'grass');
-  C.paintGround(x0 + 2.6, 0, x0 + 6.6, y1, 'lawn');
-  C.paintGround(x0, 0, x0 + 2.6, y1, 'plaza');
-  C.paintGround(x0 + 6.6, 0, x1, y1, 'patio');
+  const depth = Math.min(x1 - x0 > 40 ? 10 : 12, x1 - x0 - 7.2);
+  C.paintGround(x0 + 2.6, y0b, x0 + 6.6, y1, 'lawn');
+  C.paintGround(x0, y0b, x0 + 2.6, y1, 'plaza');
+  C.paintGround(x0 + 6.6, y0b, x0 + 7.2 + depth + 1, y1, 'patio');
   // the buildings along the back of the strip, facing the river (gaps where the bridges come in)
   const gaps = [yb, ...(W.bridges || []).filter((b) => b.y > y0b && b.y < y1 && b.x1 >= x1 - 1).map((b) => b.y)];
   const fr = new Frame(x0 + 7.0, 0, -1, 0);
@@ -805,8 +809,8 @@ export function brooklynShore(C) {
     if (gap != null) { a = gap + 6.2; continue; }
     const w = a < yb ? rng.pick([6, 7, 8]) : rng.pick([4, 4.5, 5]);
     if (a + w > y1 - 0.5) break;
-    if (a < yb) loft(C, fr, a, w, x1 - x0 - 7.2, { floors: rng.int(5, 8) });
-    else rowhouse(C, fr, a, w, x1 - x0 - 7.2, { setback: 1.2 });
+    if (a < yb) loft(C, fr, a, w, depth, { floors: rng.int(5, 8) });
+    else rowhouse(C, fr, a, w, depth, { setback: 1.2 });
     a += w + (a < yb ? 0.3 : 0);
   }
   // trees on the lawn, benches and lamps along the promenade
@@ -952,16 +956,16 @@ export function statueOfLiberty(C) {
 const beamBox = (ax, ay, bx, by) => [Math.min(ax, bx) - 0.04, Math.min(ay, by) - 0.04, Math.max(ax, bx) + 0.04, Math.max(ay, by) + 0.04];
 
 // A harbour ferry: a white hull with a blue band, two decks of windows and a wheelhouse
-export function ferry(C, x, y, ang) {
+export function ferry(C, x, y, ang, color = 0x1f4f9a, big = 1) {
   const mb = C.mb;
-  const hull = C.atlas.shared('ferry_hull', 32, 16, (p) => { for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, yy < 3 ? 0xf2efe6 : yy < 7 ? 0x1f4f9a : yy < 13 ? 0xf2efe6 : 0x8a2a2a); });
+  const hull = C.atlas.shared(`ferry_hull_${color}`, 32, 16, (p) => { for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, color === 0xe8741a ? (yy < 10 ? color : yy < 13 ? 0xf2efe6 : 0x8a2a2a) : yy < 3 ? 0xf2efe6 : yy < 7 ? color : yy < 13 ? 0xf2efe6 : 0x8a2a2a); });
   const deck = C.atlas.shared('ferry_deck', 32, 16, (p) => {
     for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, 0xf2efe6);
     for (let xx = 2; xx < 30; xx += 5) p.rect(xx, 4, 3, 7, 0x2a3a4a, winCode(0.2, true));
   });
   const top = C.atlas.shared('ferry_top', 16, 16, (p) => { for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) p.set(xx, yy, shade(0xd8d4cc, 0.95 + hash2i(xx, yy, 181) * 0.06)); });
   void ang;
-  const hx = 3.2, hy = 1.0;
+  const hx = 3.2 * big, hy = 1.0 * big;
   mb.box(x - hx, y - hy, WATER_Z - 0.1, x + hx, y + hy, 0.55, { px: hull, nx: hull, py: hull, ny: hull, pz: { t: top } });
   mb.box(x - hx + 0.6, y - hy + 0.15, 0.55, x + hx - 0.6, y + hy - 0.15, 1.25, { px: deck, nx: deck, py: deck, ny: deck, pz: { t: top } });
   mb.box(x - hx + 1.2, y - hy + 0.3, 1.25, x + hx - 1.4, y + hy - 0.3, 1.9, { px: deck, nx: deck, py: deck, ny: deck, pz: { t: top } });

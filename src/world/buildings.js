@@ -95,6 +95,10 @@ export function sharedTex(C) {
   S.roofGravel = A.shared('r_gravel', 128, 128, (p) => roofFill(p, 128, 128, 'gravel', C.rng));
   S.roofDeck = A.shared('r_deck', 128, 128, (p) => roofFill(p, 128, 128, 'deck', C.rng));
   S.roofGreen = A.shared('r_green', 128, 128, (p) => roofFill(p, 128, 128, 'green', C.rng));
+  // slate shingles for steep roofs (churches, mansards); the same tile Central Park's castle uses
+  S.slate = A.shared('slate', 32, 32, (p) => {
+    for (let yy = 0; yy < 32; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, shade((yy >> 2) % 2 ? 0x3e4450 : 0x4a5160, 0.93 + hash2i(xx >> 2, yy >> 2, 34) * 0.12));
+  });
   S.railing = A.shared('railing', 96, 18, (p) => railingTex(p, 96, 18, 0x1e1e22, 4));
   S.railingTall = A.shared('railing_t', 96, 24, (p) => railingTex(p, 96, 24, 0x1e1e22, 5));
   S.fescRail = A.shared('fesc_rail', 96, 20, (p) => {

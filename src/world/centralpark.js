@@ -35,6 +35,8 @@ export function centralPark(C) {
   const rng = new RNG(5107);
   const S = sharedTex(C), P = propTex(C);
   const cx = (R.x0 + R.x1) / 2, y0 = R.y0, x0 = R.x0;
+  // (the plan was drawn for a park 126 units long: spread it along whatever length it has)
+  const k = (R.y1 - R.y0) / 126;
   const inPark = (x, y, m = 0) => x > R.x0 + m && x < R.x1 - m && y > R.y0 + m && y < R.y1 - m;
   const net = new Net();
 
@@ -44,36 +46,36 @@ export function centralPark(C) {
   const gateYs = [];
   for (let j = PARK.by0 + 1; j <= PARK.by1; j++) gateYs.push(roadCenter(j));
   // Harlem Meer, the Pool and the Loch running into it
-  const meer = [{ x: cx + 10.5, y: y0 + 12, rx: 6.5, ry: 4.8 }, { x: cx + 4, y: y0 + 13.5, rx: 4.0, ry: 3.0 }, { x: cx + 15.5, y: y0 + 15.5, rx: 2.8, ry: 2.6 }];
+  const meer = [{ x: cx + 10.5, y: y0 + k * 12, rx: 6.5, ry: 4.8 }, { x: cx + 4, y: y0 + k * 13.5, rx: 4.0, ry: 3.0 }, { x: cx + 15.5, y: y0 + k * 15.5, rx: 2.8, ry: 2.6 }];
   const meerF = lakeField(meer, 81);
-  const pool = { x: x0 + 7, y: y0 + 26.5, r: 2.0 };
-  const loch = spline([[pool.x + 1.6, pool.y - 0.8], [x0 + 11.5, y0 + 24.4], [x0 + 15, y0 + 25.2], [x0 + 18.6, y0 + 22.8], [cx - 3.2, y0 + 18.6], [cx + 1.5, y0 + 14.4]], 8);
-  const greatHill = { x: x0 + 9.5, y: y0 + 12.5, r: 3.4 };
-  const CG = { x0: cx + 7, y0: y0 + 23.5, x1: lx1 - 0.9, y1: y0 + 30.8 };
-  const DR = { x0: x0 + 3.6, y0: y0 + 29.2, x1: x0 + 10.2, y1: y0 + 33.4 };
+  const pool = { x: x0 + 7, y: y0 + k * 26.5, r: 2.0 };
+  const loch = spline([[pool.x + 1.6, pool.y - 0.8], [x0 + 11.5, y0 + k * 24.4], [x0 + 15, y0 + k * 25.2], [x0 + 18.6, y0 + k * 22.8], [cx - 3.2, y0 + k * 18.6], [cx + 1.5, y0 + k * 14.4]], 8);
+  const greatHill = { x: x0 + 9.5, y: y0 + k * 12.5, r: 3.4 };
+  const CG = { x0: cx + 7, y0: y0 + k * 23.5, x1: lx1 - 0.9, y1: y0 + k * 30.8 };
+  const DR = { x0: x0 + 3.6, y0: y0 + k * 29.2, x1: x0 + 10.2, y1: y0 + k * 33.4 };
   // the Reservoir inside its running track
-  const RV = { x: cx, y: y0 + 46, rx: 16, ry: 11.3 };
+  const RV = { x: cx, y: y0 + k * 46, rx: 16, ry: 11.3 };
   const trackRx = RV.rx + 1.15, trackRy = RV.ry + 1.15;
   // the Great Lawn, Turtle Pond, Vista Rock and the castle, the obelisk
-  const GL = { x: cx, y: y0 + 70, rx: 11, ry: 6.8 };
+  const GL = { x: cx, y: y0 + k * 70, rx: 11, ry: 6.8 };
   const glRx = GL.rx + 1.0, glRy = GL.ry + 1.0;
-  const turtle = [{ x: cx + 2, y: y0 + 81.4, rx: 7.2, ry: 2.2 }, { x: cx + 8.2, y: y0 + 82.2, rx: 3, ry: 1.8 }];
+  const turtle = [{ x: cx + 2, y: y0 + k * 81.4, rx: 7.2, ry: 2.2 }, { x: cx + 8.2, y: y0 + k * 82.2, rx: 3, ry: 1.8 }];
   const turtleF = lakeField(turtle, 82);
-  const castle = { x: cx - 8.4, y: y0 + 81.6 };
-  const needle = { x: cx + 15.6, y: y0 + 68.6 };
+  const castle = { x: cx - 8.4, y: y0 + k * 81.6 };
+  const needle = { x: cx + 15.6, y: y0 + k * 68.6 };
   // the Lake, the Ramble above it, the Boathouse on its east arm
-  const lake = [{ x: cx - 8.5, y: y0 + 95.6, rx: 6.4, ry: 3.8 }, { x: cx + 2.5, y: y0 + 97, rx: 8, ry: 3.3 }, { x: cx + 13, y: y0 + 95.2, rx: 4.6, ry: 3.4 }];
+  const lake = [{ x: cx - 8.5, y: y0 + k * 95.6, rx: 6.4, ry: 3.8 }, { x: cx + 2.5, y: y0 + k * 97, rx: 8, ry: 3.3 }, { x: cx + 13, y: y0 + k * 95.2, rx: 4.6, ry: 3.4 }];
   const lakeF = lakeField(lake, 61);
   const bowX = cx - 3;
-  const boathouse = { x: cx + 13, y: y0 + 101.2 };
+  const boathouse = { x: cx + 13, y: y0 + k * 101.2 };
   // Bethesda Terrace, the Mall, Sheep Meadow, Strawberry Fields
-  const BT = { x: cx, y: y0 + 105.4, r: 5.0, basin: 2.7, ring: 3.9 };
+  const BT = { x: cx, y: y0 + k * 105.4, r: 5.0, basin: 2.7, ring: 3.9 };
   const mallW = 2.6;
-  const meadow = { x0: lx0 + 1.6, y0: y0 + 108.4, x1: cx - 5.2, y1: y0 + 120.4 };
-  const SF = { x: lx0 + 4.2, y: y0 + 102.2, r: 2.3 };
+  const meadow = { x0: lx0 + 1.6, y0: y0 + k * 108.4, x1: cx - 5.2, y1: y0 + k * 120.4 };
+  const SF = { x: lx0 + 4.2, y: y0 + k * 102.2, r: 2.3 };
   // Wollman Rink and the Pond with Gapstow Bridge
-  const rink = { x0: cx + 6.6, y0: y0 + 105.8, x1: cx + 15.6, y1: y0 + 110.0 };
-  const pond = [{ x: cx + 12, y: y0 + 117.4, rx: 5.2, ry: 2.4 }, { x: cx + 7.2, y: y0 + 118.4, rx: 2.4, ry: 1.6 }];
+  const rink = { x0: cx + 6.6, y0: y0 + k * 105.8, x1: cx + 15.6, y1: y0 + k * 110.0 };
+  const pond = [{ x: cx + 12, y: y0 + k * 117.4, rx: 5.2, ry: 2.4 }, { x: cx + 7.2, y: y0 + k * 118.4, rx: 2.4, ry: 1.6 }];
   const pondF = lakeField(pond, 83);
   const gapX = cx + 12.4;
   const anyWater = (x, y) => meerF(x, y) > -0.2 || turtleF(x, y) > -0.2 || lakeF(x, y) > -0.2 || pondF(x, y) > -0.2
@@ -88,7 +90,7 @@ export function centralPark(C) {
   // ---- path network -------------------------------------------------------------------------------
   const sideJ = [];
   for (const gy of gateYs) sideJ.push([lx0, gy], [lx1, gy]);
-  const extraJ = [[lx0, y0 + 36], [lx1, CG.y0 + 3.6], [lx1, y0 + 79.6], [lx0, y0 + 90.4], [lx1, y0 + 89.4], [lx1, y0 + 113.0], [gapX, ly1], [cx, ly0], [cx, ly1]];
+  const extraJ = [[lx0, y0 + k * 36], [lx1, CG.y0 + 3.6], [lx1, y0 + k * 79.6], [lx0, y0 + k * 90.4], [lx1, y0 + k * 89.4], [lx1, y0 + k * 113.0], [gapX, ly1], [cx, ly0], [cx, ly1]];
   const arcMid = (sx, sy) => [sx < 0 ? lx0 + loopR * (1 - Math.SQRT1_2) : lx1 - loopR * (1 - Math.SQRT1_2), sy < 0 ? ly0 + loopR * (1 - Math.SQRT1_2) : ly1 - loopR * (1 - Math.SQRT1_2)];
   const cornerJ = [arcMid(-1, -1), arcMid(1, -1), arcMid(1, 1), arcMid(-1, 1)];
   const loop = splitClosed(roundedRect(lx0, ly0, lx1, ly1, loopR), [...sideJ, ...extraJ, ...cornerJ]);
@@ -110,16 +112,16 @@ export function centralPark(C) {
     net.path([[gx, gy], cornerJ[k]], loopW);
   }
   // the north end: round the Great Hill, along the Loch, the Meer's south shore, the garden
-  const MW = [cx - 4.2, y0 + 21.8];
+  const MW = [cx - 4.2, y0 + k * 21.8];
   const ghRing = splitClosed(ellipsePts(greatHill.x, greatHill.y, greatHill.r + 0.9, greatHill.r + 0.9), [[greatHill.x, greatHill.y + greatHill.r + 0.9], [greatHill.x + greatHill.r + 0.9, greatHill.y], [greatHill.x - 2.9, greatHill.y - 2.9]]);
   for (const piece of ghRing.pieces) net.path(piece, 1.2, { step: 2.4 });
-  net.path(spline([ghRing.at[2], [x0 + 5.6, y0 + 6.4], cornerJ[0]]), 1.2);
-  const lochPath = spline([J(lx0, gateYs[0]), [x0 + 7.6, y0 + 21.4], [x0 + 12.2, y0 + 20.6], [x0 + 16.4, y0 + 21.0], MW]);
+  net.path(spline([ghRing.at[2], [x0 + 5.6, y0 + k * 6.4], cornerJ[0]]), 1.2);
+  const lochPath = spline([J(lx0, gateYs[0]), [x0 + 7.6, y0 + k * 21.4], [x0 + 12.2, y0 + k * 20.6], [x0 + 16.4, y0 + k * 21.0], MW]);
   net.path(lochPath, 1.4, { step: 2.4 });
-  net.path(spline([ghRing.at[0], [greatHill.x + 0.4, y0 + 19.2], lochPath[Math.floor(lochPath.length * 0.35)]]), 1.2);
-  net.path(spline([J(cx, ly0), [cx - 2.4, y0 + 8.2], [cx - 4.6, y0 + 14.4], MW]), 1.4);
-  net.path(spline([ghRing.at[1], [x0 + 15.4, y0 + 11.0], [cx - 4.6, y0 + 14.4]]), 1.2);
-  const meerS = spline([MW, [cx + 1.6, y0 + 20.4], [cx + 8.2, y0 + 20.4], [cx + 15.0, y0 + 21.6], [lx1 - 0.2, gateYs[0] - 0.8]]);
+  net.path(spline([ghRing.at[0], [greatHill.x + 0.4, y0 + k * 19.2], lochPath[Math.floor(lochPath.length * 0.35)]]), 1.2);
+  net.path(spline([J(cx, ly0), [cx - 2.4, y0 + k * 8.2], [cx - 4.6, y0 + k * 14.4], MW]), 1.4);
+  net.path(spline([ghRing.at[1], [x0 + 15.4, y0 + k * 11.0], [cx - 4.6, y0 + k * 14.4]]), 1.2);
+  const meerS = spline([MW, [cx + 1.6, y0 + k * 20.4], [cx + 8.2, y0 + k * 20.4], [cx + 15.0, y0 + k * 21.6], [lx1 - 0.2, gateYs[0] - 0.8]]);
   net.path(meerS, 1.6);
   // Conservatory Garden: axis walks from the shore path and the drive to the fountain
   const cgc = [(CG.x0 + CG.x1) / 2, (CG.y0 + CG.y1) / 2];
@@ -128,14 +130,14 @@ export function centralPark(C) {
   net.path([cgc, J(lx1, CG.y0 + 3.6)], 1.4, { kind: 'gravel' });
   // dog run off the drive
   const dogGateXY = [(DR.x0 + DR.x1) / 2, DR.y1 + 0.55];
-  const dogPath = net.path([J(lx0, y0 + 36), [dogGateXY[0], y0 + 36], dogGateXY], 1.2);
+  const dogPath = net.path([J(lx0, y0 + k * 36), [dogGateXY[0], y0 + k * 36], dogGateXY], 1.2);
   const dogGate = dogPath[dogPath.length - 1];
   // the Reservoir: its running track, and ways onto it from the drive and from north and south
   const tr = splitClosed(ellipsePts(RV.x, RV.y, trackRx, trackRy), [[RV.x, RV.y - trackRy], [RV.x + trackRx, RV.y], [RV.x, RV.y + trackRy], [RV.x - trackRx, RV.y]]);
   const track = [];
   for (const piece of tr.pieces) track.push(...net.path(piece, 1.1, { step: 2.6, kind: 'gravel' }));
   const [TN, TE, TS, TW] = tr.at;
-  net.path(spline([TN, [cx - 1.2, y0 + 30.2], [cx - 3.6, y0 + 25.2], MW]), 1.4);
+  net.path(spline([TN, [cx - 1.2, y0 + k * 30.2], [cx - 3.6, y0 + k * 25.2], MW]), 1.4);
   net.path([TW, J(lx0, gateYs[1])], 1.4);
   net.path([TE, J(lx1, gateYs[1])], 1.4);
   // the Great Lawn: a ring path, spurs to the drive and the track
@@ -144,25 +146,25 @@ export function centralPark(C) {
   const [GN, GE, GS, GW] = gl.at;
   net.path([TS, GN], 1.4);
   net.path(spline([GW, [lx0 + 3.6, GL.y + 2.4], J(lx0, gateYs[2])]), 1.4);
-  net.path(spline([GE, [needle.x - 1.4, needle.y + 1.6], J(lx1, y0 + 79.6)]), 1.4);
+  net.path(spline([GE, [needle.x - 1.4, needle.y + 1.6], J(lx1, y0 + k * 79.6)]), 1.4);
   // Vista Rock: up from the lawn to the castle, down into the Ramble; the pond's south shore
   const castleN = [castle.x + 0.4, castle.y - 2.3], castleS = [castle.x + 0.9, castle.y + 2.5];
   net.path(spline([GS, [cx - 4.4, GL.y + glRy + 0.6], castleN]), 1.3);
   net.path(spline([castleN, [castle.x - 3.2, castle.y - 1.4], J(lx0, gateYs[2])]), 1.2);
-  const pondSouth = spline([castleS, [cx - 3.0, y0 + 84.4], [cx + 4.4, y0 + 84.6], [cx + 11.6, y0 + 84.2], [cx + 16.0, y0 + 86.8], J(lx1, y0 + 89.4)]);
+  const pondSouth = spline([castleS, [cx - 3.0, y0 + k * 84.4], [cx + 4.4, y0 + k * 84.6], [cx + 11.6, y0 + k * 84.2], [cx + 16.0, y0 + k * 86.8], J(lx1, y0 + k * 89.4)]);
   net.path(pondSouth, 1.3, { step: 2.4 });
   // the Ramble: winding woodland paths down to the Lake
-  const [bowN, bowS] = (() => { const [a, b] = shoreAlong(lakeF, bowX, y0 + 88, y0 + 104); return [a - 0.5, b + 0.5]; })();
-  const rambleA = spline([castleS, [castle.x + 2.4, y0 + 87.4], [bowX - 1.6, y0 + 89.6], [bowX, bowN]]);
+  const [bowN, bowS] = (() => { const [a, b] = shoreAlong(lakeF, bowX, y0 + k * 88, y0 + k * 104); return [a - 0.5, b + 0.5]; })();
+  const rambleA = spline([castleS, [castle.x + 2.4, y0 + k * 87.4], [bowX - 1.6, y0 + k * 89.6], [bowX, bowN]]);
   net.path(rambleA, 1.2, { step: 2.3 });
-  net.path(spline([rambleA[Math.floor(rambleA.length * 0.45)], [castle.x - 3.6, y0 + 89.6], J(lx0, y0 + 90.4)]), 1.2, { step: 2.3 });
-  net.path(spline([pondSouth[Math.floor(pondSouth.length * 0.45)], [cx + 4.6, y0 + 88.2], [cx + 9.0, y0 + 90.0], [cx + 12.6, y0 + 91.2]]), 1.2, { step: 2.3 });
+  net.path(spline([rambleA[Math.floor(rambleA.length * 0.45)], [castle.x - 3.6, y0 + k * 89.6], J(lx0, y0 + k * 90.4)]), 1.2, { step: 2.3 });
+  net.path(spline([pondSouth[Math.floor(pondSouth.length * 0.45)], [cx + 4.6, y0 + k * 88.2], [cx + 9.0, y0 + k * 90.0], [cx + 12.6, y0 + k * 91.2]]), 1.2, { step: 2.3 });
   // Bow Bridge: over the Lake's narrows, arching up a little
   const bowZ = (t) => CURB + 0.32 + Math.sin(PI * t) * 0.62;
   net.path([[bowX, bowN], [bowX, bowS]], 0, { step: 1.3, z: bowZ });
   // the south shore: west to Strawberry Fields, east to the terrace and the Boathouse
   const sfN = [SF.x + SF.r * 0.7, SF.y - SF.r * 0.7];
-  net.path(spline([[bowX, bowS], [cx - 9.0, y0 + 100.6], sfN]), 1.4);
+  net.path(spline([[bowX, bowS], [cx - 9.0, y0 + k * 100.6], sfN]), 1.4);
   net.path([[SF.x - SF.r, SF.y], J(lx0, gateYs[3])], 1.4);
   // Bethesda Terrace: a ring round the fountain, axes out of it
   const ring = [];
@@ -180,13 +182,13 @@ export function centralPark(C) {
   const dockEnd = net.node(dockX, dockRoot[1] - 2.1);
   net.edge(dockIds[dockIds.length - 1], dockEnd);
   // the Mall: from the terrace to the south end of the park
-  const MJ = [cx, y0 + 113.4];
+  const MJ = [cx, y0 + k * 113.4];
   net.path([rS, MJ], mallW);
   net.path([MJ, J(cx, ly1)], mallW);
   // between the rink and the Pond, over Gapstow Bridge, to the drive
-  const se = spline([MJ, [cx + 5.0, MJ[1] - 0.2], [gapX - 1.6, y0 + 112.6], [gapX + 3.6, y0 + 112.8], J(lx1, y0 + 113.0)]);
+  const se = spline([MJ, [cx + 5.0, MJ[1] - 0.2], [gapX - 1.6, y0 + k * 112.6], [gapX + 3.6, y0 + k * 112.8], J(lx1, y0 + k * 113.0)]);
   net.path(se, 1.5);
-  const [gapN, gapS] = (() => { const [a, b] = shoreAlong(pondF, gapX, y0 + 112, y0 + 123); return [a - 0.5, b + 0.5]; })();
+  const [gapN, gapS] = (() => { const [a, b] = shoreAlong(pondF, gapX, y0 + k * 112, y0 + k * 123); return [a - 0.5, b + 0.5]; })();
   net.path([[gapX, se[Math.floor(se.length * 0.62)][1]], [gapX, gapN]], 1.3);
   const gapZ = (t) => CURB + 0.3 + Math.sin(PI * t) * 0.85;
   net.path([[gapX, gapN], [gapX, gapS]], 0, { step: 1.2, z: gapZ });
@@ -197,8 +199,8 @@ export function centralPark(C) {
   // ---- ground -------------------------------------------------------------------------------------
   C.paintGround(R.x0, R.y0, R.x1, R.y1, 'grass');
   // woods: the North Woods, the Ramble, the shores, and copses all over
-  C.paintWhere(R.x0, R.y0, cx + 2, y0 + 34, (x, y) => valueNoise(x * 0.17, y * 0.17, 91) > 0.28, 'woods');
-  C.paintWhere(R.x0, y0 + 83, R.x1, y0 + 93, (x, y) => valueNoise(x * 0.2, y * 0.2, 92) > 0.3, 'woods');
+  C.paintWhere(R.x0, R.y0, cx + 2, y0 + k * 34, (x, y) => valueNoise(x * 0.17, y * 0.17, 91) > 0.28, 'woods');
+  C.paintWhere(R.x0, y0 + k * 83, R.x1, y0 + k * 93, (x, y) => valueNoise(x * 0.2, y * 0.2, 92) > 0.3, 'woods');
   C.paintWhere(R.x0, R.y0, R.x1, R.y1, (x, y) => valueNoise(x * 0.12, y * 0.12, 93) > 0.66, 'woods');
   // lawns: the Great Hill, the Great Lawn, Sheep Meadow
   C.paintWhere(greatHill.x - greatHill.r, greatHill.y - greatHill.r, greatHill.x + greatHill.r, greatHill.y + greatHill.r, (x, y) => dist(x, y, greatHill.x, greatHill.y) < greatHill.r, 'lawn');
@@ -425,7 +427,7 @@ export function centralPark(C) {
   }
 
   // ---- rocks: Vista Rock's shoulders, outcrops in the Ramble and the North Woods, lake shores -----
-  for (const [x, y, r, h] of [[castle.x - 2.4, castle.y + 1.6, 0.9, 0.8], [castle.x + 2.6, castle.y + 1.2, 0.7, 0.6], [cx + 3.2, y0 + 88.4, 0.8, 0.7], [cx - 1.6, y0 + 86.8, 0.55, 0.45], [x0 + 13.4, y0 + 16.0, 0.9, 0.9], [x0 + 6.2, y0 + 18.6, 0.7, 0.6], [cx - 6.0, y0 + 9.4, 0.6, 0.5], [cx - 10.6, y0 + 112.6, 0.8, 0.7]]) rock(x, y, r, h);
+  for (const [x, y, r, h] of [[castle.x - 2.4, castle.y + 1.6, 0.9, 0.8], [castle.x + 2.6, castle.y + 1.2, 0.7, 0.6], [cx + 3.2, y0 + k * 88.4, 0.8, 0.7], [cx - 1.6, y0 + k * 86.8, 0.55, 0.45], [x0 + 13.4, y0 + k * 16.0, 0.9, 0.9], [x0 + 6.2, y0 + k * 18.6, 0.7, 0.6], [cx - 6.0, y0 + k * 9.4, 0.6, 0.5], [cx - 10.6, y0 + k * 112.6, 0.8, 0.7]]) rock(x, y, r, h);
   for (const [F, lobes] of [[meerF, meer], [lakeF, lake], [pondF, pond], [turtleF, turtle]])
     for (let k = 0; k < 26; k++) {
       const l = rng.pick(lobes), a = rng.range(0, 2 * PI);
@@ -509,17 +511,17 @@ export function centralPark(C) {
   for (let k = 0; k < 6; k++) { const a = (k / 6) * 2 * PI + 0.3, x = SF.x + Math.cos(a) * (SF.r + 0.5), y = SF.y + Math.sin(a) * (SF.r + 0.5); if (Math.abs(Math.cos(a)) > 0.7) benchAt(x, y, 'y', -Math.sign(Math.cos(a))); else benchAt(x, y, 'x', -Math.sign(Math.sin(a))); }
   for (const [x, y, ax, f] of [[RV.x - 8, RV.y + trackRy + 1.2, 'x', -1], [RV.x + 8, RV.y + trackRy + 1.2, 'x', -1], [RV.x - 6, RV.y - trackRy - 1.2, 'x', 1], [RV.x + 6, RV.y - trackRy - 1.2, 'x', 1],
     [GL.x - 7, GL.y + glRy + 0.95, 'x', -1], [GL.x + 7, GL.y + glRy + 0.95, 'x', -1], [GL.x - 6, GL.y - glRy - 0.95, 'x', 1], [GL.x + 6, GL.y - glRy - 0.95, 'x', 1],
-    [cx + 4, y0 + 21.4, 'x', -1], [cx + 10, y0 + 21.4, 'x', -1], [cx - 9, y0 + 101.6, 'x', -1], [cx + 6, y0 + 101.2, 'x', -1], [castle.x + 2.4, castle.y - 2.6, 'x', 1],
-    [lx0 + 1.3, y0 + 60, 'y', -1], [lx1 - 1.3, y0 + 40, 'y', 1], [lx0 + 1.3, y0 + 100, 'y', -1], [lx1 - 1.3, y0 + 96, 'y', 1], [cx - 8, ly1 - 1.3, 'x', 1]]) benchAt(x, y, ax, f);
+    [cx + 4, y0 + k * 21.4, 'x', -1], [cx + 10, y0 + k * 21.4, 'x', -1], [cx - 9, y0 + k * 101.6, 'x', -1], [cx + 6, y0 + k * 101.2, 'x', -1], [castle.x + 2.4, castle.y - 2.6, 'x', 1],
+    [lx0 + 1.3, y0 + k * 60, 'y', -1], [lx1 - 1.3, y0 + k * 40, 'y', 1], [lx0 + 1.3, y0 + k * 100, 'y', -1], [lx1 - 1.3, y0 + k * 96, 'y', 1], [cx - 8, ly1 - 1.3, 'x', 1]]) benchAt(x, y, ax, f);
   for (const [x, y] of [[cx + 1.4, ly0 + 1.4], [cx - 1.6, ly1 - 1.6], [BT.x + 6.2, BT.y + 1.2], [BT.x - 6.2, BT.y - 1.2], [SF.x + 2.6, SF.y + 2.6], [GL.x + glRx + 1.4, GL.y + 1.4], [RV.x - trackRx - 1.4, RV.y + 1.4], [cgc[0] - 2.4, CG.y0 - 1.2]]) if (soft(x, y)) trashBasket(C, x, y);
 
   // ---- the woods: everything that isn't lawn, water, path or plaza --------------------------------------
   const zone = (x, y) => {
     if (x > DR.x0 - 0.8 && x < DR.x1 + 0.8 && y > DR.y0 - 0.8 && y < DR.y1 + 0.8) return null;
     if (x > CG.x0 - 0.6 && x < CG.x1 + 0.6 && y > CG.y0 - 0.6 && y < CG.y1 + 0.6) return null;
-    if (y < y0 + 34) return { d: x < cx + 2 ? 1 : 0.85, sp: ['oak', 'elm', 'pine', 'oak', 'locust', 'pine'] }; // the North Woods
-    if (y > y0 + 83 && y < y0 + 93) return { d: 1, sp: ['oak', 'elm', 'pine', 'oak', 'locust', 'cherry'] }; // the Ramble
-    if (y > y0 + 100 && y < y0 + 108 && x < cx - 3) return { d: 0.85, sp: ['cherry', 'cherry', 'elm', 'locust'] }; // Cherry Hill
+    if (y < y0 + k * 34) return { d: x < cx + 2 ? 1 : 0.85, sp: ['oak', 'elm', 'pine', 'oak', 'locust', 'pine'] }; // the North Woods
+    if (y > y0 + k * 83 && y < y0 + k * 93) return { d: 1, sp: ['oak', 'elm', 'pine', 'oak', 'locust', 'cherry'] }; // the Ramble
+    if (y > y0 + k * 100 && y < y0 + k * 108 && x < cx - 3) return { d: 0.85, sp: ['cherry', 'cherry', 'elm', 'locust'] }; // Cherry Hill
     return { d: 0.88, sp: ['oak', 'plane', 'elm', 'locust', 'oak', 'cherry'] };
   };
   const gs = 1.6;

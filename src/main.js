@@ -42,8 +42,9 @@ async function boot() {
   const camera = new Camera();
   const dpr = window.devicePixelRatio || 1;
   camera.scale = camera.scaleTo = Math.max(1, Math.round(dpr));
-  // open on Times Square: the red steps in front, the screens behind
-  [camera.x, camera.y] = world.timesSquare?.view || [MAPX / 2, MAPY / 2];
+  // open over Central Park, looking down its length from the Mall
+  // (over the middle of Central Park, where no tower stands between the camera and the lawns)
+  [camera.x, camera.y] = world.park ? [world.park.cx - 10, world.park.cy - 10] : [MAPX / 2, MAPY / 2];
   if (q.has('zoom')) camera.scale = camera.scaleTo = parseFloat(q.get('zoom'));
   if (q.has('x')) camera.x = parseFloat(q.get('x'));
   if (q.has('y')) camera.y = parseFloat(q.get('y'));
