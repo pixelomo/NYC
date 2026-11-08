@@ -43,6 +43,7 @@ export class Particles {
     this.rain = [];
     this.fireworkTimer = 3;
     this.flashes = [];
+    this.bullets = [];
     this.fireflies = [];
     this.steamAcc = new Map();
   }
@@ -87,6 +88,9 @@ export class Particles {
   }
   muzzle(x, y, z, dx, dy) {
     const r = this.rng;
+    // a star of flame at the muzzle, then the sparks
+    for (const [ax, ay] of [[dx, dy], [-dy, dx], [dy, -dx]]) for (let k = 1; k <= (ax === dx ? 3 : 1); k++)
+      this.add({ x: x + ax * 0.07 * k, y: y + ay * 0.07 * k, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.07, max: 0.07, f: this.fr.dot2, row: this.rows.fbYellow, kind: 'spark' });
     for (let i = 0; i < 4; i++) {
       const s = r.range(0.5, 3);
       this.add({ x: x + dx * 0.05 * i, y: y + dy * 0.05 * i, z, vx: dx * s + r.range(-0.4, 0.4), vy: dy * s + r.range(-0.4, 0.4), vz: r.range(-0.3, 0.3), g: 0, life: 0.06, max: 0.06, f: i ? this.fr.dot : this.fr.dot2, row: this.rows.fbYellow, kind: 'spark' });
@@ -94,11 +98,27 @@ export class Particles {
     this.add({ x: x + dx * 0.1, y: y + dy * 0.1, z, vx: r.range(-0.2, 0.2), vy: r.range(-0.2, 0.2), vz: 0.4, g: 0, life: 0.5, max: 0.5, kind: 'smoke', row: this.rows.smokeGrey, grow: 1.2, a: 0.5 });
     this.flashes.push({ x, y, k: 0.9, color: [1, 0.8, 0.45], r: 3.2, decay: 12 });
   }
+  // a bullet you can see: a bright head that flies from the muzzle to whatever it hits (fast, but
+  // over a few frames rather than instantly), drawing a short glowing streak behind it
   tracer(x0, y0, z0, x1, y1, z1) {
-    const d = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.ceil(d / 0.3));
-    for (let i = 1; i < n; i++) {
-      const t = i / n;
-      this.add({ x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t, z: z0 + (z1 - z0) * t, vx: 0, vy: 0, vz: 0, g: 0, life: 0.03 + t * 0.05, max: 0.08, f: this.fr.dot, row: this.rows.tracer, kind: 'spark' });
+    const d = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+    if (d < 0.05) return;
+    this.bullets.push({ x: x0, y: y0, z: z0, ux: (x1 - x0) / d, uy: (y1 - y0) / d, uz: (z1 - z0) / d, left: d, sp: 42 });
+  }
+  bulletsUpdate(dt) {
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      const step = Math.min(b.left, b.sp * dt);
+      // the streak: dots along the stretch it covered this frame and a little behind, brightest at the head
+      const tail = Math.min(2.2, step + 1.0), n = Math.max(4, Math.ceil(tail / 0.07));
+      const hx = b.x + b.ux * step, hy = b.y + b.uy * step, hz = b.z + b.uz * step;
+      for (let k = 0; k <= n; k++) {
+        const t = k / n, x = hx - b.ux * tail * t, y = hy - b.uy * tail * t, z = hz - b.uz * tail * t;
+        this.add({ x, y, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.09 * (1 - t) + 0.03, max: 0.12, f: t < 0.5 ? this.fr.dot2 : this.fr.dot, row: this.rows.tracer, kind: 'spark' });
+      }
+      this.flashes.push({ x: hx, y: hy, k: 0.5, color: [1, 0.85, 0.5], r: 1.3, decay: 30 });
+      b.x = hx; b.y = hy; b.z = hz; b.left -= step;
+      if (b.left <= 1e-3) this.bullets.splice(i, 1);
     }
   }
   shell(x, y, z, dx, dy) {
@@ -193,6 +213,7 @@ export class Particles {
     const wind = env.wind;
     const wx = Math.cos(env.windDir) * wind * 0.8, wy = Math.sin(env.windDir) * wind * 0.8;
     if (!view || !view.bw) return;
+    this.bulletsUpdate(dt);
     this.carFx(dt, view);
     // --- precipitation ---
     const want = env.precip > 0.05 ? Math.floor((env.snowing ? 1400 : 1700) * env.precip * Math.min(1.6, (view.bw * view.bh) / 600000)) : 0;

@@ -87,8 +87,8 @@ export class Statics {
     const world = this.city.world;
     this.updatePalettes(env);
     const vis = (x, y, z, m = 6) => view.visible(x, y, z, m);
-    // trees
-    for (let i = 0; i < world.trees.length; i++) {
+    // trees (drawn in 3D by render/treeLayer.js when there is one)
+    if (!this.city.treeLayer) for (let i = 0; i < world.trees.length; i++) {
       const t = world.trees[i];
       if (!vis(t.x, t.y, t.z + 2, 6)) continue;
       const fr = this.treeFrames[t.species][t.variant];
@@ -130,6 +130,7 @@ export class Statics {
     const lampsOn = env.lampsOn;
     if (lampsOn) {
       for (const h of world.lampHeads) {
+        if (h.off) continue;
         if (!vis(h.x, h.y, h.z, 2)) continue;
         L.push(h.x, h.y, h.z - 0.02, this.frames.glow, this.glowRows[h.kind] ?? this.glowRows.street, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
       }
@@ -149,6 +150,7 @@ export class Statics {
     if (tr) {
       const vd = cam.viewDir();
       for (const s of world.signals) {
+        if (s.off) continue;
         if (s.face[0] * vd[0] + s.face[1] * vd[1] <= 0.05) continue;
         if (!vis(s.x, s.y, s.z, 1)) continue;
         const st = tr.signalState(s.i, s.j);
@@ -179,6 +181,7 @@ export class Statics {
     const shopsOpen = env.hour >= 7 && env.hour < 22.5;
     for (let i = 0; i < world.lamps.length; i++) {
       const l = world.lamps[i];
+      if (l.off) continue;
       let k = l.k;
       if (l.kind === 'street' || l.kind === 'park' || l.kind === 'flood' || l.kind === 'globe' || l.kind === 'shelter' || l.kind === 'shed') {
         if (!env.lampsOn) continue;

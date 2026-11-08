@@ -384,6 +384,7 @@ export class Vehicles {
       }
       c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10);
       if (Math.abs(c.v) > 1 || Math.hypot(c.vx, c.vy) > 1) this.runOver(c, P);
+      city.poles?.carHit(c);
     }
     this.contacts();
     // fires, smoke and the cars nobody needs any more

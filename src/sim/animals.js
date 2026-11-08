@@ -125,6 +125,7 @@ export class Animals {
     const W = this.city.world;
     let best = null, bd = 900;
     for (const p of W.perches) {
+      if (p.off) continue;
       const d = dist2(p.x, p.y, pg.x, pg.y) * this.rng.range(0.6, 1.4);
       if (d < bd && d > 4) { bd = d; best = p; }
     }

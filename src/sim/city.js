@@ -4,6 +4,8 @@ import { SpriteAtlas, PaletteBank, buildPropSprites } from '../render/sprites.js
 import { SpriteLayer } from '../render/spriteLayer.js';
 import { LightLayer } from '../render/lightLayer.js';
 import { CarLayer } from '../render/carLayer.js';
+import { PersonLayer } from '../render/personLayer.js';
+import { TreeLayer } from '../render/treeLayer.js';
 import { Statics } from './statics.js';
 import { Traffic } from './traffic.js';
 import { People } from './people.js';
@@ -13,6 +15,7 @@ import { Particles } from './particles.js';
 import { Subway } from './subway.js';
 import { Player } from './player.js';
 import { Vehicles } from './vehicles.js';
+import { Poles } from './poles.js';
 import { Collision } from './collide.js';
 import { DecalLayer } from '../render/decalLayer.js';
 import { T } from '../world/layout.js';
@@ -30,6 +33,8 @@ export class City {
     this.statics = new Statics(this);
     this.coll = new Collision(world);
     this.carLayer = new CarLayer(gl, this);
+    this.personLayer = new PersonLayer(gl, this);
+    this.treeLayer = new TreeLayer(gl, this);
     this.decals = new DecalLayer(gl, this);
     this.traffic = new Traffic(this);
     this.systems = [];
@@ -37,8 +42,8 @@ export class City {
     this.lightLayer = new LightLayer(gl);
     renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) });
     renderer.addLayer({
-      shadow: (ctx) => { this.carLayer.shadow(ctx); this.sprites.shadow(ctx); },
-      draw: (ctx) => { this.decals.draw(ctx); this.carLayer.draw(ctx); this.sprites.draw(ctx); },
+      shadow: (ctx) => { this.carLayer.shadow(ctx); this.personLayer.shadow(ctx); this.treeLayer.shadow(ctx); this.sprites.shadow(ctx); },
+      draw: (ctx) => { this.decals.draw(ctx); this.carLayer.draw(ctx); this.personLayer.draw(ctx); this.treeLayer.draw(ctx); this.sprites.draw(ctx); },
     });
     this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => true };
     this.time = 0;
@@ -58,6 +63,7 @@ export class City {
     // car physics after everyone has moved: contacts, damage, fires, wrecks
     this.vehicles = new Vehicles(this);
     this.addSystem(this.vehicles);
+    this.poles = this.addSystem(new Poles(this));
     this.addSystem({ update: (dt) => this.decals.update(dt) });
     this.traffic.init();
     this.people.init();
@@ -97,9 +103,12 @@ export class City {
     const env = this.env;
     const L = this.sprites;
     L.begin();
+    this.personLayer.begin();
     this.statics.emit(L, env, this.camera, this.time, view);
     for (const s of this.systems) s.emit && s.emit(L, view);
     L.end();
+    this.personLayer.end();
+    this.treeLayer.prepare(view, this.statics.treeRows);
     this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view);
     this.decals.prepare(view);
     const LL = this.lightLayer;

@@ -44,7 +44,10 @@ npm run build
   Randall's Island, suspension span to Queens), the **Hell Gate Bridge**'s crimson steel arch between
   granite towers, the **Queensboro Bridge**'s cantilever truss over
   Roosevelt Island with the **tram** beside it, the **Williamsburg**, **Manhattan** (with its arch
-  and colonnade) and **Brooklyn Bridges**. Strings of lights hang along their cables at night.
+  and colonnade) and **Brooklyn Bridges**. Strings of lights hang along their cables at night. Each
+  one is joined up at both ends: its ramp starts down on the avenue in Manhattan, and on the far
+  side it comes down off the deck onto a road that runs on into Queens, Brooklyn or the Bronx
+  (the Henry Hudson Bridge lands on Riverdale's ridge).
 - Pick a place from the **GO TO** menu to glide there (the camera turns to that place's best
   side), or press **V** for a bird's-eye view. Zoom right out to see the whole island. The slab's
   cross-section reveals soil, schist and utility pipes — and a **subway tunnel** where silver trains
@@ -163,6 +166,16 @@ npm run build
   cart, kids after school, joggers, dog walkers, tourists, retirees feeding pigeons, stoop sitters
   on summer evenings, trick-or-treaters in autumn. They path-find along sidewalks, wait for the
   WALK signal, climb stoops, enter shops and come out with bags, and open umbrellas in the rain.
+  They are **little 3D figures**, each posed every frame (swinging arms and legs as they walk,
+  pumping them as they run, sitting on benches and stoops, waving, aiming, lying where they fall)
+  and dressed from their own outfit: hair (short, long, ponytail, bun, afro, spiky), hats (cap,
+  fedora, beanie, police cap, hood, helmet, witch's hat), short or long sleeves, jackets, long
+  coats and puffers, trousers, shorts, skirts and dresses, scarves, glasses, ties, backpacks,
+  shoulder bags, briefcases, shopping bags and canes, in their own colours.
+- **Trees in 3D**: plane trees, locusts, oaks, elms, cherries and pines, each a trunk with branches
+  reaching into a crown of faceted leaf clusters (or stacked cones), speckled light and dark like
+  pixel foliage. Leaves turn in autumn and fall in winter to show the bare branches, with snow on
+  them after a snowfall; every tree casts a real shadow.
 - **Traffic**: yellow cabs, cars, vans, trucks and buses obey signals, turn, yield to pedestrians
   and oncoming traffic, park and pull out. A bus loops round the park between stops; a fire truck sometimes races
   out with sirens; garbage trucks run in the morning; an ice-cream truck plays its jingle in summer;
@@ -211,8 +224,13 @@ nearest the middle of the screen; the camera switches to the bird's-eye view and
 - **The pistol**: aim with the mouse and **click** to shoot (hold to keep firing), or **Space** on
   foot to shoot at whoever is in front of you; **R** reloads the 12-round clip. It works out of a
   car window too. People who are shot go down in a spreading pool of blood; police officers take
-  two hits. Gunfire sends everyone nearby running and the pigeons into the air; shooting a car
-  dents it, breaks its glass and eventually sets it on fire.
+  two hits. Each shot leaves a muzzle flash and a glowing tracer that streaks to whatever it hits.
+  Gunfire sends everyone nearby running and the pigeons into the air; shooting a car dents it,
+  breaks its glass and eventually sets it on fire.
+- **Knock things over**: drive into a street lamp or a traffic-signal pole fast enough and it
+  goes down — it topples the way you were going, bounces and lies across the sidewalk or the
+  street, its lamp dark or its signals dead (a slow bump just stops you). The city puts fallen
+  poles back up later, out of sight.
 - **Wanted level**: the moment the police come after you, you get **one star** out of five. The
   longer the chase runs and the more damage you do (cars wrecked, people hurt, officers down),
   the more stars — and the more police cars, faster and pushier: from three stars they cut you
@@ -273,9 +291,10 @@ URL parameters are handy for jumping straight to a moment, e.g.
   quick to build and light on memory, ordinary blocks come in a few seeded variants per type whose
   atlas art is painted once and reused, and the ground is painted at half the art resolution with
   the fine grain added back in the shader.
-- `src/render/sprites.js` – palette-indexed sprites: one person template covers every skin, hair
-  and clothing colour (26×42-pixel figures with faces, hairstyles, hats, coats, bags and a shaded
-  outline); trees swap palettes per season (leaves hide in winter, revealing branches).
+- `src/render/sprites.js` – palette-indexed sprites (animals, props, effects) and the seasonal
+  palettes. `src/render/personLayer.js` draws the people as instanced, jointed 3D figures (one mesh
+  holds every hairstyle and garment, each instance its pose and a mask of what it wears);
+  `src/render/treeLayer.js` the 3D trees. `src/sim/poles.js` knocks lamps and signal poles over.
 - `src/render/carLayer.js` – instanced 3D vehicles. Bodies are lofted from cross-sections
   (chamfered corners, sloped hoods and windshields, cabins that narrow towards the roof) with
   10-sided wheels, hubcaps, bumpers, mirrors and light bars. Their textures are projected from the

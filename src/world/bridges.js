@@ -10,7 +10,7 @@
 // Each comes down onto Manhattan over an approach in its own block and runs out to the far shore
 // (to the edge of the diorama). At night strings of lights hang along the main cables.
 
-import { T, CURB, WATER_Z, MAPX, STREET, BROOKLYN_X, NBX, NBY, BLOCK_TYPES, blockRect, BOROUGHS } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, STREET, SIDEWALK, BROOKLYN_X, NBX, NBY, BLOCK_TYPES, blockRect, BOROUGHS } from './layout.js';
 import { MAT } from './mesh.js';
 import { winCode } from '../core/painter.js';
 import { shade, mixc, hash2i } from '../core/math.js';
@@ -180,7 +180,8 @@ function tower(C, x, y, hw, zd, zt, style, X, o = {}) {
 function suspension(C, o) {
   const X = texes(C, o.color);
   const { y, x0, x1, t0, t1, zd, zt, hw } = o;
-  deck(C, x0, x1, y, zd, hw, X, { lower: o.lower });
+  deck(C, x0, o.land ? o.land[0] : x1, y, zd, hw, X, { lower: o.lower });
+  if (o.land) landing(C, o.land[0], o.land[1], y, zd, hw, o.color);
   tower(C, t0, y, hw, zd, zt, o.style, X, { leg: o.leg });
   tower(C, t1, y, hw, zd, zt, o.style, X, { leg: o.leg, noFooting: o.farOnLand });
   const xA = o.anchors[0], xB = o.anchors[1], zA = zd + 0.9, zLow = zd + 1.0;
@@ -204,8 +205,9 @@ function suspension(C, o) {
 export function approach(C, L, side, zd, hw, color, o = {}) {
   const mb = C.mb, S = sharedTex(C), X = texes(C, color);
   const y = (L.y0 + L.y1) / 2, n = 6;
-  const xs = side === 'e' ? L.x0 + 1.0 : L.x1 - 1.0, xe = side === 'e' ? L.x1 - (o.anchor ? 5.5 : 0) : L.x0 + (o.anchor ? 5.5 : 0);
-  const z0 = CURB + 0.6;
+  // (the ramp starts down on the avenue's roadway, across the sidewalk from the block)
+  const xs = side === 'e' ? L.x0 - SIDEWALK - 0.4 : L.x1 + SIDEWALK + 0.4, xe = side === 'e' ? L.x1 - (o.anchor ? 5.5 : 0) : L.x0 + (o.anchor ? 5.5 : 0);
+  const z0 = 0.02;
   for (let k = 0; k < n; k++) {
     const xa = xs + ((xe - xs) * k) / n, xb = xs + ((xe - xs) * (k + 1)) / n;
     const za = z0 + ((zd - z0) * k) / n, zb = z0 + ((zd - z0) * (k + 1)) / n;
@@ -234,11 +236,35 @@ export function approach(C, L, side, zd, hw, color, o = {}) {
   return { y, xe };
 }
 
+// ---- the far end: down a ramp onto a road that runs on to the edge of the diorama ------------------
+// The deck ends at xa; a ramp on steel bents comes down to the ground by xb, and the road goes on
+// from there to the edge (into the rest of Queens or Brooklyn).
+function landing(C, xa, xb, y, zd, hw, color) {
+  const mb = C.mb, X = texes(C, color), n = 5, z1 = CURB + 0.03;
+  for (let k = 0; k < n; k++) {
+    const lo = xa + ((xb - xa) * k) / n, hi = xa + ((xb - xa) * (k + 1)) / n;
+    const zlo = zd + ((z1 - zd) * k) / n, zhi = zd + ((z1 - zd) * (k + 1)) / n;
+    mb.quad([lo, y - hw, zlo], [hi, y - hw, zhi], [hi, y + hw, zhi], [lo, y + hw, zlo], [[lo * T, (y - hw) * T], [hi * T, (y - hw) * T], [hi * T, (y + hw) * T], [lo * T, (y + hw) * T]], X.road, [0, 0, 1], MAT.SNOW | MAT.WET);
+    for (const sy of [-1, 1]) {
+      const yy = y + sy * hw, d = Math.min(0.6, zhi - CURB);
+      mb.quad(sy > 0 ? [hi, yy, zhi] : [lo, yy, zlo], sy > 0 ? [lo, yy, zlo] : [hi, yy, zhi], sy > 0 ? [lo, yy, zlo - d] : [hi, yy, zhi - d], sy > 0 ? [hi, yy, zhi - d] : [lo, yy, zlo - d], [[0, 0], [(hi - lo) * T, 0], [(hi - lo) * T, 0.6 * T], [0, 0.6 * T]], X.plate, [0, sy, 0], 0);
+      mb.quad(sy > 0 ? [hi, yy, zhi + 0.5] : [lo, yy, zlo + 0.5], sy > 0 ? [lo, yy, zlo + 0.5] : [hi, yy, zhi + 0.5], sy > 0 ? [lo, yy, zlo] : [hi, yy, zhi], sy > 0 ? [hi, yy, zhi] : [lo, yy, zlo], [[0, 0], [(hi - lo) * T, 0], [(hi - lo) * T, 0.5 * T], [0, 0.5 * T]], X.plate, [0, sy, 0], 0);
+      if (k > 0 && zlo - 0.6 > CURB + 0.2) mb.box(lo - 0.2, y + sy * (hw - 0.4) - 0.2, CURB, lo + 0.2, y + sy * (hw - 0.4) + 0.2, zlo - 0.6, sides(X.plate));
+    }
+  }
+  // the road on: asphalt with its centre line, kerbs either side, a lamp or two
+  mb.box(xb, y - hw, CURB, MAPX, y + hw, z1, { pz: { t: X.road, world: true } });
+  for (const sy of [-1, 1]) mb.box(xb, y + sy * hw - (sy > 0 ? 0 : 0.25), CURB, MAPX, y + sy * hw + (sy > 0 ? 0.25 : 0), CURB + 0.12, sides(X.granite, { t: X.granite }));
+  C.paintGround(Math.min(xa, xb), y - hw - 1.2, MAPX, y + hw + 1.2, 'plaza');
+}
+
 // ---- the Queensboro Bridge: a cantilevered steel truss on five piers, over Roosevelt Island --------
 function cantilever(C, o) {
   const mb = C.mb, X = texes(C, o.color), W = C.world;
-  const { y, x0, x1, zd, hw, piers } = o;
+  const { y, x0, zd, hw, piers } = o;
+  const x1 = o.land ? o.land[0] : o.x1;
   deck(C, x0, x1, y, zd, hw, X, { lower: true });
+  if (o.land) landing(C, o.land[0], o.land[1], y, zd, hw, o.color);
   // the top chord: high over each pier, low in the middle of each span
   const peak = zd + 8.5, low = zd + 2.2;
   const prof = (x) => {
@@ -273,7 +299,7 @@ function cantilever(C, o) {
   }
   for (let x = x0 + 2; x < x1; x += 3.2) { W.lampHeads.push({ x, y: y - hw, z: prof(x) + 0.25, kind: 'globe' }); W.lampHeads.push({ x, y: y + hw, z: prof(x) + 0.25, kind: 'globe' }); }
   landmark(C, o.name, (x0 + x1) / 2 + 6, y + hw + 10, 0);
-  W.bridges.push({ name: o.name, y, x0, x1, z: zd, hw });
+  W.bridges.push({ name: o.name, y, x0, x1: o.x1, z: zd, hw });
 }
 
 // ---- an arch along y (the Henry Hudson Bridge), or along x (High Bridge's middle span) ----------
@@ -390,8 +416,22 @@ export function buildBridges(C) {
     const c = inw.x0 + 4.5, top = inw.y0 - STREET; // Manhattan's north shore
     deckArch(C, { axis: 'y', c, a0: 2, a1: inw.y0 + 6, s0: top - 12.5, s1: top - 0.5, zd: 6.5, hw: 1.6, color: 0x4a5a6a });
     C.mb.box(c - 1.6, inw.y0 + 2, CURB, c + 1.6, inw.y0 + 6, 6.0, sides(texes(C, 0x4a5a6a).granite));
+    // and a ramp down through the park to the street at its south side
+    {
+      const X = texes(C, 0x4a5a6a), y0 = inw.y0 + 6, y1 = inw.y1 + SIDEWALK + 0.6, zt = 6.5, zb = 0.02, n = 6, hw = 1.6;
+      for (let k = 0; k < n; k++) {
+        const ya = y0 + ((y1 - y0) * k) / n, yb = y0 + ((y1 - y0) * (k + 1)) / n, za = zt + ((zb - zt) * k) / n, zb2 = zt + ((zb - zt) * (k + 1)) / n;
+        C.mb.quad([c - hw, ya, za], [c + hw, ya, za], [c + hw, yb, zb2], [c - hw, yb, zb2], [[(c - hw) * T, ya * T], [(c + hw) * T, ya * T], [(c + hw) * T, yb * T], [(c - hw) * T, yb * T]], X.road, [0, 0, 1], MAT.SNOW | MAT.WET);
+        for (const sx of [-1, 1]) {
+          const xx = c + sx * hw;
+          C.mb.quad(sx > 0 ? [xx, ya, za + 0.5] : [xx, yb, zb2 + 0.5], sx > 0 ? [xx, yb, zb2 + 0.5] : [xx, ya, za + 0.5], sx > 0 ? [xx, yb, zb2 - 0.5] : [xx, ya, za - 0.5], sx > 0 ? [xx, ya, za - 0.5] : [xx, yb, zb2 - 0.5], [[0, 0], [(yb - ya) * T, 0], [(yb - ya) * T, T], [0, T]], X.plate, [sx, 0, 0], 0);
+          if (k > 0 && za - 0.6 > CURB + 0.2) C.mb.box(xx - sx * 0.4 - 0.2, ya - 0.2, CURB, xx - sx * 0.4 + 0.2, ya + 0.2, za - 0.6, sides(X.plate));
+        }
+        if (za > 1.3) markHeight(W, c - hw, ya, c + hw, yb, za - 0.6);
+      }
+    }
     landmark(C, 'HENRY HUDSON BRIDGE', c + 8, top - 6, 0);
-    W.bridges.push({ name: 'HENRY HUDSON BRIDGE', x: c, y0: 2, y1: inw.y0 + 6, z: 6.5, hw: 1.6 });
+    W.bridges.push({ name: 'HENRY HUDSON BRIDGE', x: c, y0: 2, y1: inw.y0 + 6, z: 6.5, hw: 1.6, ridge: top - 13.2 }); // (lands on Riverdale's ridge: greater.js)
   }
   const hb = findBlock('highbridge');
   if (hb) highBridge(C, hb);
@@ -405,7 +445,7 @@ export function buildBridges(C) {
     for (const tx of [edge + 1.5, edge + 10]) tower(C, tx, a.y, hw, zd, zd + 9, 'deco', X, { leg: 1.0 });
     // piers across Randall's Island
     for (let x = edge + 14; x < 358; x += 5) C.mb.box(x - 0.4, a.y - hw + 0.4, CURB, x + 0.4, a.y + hw - 0.4, zd - 0.5, sides(X.plate));
-    suspension(C, { name: 'TRIBOROUGH BRIDGE', y: a.y, x0: 362, x1: MAPX, t0: 364, t1: BROOKLYN_X + 4, zd, zt: 21, hw, style: 'deco', color: 0x7a8a7a, leg: 1.2, anchors: [358, MAPX + 4], farOnLand: true, rot: 0 });
+    suspension(C, { name: 'TRIBOROUGH BRIDGE', y: a.y, x0: 362, x1: MAPX, t0: 364, t1: BROOKLYN_X + 3, zd, zt: 21, hw, style: 'deco', color: 0x7a8a7a, leg: 1.2, anchors: [358, BROOKLYN_X + 9], land: [BROOKLYN_X + 11, MAPX - 2.5], farOnLand: true, rot: 0 });
   }
   hellGate(C);
   // Queensboro Bridge, over Roosevelt Island, and the tram beside it
@@ -413,7 +453,7 @@ export function buildBridges(C) {
   if (qb) {
     const zd = 7.6, hw = 2.8, a = approach(C, qb, 'e', zd, hw, 0x9a8e78, { trees: 'south' });
     const edge = qb.x1 + STREET, RI = { x0: 349, x1: 360 };
-    cantilever(C, { name: 'QUEENSBORO BRIDGE', y: a.y, x0: edge, x1: MAPX, zd, hw, color: 0x9a8e78, piers: [edge + 3, RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], landPiers: [RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3] });
+    cantilever(C, { name: 'QUEENSBORO BRIDGE', y: a.y, x0: edge, x1: MAPX, zd, hw, color: 0x9a8e78, piers: [edge + 3, RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], landPiers: [RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], land: [BROOKLYN_X + 7, MAPX - 2.5] });
     tram(C, qb.x1 - 2.4, RI.x0 + 4, qb.y0 + 2.2, edge + 4);
   }
   // Williamsburg and Manhattan Bridges to Brooklyn
@@ -421,13 +461,13 @@ export function buildBridges(C) {
   if (wb) {
     const zd = 7.2, hw = 2.8, a = approach(C, wb, 'e', zd, hw, 0x5c5652, { anchor: true });
     const edge = wb.x1 + STREET;
-    suspension(C, { name: 'WILLIAMSBURG BRIDGE', y: a.y, x0: edge, x1: MAPX, t0: edge + 5, t1: BROOKLYN_X - 5, zd, zt: 19, hw, style: 'lattice', color: 0x5c5652, leg: 1.3, anchors: [wb.x1 - 3, BROOKLYN_X + 14], rot: 0 });
+    suspension(C, { name: 'WILLIAMSBURG BRIDGE', y: a.y, x0: edge, x1: MAPX, t0: edge + 5, t1: BROOKLYN_X - 5, zd, zt: 19, hw, style: 'lattice', color: 0x5c5652, leg: 1.3, anchors: [wb.x1 - 3, BROOKLYN_X + 5], land: [BROOKLYN_X + 7.5, MAPX - 2.5], rot: 0 });
   }
   const mbr = findBlock('mbridge');
   if (mbr) {
     const zd = 7.4, hw = 3.0, a = approach(C, mbr, 'e', zd, hw, 0x6a8aaa, { anchor: true });
     const edge = mbr.x1 + STREET;
-    suspension(C, { name: 'MANHATTAN BRIDGE', y: a.y, x0: edge, x1: MAPX, t0: edge + 6, t1: BROOKLYN_X - 6, zd, zt: 20, hw, style: 'arch', color: 0x6a8aaa, leg: 1.4, anchors: [mbr.x1 - 3, BROOKLYN_X + 14], rot: 0 });
+    suspension(C, { name: 'MANHATTAN BRIDGE', y: a.y, x0: edge, x1: MAPX, t0: edge + 6, t1: BROOKLYN_X - 6, zd, zt: 20, hw, style: 'arch', color: 0x6a8aaa, leg: 1.4, anchors: [mbr.x1 - 3, BROOKLYN_X + 5], land: [BROOKLYN_X + 7.5, MAPX - 2.5], rot: 0 });
     // the arch and colonnade at its Manhattan end
     colonnade(C, mbr.x0 + 0.8, a.y, hw);
   }
@@ -441,7 +481,7 @@ function hellGate(C) {
   const RI = BOROUGHS.find((b) => b.name === 'queens');
   if (!RI) return;
   const mb = C.mb, W = C.world, X = texes(C, 0x8a3a36), S = sharedTex(C);
-  const y = RI.y0 + 38, hw = 1.5, zd = 8.4, xa = 338, xb = RI.x0 + 14, t0 = 357.5, t1 = RI.x0 + 1.5;
+  const y = RI.y0 + 38, hw = 1.5, zd = 8.4, xa = 338, xb = MAPX, t0 = 357.5, t1 = RI.x0 + 1.5;
   const rail = C.atlas.shared('hg_rail', 32, 32, (p) => {
     for (let yy = 0; yy < 32; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, shade(0x6a6258, 0.9 + hash2i(xx, yy, 331) * 0.14));
     for (let xx = 0; xx < 32; xx += 4) for (let yy = 4; yy < 28; yy++) p.set(xx, yy, 0x4a3a2a);

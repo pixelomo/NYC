@@ -733,6 +733,7 @@ export class People {
   faceSeat(p) {
     const f = p.seat ? p.seat.b.seats[p.seat.k].face : p.stoopSeat ? p.stoopSeat.n : [0, 1];
     const d = this.city.camera.screenDir(f[0], f[1]);
+    p.dx = f[0]; p.dy = f[1];
     p.front = d[1] >= 0;
     p.flip = d[0] < 0;
   }
@@ -827,7 +828,10 @@ export class People {
     const f = arr[fi] || arr[0];
     let alpha = p.alpha;
     if (p.z < CURB - 0.15) alpha *= clamp(1 + (p.z - CURB + 0.15) * 1.6, 0, 1);
-    L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === 'down' || p.anim === 'lie' ? SF.FLAT : 0), alpha, p.anim === 'down' ? 0.002 : 0.003);
+    // drawn in 3D (render/personLayer.js); the sprite frames stay for anything that still wants one
+    const PL = this.city.personLayer;
+    if (PL) PL.add(p, { alpha });
+    else L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === 'down' || p.anim === 'lie' ? SF.FLAT : 0), alpha, p.anim === 'down' ? 0.002 : 0.003);
     if (p.umbrella) {
       const hz = p.z + (p.kid ? 0.82 : 1.12);
       L.push(p.x, p.y, hz, this.umbrellaFrame, p.pal, 0, alpha, 0.004);

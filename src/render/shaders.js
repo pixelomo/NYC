@@ -85,13 +85,26 @@ layout(location=3) in vec4 aNrm;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uViewProj;
 uniform uint uVis;
+// knocked-over poles: their static geometry (tagged in the normal's spare byte) is hidden, and a
+// fallen copy is drawn in the dynamic mesh. uDown: x, y, reach, tag
+uniform vec4 uDown[48];
+uniform int uDownN;
+bool knocked(vec3 p, float tag) {
+  if (tag < 0.5 || uDownN == 0) return false;
+  for (int i = 0; i < 48; i++) {
+    if (i >= uDownN) break;
+    vec4 d = uDown[i];
+    if (abs(d.w - tag) < 0.5 && distance(p.xy, d.xy) < d.z) return true;
+  }
+  return false;
+}
 out vec3 vWorld;
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out vec3 vNrm;
 flat out uvec4 vInfo;
 void main() {
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || knocked(aPos, floor(aNrm.w * 127.0 + 0.5))) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vWorld = aPos;
   vUV = aUV;
   vRect = aRect;
@@ -349,8 +362,23 @@ export const SHADOW_VS = HEAD + `
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aUV;
 layout(location=2) in uvec4 aRect;
+layout(location=3) in vec4 aNrm;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uShadowVP;
+// knocked-over poles: their static geometry (tagged in the normal's spare byte) is hidden, and a
+// fallen copy is drawn in the dynamic mesh. uDown: x, y, reach, tag
+uniform vec4 uDown[48];
+uniform int uDownN;
+bool knocked(vec3 p, float tag) {
+  if (tag < 0.5 || uDownN == 0) return false;
+  for (int i = 0; i < 48; i++) {
+    if (i >= uDownN) break;
+    vec4 d = uDown[i];
+    if (abs(d.w - tag) < 0.5 && distance(p.xy, d.xy) < d.z) return true;
+  }
+  return false;
+}
+
 uniform uint uVis;
 uniform uint uSkipDetail; // 1: building bodies only (the map trees sample)
 out vec2 vUV;
@@ -359,7 +387,7 @@ flat out uint vLayer;
 flat out uint vMat;
 void main() {
   // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u) || knocked(aPos, floor(aNrm.w * 127.0 + 0.5))) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aUV; vRect = aRect; vLayer = aInfo.x;
   vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);

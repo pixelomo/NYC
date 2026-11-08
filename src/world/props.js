@@ -217,9 +217,17 @@ export function propTex(C) {
 const solidBox = (C, x0, y0, z0, x1, y1, z1, side, top, opt) => C.mb.box(x0, y0, z0, x1, y1, z1, { px: side, nx: side, py: side, ny: side, pz: top || side }, opt);
 
 // NYC-style street lamp. (x,y) = pole base, (ax, ay) = arm direction (toward road)
+// the textures a knocked-over pole is redrawn with
+function poleTex(C, P) {
+  if (!C.world.poleTex) C.world.poleTex = { pole: P.pole, poleDark: P.poleDark, lampHead: P.lampHead, streetSign: P.streetSign, sigHead: P.sigHead, pedHead: P.pedHead, yellow: P.yellow };
+}
+
 export function streetLamp(C, x, y, ax, ay, o = {}) {
   const P = propTex(C);
   const z = CURB, h = o.h ?? 4.25;
+  poleTex(C, P);
+  const tag0 = C.mb.tag;
+  C.mb.tag = 1;
   solidBox(C, x - 0.07, y - 0.07, z, x + 0.07, y + 0.07, z + h, P.pole);
   solidBox(C, x - 0.11, y - 0.11, z, x + 0.11, y + 0.11, z + 0.5, P.pole);
   const L = 1.1;
@@ -228,10 +236,16 @@ export function streetLamp(C, x, y, ax, ay, o = {}) {
   const hx0 = ex - (ax ? 0.25 * ax : 0.12), hx1 = ex + (ax ? 0.12 * ax : 0.12);
   const hy0 = ey - (ay ? 0.25 * ay : 0.12), hy1 = ey + (ay ? 0.12 * ay : 0.12);
   solidBox(C, Math.min(hx0, hx1), Math.min(hy0, hy1), z + h - 0.2, Math.max(hx0, hx1), Math.max(hy0, hy1), z + h - 0.02, P.lampHead, P.pole);
-  C.world.lamps.push({ x: ex, y: ey, z: z + h - 0.25, r: 4.2, color: [1.0, 0.86, 0.62], k: 1.0, kind: 'street' });
-  C.world.lampHeads.push({ x: ex, y: ey, z: z + h - 0.25, kind: 'street' });
-  markHeight(C.world, x - 0.1, y - 0.1, x + 0.1, y + 0.1, z + h);
-  C.world.perches.push({ x: (x + ex) / 2, y: (y + ey) / 2, z: z + h });
+  C.mb.tag = tag0;
+  const W = C.world;
+  W.lamps.push({ x: ex, y: ey, z: z + h - 0.25, r: 4.2, color: [1.0, 0.86, 0.62], k: 1.0, kind: 'street' });
+  W.lampHeads.push({ x: ex, y: ey, z: z + h - 0.25, kind: 'street' });
+  // (not a solid: a car that hits it knocks it down, see sim/poles.js)
+  const ns = W.solids.length;
+  markHeight(W, x - 0.1, y - 0.1, x + 0.1, y + 0.1, z + h);
+  W.solids.length = ns;
+  W.perches.push({ x: (x + ex) / 2, y: (y + ey) / 2, z: z + h });
+  W.poles.push({ kind: 'lamp', tag: 1, x, y, h, ax, ay, lamp: W.lamps[W.lamps.length - 1], head: W.lampHeads[W.lampHeads.length - 1], perch: W.perches[W.perches.length - 1] });
 }
 
 export function parkLamp(C, x, y) {
@@ -251,6 +265,9 @@ export function signalPole(C, x, y, sx, sy, i, j, o = {}) {
   // sx, sy: which quadrant (+1/-1) relative to the intersection centre
   const P = propTex(C);
   const z = CURB, h = 3.3;
+  poleTex(C, P);
+  const tag0 = C.mb.tag, sig0 = C.world.signals.length;
+  C.mb.tag = 2;
   solidBox(C, x - 0.06, y - 0.06, z, x + 0.06, y + 0.06, z + h, P.poleDark);
   // street name signs
   solidBox(C, x - 0.5, y - 0.02, z + h - 0.15, x + 0.5, y + 0.02, z + h, P.streetSign);
@@ -282,7 +299,9 @@ export function signalPole(C, x, y, sx, sy, i, j, o = {}) {
     solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow);
     C.world.signals.push({ i, j, axis: 'y', x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: 'ped' });
   }
+  C.mb.tag = tag0;
   C.world.perches.push({ x, y, z: z + h + 0.17 });
+  C.world.poles.push({ kind: 'signal', tag: 2, x, y, h, sx, sy, closedX: !!o.closedX, closedY: !!o.closedY, signals: C.world.signals.slice(sig0), perch: C.world.perches[C.world.perches.length - 1] });
 }
 
 export function hydrant(C, x, y) {

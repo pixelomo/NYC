@@ -50,6 +50,9 @@ export class MeshBuilder {
     this.ni = 0;
     this.defaultGroup = GRP.ALWAYS;
     this.detail = true;
+    // a tag stored in the normal's spare byte: 1 street lamp, 2 signal pole (the renderer can hide
+    // a single one that has been knocked over)
+    this.tag = 0;
   }
   // geometry created inside fn is a building body (shades trees)
   body(fn) {
@@ -80,7 +83,7 @@ export class MeshBuilder {
     this.nrm[k * 4] = Math.round(n[0] * 127);
     this.nrm[k * 4 + 1] = Math.round(n[1] * 127);
     this.nrm[k * 4 + 2] = Math.round(n[2] * 127);
-    this.nrm[k * 4 + 3] = 0;
+    this.nrm[k * 4 + 3] = this.tag;
     this.info[k * 4] = tex.layer;
     this.info[k * 4 + 1] = mat;
     this.info[k * 4 + 2] = group | (tex.cast === 'none' ? CAST.NONE : tex.cast === 'solid' ? CAST.SOLID : 0) | (this.detail ? CAST.DETAIL : 0);

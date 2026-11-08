@@ -143,8 +143,10 @@ export class Subway {
   }
   emit(L, view) {
     const cam = this.city.camera;
+    const PL = this.city.personLayer;
     const draw = (p, walking) => {
       if (!view.visible(p.x, p.y, p.z, 2)) return;
+      if (PL) { PL.add(p, { anim: walking ? 'walk' : 'idle', face: walking ? [-1, 0] : [0, 1], alpha: clamp(p.alpha, 0, 1) }); return; }
       let f;
       if (walking) {
         const d = cam.screenDir(-1, 0);

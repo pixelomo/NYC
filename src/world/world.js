@@ -31,7 +31,7 @@ export function buildWorld(seed = 1977, progress = () => {}) {
     heights: new Float32Array(MAPX * MAPY),
     lamps: [], lampHeads: [], trees: [], props: [], doors: [], officeDoors: [], benches: [], steam: [], signals: [],
     shops: [], stoopSeats: [], perches: [], pigeonCoops: [], beacons: [], flags: [], fountains: [], hydrants: [],
-    trash: [], hoops: [], swings: [], slides: [], sprinklers: [], busStops: [], subways: [], carts: [], marquees: [], grates: [], canopies: [], extraNets: [], solids: [],
+    trash: [], hoops: [], swings: [], slides: [], sprinklers: [], busStops: [], subways: [], carts: [], marquees: [], grates: [], canopies: [], extraNets: [], solids: [], poles: [],
     blocks: [],
   };
   for (let by = 0; by < NBY; by++)

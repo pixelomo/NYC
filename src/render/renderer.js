@@ -9,6 +9,9 @@ export class Renderer {
   constructor(gl) {
     this.gl = gl;
     this.progStatic = createProgram(gl, STATIC_VS, STATIC_FS, 'static');
+    this.down = new Float32Array(48 * 4);
+    this.downN = 0;
+    this.dyn = null;
     this.progShadow = createProgram(gl, SHADOW_VS, SHADOW_FS, 'shadow');
     this.progSky = createProgram(gl, FS_VS, SKY_FS, 'sky');
     this.progBlur = createProgram(gl, FS_VS, BLUR_FS, 'blur');
@@ -121,28 +124,50 @@ export class Renderer {
     // free CPU copies of the static textures
     for (const pg of atlas.pages) pg.data = null;
     G.data.length = 0;
-    const vao = gl.createVertexArray();
-    gl.bindVertexArray(vao);
-    makeBuffer(gl, mesh.pos);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
-    makeBuffer(gl, mesh.uv);
-    gl.enableVertexAttribArray(1);
-    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
-    makeBuffer(gl, mesh.rect);
-    gl.enableVertexAttribArray(2);
-    gl.vertexAttribIPointer(2, 4, gl.UNSIGNED_SHORT, 0, 0);
-    makeBuffer(gl, mesh.nrm);
-    gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 4, gl.BYTE, true, 0, 0);
-    makeBuffer(gl, mesh.info);
-    gl.enableVertexAttribArray(4);
-    gl.vertexAttribIPointer(4, 4, gl.UNSIGNED_BYTE, 0, 0);
-    makeBuffer(gl, mesh.idx, gl.ELEMENT_ARRAY_BUFFER);
-    gl.bindVertexArray(null);
+    const vao = this.meshVAO(mesh).vao;
     this.staticVAO = vao;
     this.staticCount = mesh.indexCount;
     this.stats.tris = mesh.indexCount / 3;
+  }
+
+  // a vertex array for a mesh in the static format
+  meshVAO(mesh) {
+    const gl = this.gl;
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const bufs = [];
+    const attr = (data, loc, n, type, int, norm = false) => {
+      bufs.push(makeBuffer(gl, data));
+      gl.enableVertexAttribArray(loc);
+      if (int) gl.vertexAttribIPointer(loc, n, type, 0, 0); else gl.vertexAttribPointer(loc, n, type, norm, 0, 0);
+    };
+    attr(mesh.pos, 0, 3, gl.FLOAT, false);
+    attr(mesh.uv, 1, 2, gl.FLOAT, false);
+    attr(mesh.rect, 2, 4, gl.UNSIGNED_SHORT, true);
+    attr(mesh.nrm, 3, 4, gl.BYTE, false, true);
+    attr(mesh.info, 4, 4, gl.UNSIGNED_BYTE, true);
+    bufs.push(makeBuffer(gl, mesh.idx, gl.ELEMENT_ARRAY_BUFFER));
+    gl.bindVertexArray(null);
+    return { vao, bufs, count: mesh.indexCount };
+  }
+  // a small mesh in the static format rebuilt now and then (knocked-over poles)
+  setDynamic(mesh) {
+    const gl = this.gl;
+    if (this.dyn) { gl.deleteVertexArray(this.dyn.vao); for (const b of this.dyn.bufs) gl.deleteBuffer(b); this.dyn = null; }
+    if (mesh && mesh.indexCount) this.dyn = this.meshVAO(mesh);
+  }
+  // static geometry (then the dynamic mesh) with the current program; knocked poles hidden
+  drawStatic(p) {
+    const gl = this.gl;
+    if (p.u.uDown) gl.uniform4fv(p.u.uDown, this.down);
+    if (p.u.uDownN) gl.uniform1i(p.u.uDownN, this.downN);
+    gl.bindVertexArray(this.staticVAO);
+    gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+    if (this.dyn) {
+      if (p.u.uDownN) gl.uniform1i(p.u.uDownN, 0);
+      gl.bindVertexArray(this.dyn.vao);
+      gl.drawElements(gl.TRIANGLES, this.dyn.count, gl.UNSIGNED_INT, 0);
+    }
   }
 
   addLayer(layer) {
@@ -289,8 +314,7 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
       gl.uniform1i(p.u.uAtlas, 0);
-      gl.bindVertexArray(this.staticVAO);
-      gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+      this.drawStatic(p);
       for (const l of this.layers) l.shadow && l.shadow(ctx);
       // static-only map for tall sprites (same light matrix, static geometry only)
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS);
@@ -303,8 +327,7 @@ export class Renderer {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex);
       gl.uniform1i(p.u.uAtlas, 0);
-      gl.bindVertexArray(this.staticVAO);
-      gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+      this.drawStatic(p);
       gl.disable(gl.POLYGON_OFFSET_FILL);
     }
 
@@ -381,8 +404,7 @@ export class Renderer {
       gl.uniform1f(u.uCrown, env.crown);
       gl.uniform3fv(u.uCrownA, env.crownA);
       gl.uniform3fv(u.uCrownB, env.crownB);
-      gl.bindVertexArray(this.staticVAO);
-      gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+      this.drawStatic(p);
     }
     for (const l of this.layers) l.draw && l.draw(ctx);
     for (const l of this.layers) l.drawLate && l.drawLate(ctx);

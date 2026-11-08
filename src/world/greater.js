@@ -204,9 +204,18 @@ function bronx(C) {
   // Yankee Stadium, across the Harlem River from Washington Heights (161st Street)
   const ys = { x0: 272, y0: 136, x1: 310, y1: 174 };
   const keep = (x, y) => x > ys.x0 - 3 && x < ys.x1 + 3 && y > ys.y0 - 3 && y < ys.y1 + 3;
-  // Riverdale: a green hill over Spuyten Duyvil
+  // Riverdale: a green hill over Spuyten Duyvil, its rocky ridge carrying the Henry Hudson Bridge's
+  // road on north
   patch(C, R.x0, R.y0, R.x1, 30, L.grass, CURB + 0.016);
-  for (let x = R.x0 + 2; x < R.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) if (clsAt(x, y) === CL.BORO && rng.chance(0.7)) addTreeAt(C, x + rng.range(-0.6, 0.6), y, CURB, rng.pick(['oak', 'elm', 'pine', 'locust']));
+  const hh = (C.world.bridges || []).find((b) => b.name === 'HENRY HUDSON BRIDGE');
+  const ridge = hh ? { x0: Math.max(R.x0 + 0.5, hh.x - 10), x1: hh.x + 10, y0: 0, y1: hh.ridge, z: hh.z - 0.5 } : null;
+  if (ridge) {
+    C.mb.box(ridge.x0, ridge.y0, CURB, ridge.x1, ridge.y1, ridge.z, { px: L.rock, nx: L.rock, py: L.rock, pz: { t: L.grass, world: true } });
+    markHeight(C.world, ridge.x0, ridge.y0, ridge.x1, ridge.y1, ridge.z);
+    for (let x = ridge.x0 + 1.2; x < ridge.x1 - 1; x += 2.4) for (let y = 1.5; y < ridge.y1 - 1; y += 2.8) if (Math.abs(x - hh.x) > hh.hw + 1.2 && rng.chance(0.75)) addTreeAt(C, x + rng.range(-0.5, 0.5), y, ridge.z, rng.pick(['oak', 'pine', 'elm']));
+  }
+  const onRidge = (x, y) => ridge && x > ridge.x0 - 1 && x < ridge.x1 + 1 && y < ridge.y1 + 1;
+  for (let x = R.x0 + 2; x < R.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) if (clsAt(x, y) === CL.BORO && !onRidge(x, y) && rng.chance(0.7)) addTreeAt(C, x + rng.range(-0.6, 0.6), y, CURB, rng.pick(['oak', 'elm', 'pine', 'locust']));
   // the Grand Concourse's apartment houses and the walk-up streets: whole blocks, as in Manhattan
   const lots = wholeLots(C, { ...R, y0: 34 }, keep);
   for (const lot of lots) offIslandBlock(C, lot, rng.pick(['redbrick', 'redbrick', 'tenements', 'walkups', 'shops', 'redbrick']), lot.bx, lot.by);

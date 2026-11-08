@@ -249,13 +249,26 @@ layout(location=3) in vec4 aNrm;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uViewProj;
 uniform uint uVis;
+// knocked-over poles: their static geometry (tagged in the normal's spare byte) is hidden, and a
+// fallen copy is drawn in the dynamic mesh. uDown: x, y, reach, tag
+uniform vec4 uDown[48];
+uniform int uDownN;
+bool knocked(vec3 p, float tag) {
+  if (tag < 0.5 || uDownN == 0) return false;
+  for (int i = 0; i < 48; i++) {
+    if (i >= uDownN) break;
+    vec4 d = uDown[i];
+    if (abs(d.w - tag) < 0.5 && distance(p.xy, d.xy) < d.z) return true;
+  }
+  return false;
+}
 out vec3 vWorld;
 out vec2 vUV;
 flat out uvec4 vRect;
 flat out vec3 vNrm;
 flat out uvec4 vInfo;
 void main() {
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || knocked(aPos, floor(aNrm.w * 127.0 + 0.5))) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vWorld = aPos;
   vUV = aUV;
   vRect = aRect;
@@ -508,8 +521,23 @@ void main() {
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec2 aUV;
 layout(location=2) in uvec4 aRect;
+layout(location=3) in vec4 aNrm;
 layout(location=4) in uvec4 aInfo;
 uniform mat4 uShadowVP;
+// knocked-over poles: their static geometry (tagged in the normal's spare byte) is hidden, and a
+// fallen copy is drawn in the dynamic mesh. uDown: x, y, reach, tag
+uniform vec4 uDown[48];
+uniform int uDownN;
+bool knocked(vec3 p, float tag) {
+  if (tag < 0.5 || uDownN == 0) return false;
+  for (int i = 0; i < 48; i++) {
+    if (i >= uDownN) break;
+    vec4 d = uDown[i];
+    if (abs(d.w - tag) < 0.5 && distance(p.xy, d.xy) < d.z) return true;
+  }
+  return false;
+}
+
 uniform uint uVis;
 uniform uint uSkipDetail; // 1: building bodies only (the map trees sample)
 out vec2 vUV;
@@ -518,7 +546,7 @@ flat out uint vLayer;
 flat out uint vMat;
 void main() {
   // hidden group, or a mesh that must not cast (fine railings, chain-link, glass)
-  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (((uVis >> (aInfo.z & 31u)) & 1u) == 0u || (aInfo.z & 128u) != 0u || (uSkipDetail != 0u && (aInfo.z & 32u) != 0u) || knocked(aPos, floor(aNrm.w * 127.0 + 0.5))) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
   vUV = aUV; vRect = aRect; vLayer = aInfo.x;
   vMat = aInfo.y | ((aInfo.z & 64u) != 0u ? 256u : 0u); // 256: cast a solid shadow, ignoring alpha holes
   gl_Position = uShadowVP * vec4(aPos, 1.0);
@@ -750,7 +778,7 @@ void main() {
   // src/render/renderer.js
   var Renderer = class {
     constructor(gl) {
-      this.gl = gl, this.progStatic = createProgram(gl, STATIC_VS, STATIC_FS, "static"), this.progShadow = createProgram(gl, SHADOW_VS, SHADOW_FS, "shadow"), this.progSky = createProgram(gl, FS_VS, SKY_FS, "sky"), this.progBlur = createProgram(gl, FS_VS, BLUR_FS, "blur"), this.progComp = createProgram(gl, FS_VS, COMPOSITE_FS, "composite"), this.emptyVAO = gl.createVertexArray(), this.noiseTex = this._makeNoise();
+      this.gl = gl, this.progStatic = createProgram(gl, STATIC_VS, STATIC_FS, "static"), this.down = new Float32Array(48 * 4), this.downN = 0, this.dyn = null, this.progShadow = createProgram(gl, SHADOW_VS, SHADOW_FS, "shadow"), this.progSky = createProgram(gl, FS_VS, SKY_FS, "sky"), this.progBlur = createProgram(gl, FS_VS, BLUR_FS, "blur"), this.progComp = createProgram(gl, FS_VS, COMPOSITE_FS, "composite"), this.emptyVAO = gl.createVertexArray(), this.noiseTex = this._makeNoise();
       let maxTex = gl.getParameter(gl.MAX_TEXTURE_SIZE), qs = new URLSearchParams(location.search);
       this.shadowSize = Math.min(qs.has("shadow") ? parseInt(qs.get("shadow"), 10) : 4096, maxTex), this.shadowTex = makeDepthTexture(gl, this.shadowSize, this.shadowSize, !0), this.shadowFBO = makeFBO(gl, [], this.shadowTex), this._makeStaticShadow(), this.floatOK = !!gl.getExtension("EXT_color_buffer_float"), gl.getExtension("OES_texture_float_linear"), this.lightW = Math.round(419 * 3), this.lightH = Math.round(986 * 3), this.lightTex = makeTexture(gl, this.lightW, this.lightH, this.floatOK ? { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, filter: gl.LINEAR } : { filter: gl.LINEAR }), this.lightFBO = makeFBO(gl, [this.lightTex], null), this.bw = 0, this.bh = 0, this.layers = [], this.stats = { tris: 0 };
     }
@@ -809,8 +837,32 @@ void main() {
       this.groundIdx = makeTexture(gl, G3.ntx, G3.nty, { data: idx }), this.groundScale = scale, this.groundTile = size, this.groundPer = L.per;
       for (let pg of atlas.pages) pg.data = null;
       G3.data.length = 0;
-      let vao = gl.createVertexArray();
-      gl.bindVertexArray(vao), makeBuffer(gl, mesh.pos), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 3, gl.FLOAT, !1, 0, 0), makeBuffer(gl, mesh.uv), gl.enableVertexAttribArray(1), gl.vertexAttribPointer(1, 2, gl.FLOAT, !1, 0, 0), makeBuffer(gl, mesh.rect), gl.enableVertexAttribArray(2), gl.vertexAttribIPointer(2, 4, gl.UNSIGNED_SHORT, 0, 0), makeBuffer(gl, mesh.nrm), gl.enableVertexAttribArray(3), gl.vertexAttribPointer(3, 4, gl.BYTE, !0, 0, 0), makeBuffer(gl, mesh.info), gl.enableVertexAttribArray(4), gl.vertexAttribIPointer(4, 4, gl.UNSIGNED_BYTE, 0, 0), makeBuffer(gl, mesh.idx, gl.ELEMENT_ARRAY_BUFFER), gl.bindVertexArray(null), this.staticVAO = vao, this.staticCount = mesh.indexCount, this.stats.tris = mesh.indexCount / 3;
+      let vao = this.meshVAO(mesh).vao;
+      this.staticVAO = vao, this.staticCount = mesh.indexCount, this.stats.tris = mesh.indexCount / 3;
+    }
+    // a vertex array for a mesh in the static format
+    meshVAO(mesh) {
+      let gl = this.gl, vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      let bufs = [], attr = (data, loc, n, type, int, norm = !1) => {
+        bufs.push(makeBuffer(gl, data)), gl.enableVertexAttribArray(loc), int ? gl.vertexAttribIPointer(loc, n, type, 0, 0) : gl.vertexAttribPointer(loc, n, type, norm, 0, 0);
+      };
+      return attr(mesh.pos, 0, 3, gl.FLOAT, !1), attr(mesh.uv, 1, 2, gl.FLOAT, !1), attr(mesh.rect, 2, 4, gl.UNSIGNED_SHORT, !0), attr(mesh.nrm, 3, 4, gl.BYTE, !1, !0), attr(mesh.info, 4, 4, gl.UNSIGNED_BYTE, !0), bufs.push(makeBuffer(gl, mesh.idx, gl.ELEMENT_ARRAY_BUFFER)), gl.bindVertexArray(null), { vao, bufs, count: mesh.indexCount };
+    }
+    // a small mesh in the static format rebuilt now and then (knocked-over poles)
+    setDynamic(mesh) {
+      let gl = this.gl;
+      if (this.dyn) {
+        gl.deleteVertexArray(this.dyn.vao);
+        for (let b of this.dyn.bufs) gl.deleteBuffer(b);
+        this.dyn = null;
+      }
+      mesh && mesh.indexCount && (this.dyn = this.meshVAO(mesh));
+    }
+    // static geometry (then the dynamic mesh) with the current program; knocked poles hidden
+    drawStatic(p) {
+      let gl = this.gl;
+      p.u.uDown && gl.uniform4fv(p.u.uDown, this.down), p.u.uDownN && gl.uniform1i(p.u.uDownN, this.downN), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), this.dyn && (p.u.uDownN && gl.uniform1i(p.u.uDownN, 0), gl.bindVertexArray(this.dyn.vao), gl.drawElements(gl.TRIANGLES, this.dyn.count, gl.UNSIGNED_INT, 0));
     }
     addLayer(layer) {
       this.layers.push(layer);
@@ -873,9 +925,9 @@ void main() {
       if (shadowOn) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBO), gl.viewport(0, 0, this.shadowSize, this.shadowSize), gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT), gl.enable(gl.POLYGON_OFFSET_FILL), gl.polygonOffset(1.5, 3);
         let p2 = this.progShadow;
-        gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 0), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+        gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 0), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), this.drawStatic(p2);
         for (let l of this.layers) l.shadow && l.shadow(ctx);
-        gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS), gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS), gl.clear(gl.DEPTH_BUFFER_BIT), gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 1), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0), gl.disable(gl.POLYGON_OFFSET_FILL);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.shadowFBOS), gl.viewport(0, 0, this.shadowSizeS, this.shadowSizeS), gl.clear(gl.DEPTH_BUFFER_BIT), gl.useProgram(p2.program), gl.uniformMatrix4fv(p2.u.uShadowVP, !1, shadowMat), gl.uniform1ui(p2.u.uVis, vis), gl.uniform1ui(p2.u.uSkipDetail, 1), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(p2.u.uAtlas, 0), this.drawStatic(p2), gl.disable(gl.POLYGON_OFFSET_FILL);
       }
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.lightFBO), gl.viewport(0, 0, this.lightW, this.lightH), gl.disable(gl.DEPTH_TEST), gl.clearColor(0, 0, 0, 1), gl.clear(gl.COLOR_BUFFER_BIT), gl.enable(gl.BLEND), gl.blendFunc(gl.ONE, gl.ONE);
       for (let l of this.layers) l.light && l.light(ctx);
@@ -895,7 +947,7 @@ void main() {
       gl.enable(gl.DEPTH_TEST), gl.depthFunc(gl.LESS), gl.depthMask(!0), gl.clear(gl.DEPTH_BUFFER_BIT);
       {
         let p2 = this.progStatic, u2 = p2.u;
-        gl.useProgram(p2.program), this.setLit(p2, ctx), gl.uniform1ui(u2.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(u2.uAtlas, 0), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, this.groundTex), gl.uniform1i(u2.uGround, 4), gl.activeTexture(gl.TEXTURE6), gl.bindTexture(gl.TEXTURE_2D, this.groundIdx), gl.uniform1i(u2.uGroundIdx, 6), gl.uniform1i(u2.uGroundTile, this.groundTile), gl.uniform1i(u2.uGroundPer, this.groundPer), gl.uniform1f(u2.uGroundScale, this.groundScale), gl.uniform1f(u2.uResLit, env.resLit), gl.uniform1f(u2.uOffLit, env.offLit), gl.uniform1f(u2.uLeaves, env.leaves), gl.uniform1f(u2.uSeason, env.season), gl.uniform1f(u2.uFlowers, env.flowers), gl.uniform3fv(u2.uSkyTop, env.skyTop), gl.uniform3fv(u2.uSkyHor, env.skyBottom), gl.uniform3fv(u2.uViewDir, camera.viewDir()), gl.uniform1f(u2.uIce, env.ice), gl.uniform1f(u2.uCrown, env.crown), gl.uniform3fv(u2.uCrownA, env.crownA), gl.uniform3fv(u2.uCrownB, env.crownB), gl.bindVertexArray(this.staticVAO), gl.drawElements(gl.TRIANGLES, this.staticCount, gl.UNSIGNED_INT, 0);
+        gl.useProgram(p2.program), this.setLit(p2, ctx), gl.uniform1ui(u2.uVis, vis), gl.activeTexture(gl.TEXTURE0), gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.atlasTex), gl.uniform1i(u2.uAtlas, 0), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, this.groundTex), gl.uniform1i(u2.uGround, 4), gl.activeTexture(gl.TEXTURE6), gl.bindTexture(gl.TEXTURE_2D, this.groundIdx), gl.uniform1i(u2.uGroundIdx, 6), gl.uniform1i(u2.uGroundTile, this.groundTile), gl.uniform1i(u2.uGroundPer, this.groundPer), gl.uniform1f(u2.uGroundScale, this.groundScale), gl.uniform1f(u2.uResLit, env.resLit), gl.uniform1f(u2.uOffLit, env.offLit), gl.uniform1f(u2.uLeaves, env.leaves), gl.uniform1f(u2.uSeason, env.season), gl.uniform1f(u2.uFlowers, env.flowers), gl.uniform3fv(u2.uSkyTop, env.skyTop), gl.uniform3fv(u2.uSkyHor, env.skyBottom), gl.uniform3fv(u2.uViewDir, camera.viewDir()), gl.uniform1f(u2.uIce, env.ice), gl.uniform1f(u2.uCrown, env.crown), gl.uniform3fv(u2.uCrownA, env.crownA), gl.uniform3fv(u2.uCrownB, env.crownB), this.drawStatic(p2);
       }
       for (let l of this.layers) l.draw && l.draw(ctx);
       for (let l of this.layers) l.drawLate && l.drawLate(ctx);
@@ -1538,7 +1590,7 @@ void main() {
   }
   var MeshBuilder = class {
     constructor() {
-      this.pos = new Float32Array(3 * 4096), this.uv = new Float32Array(2 * 4096), this.rect = new Uint16Array(4 * 4096), this.nrm = new Int8Array(4 * 4096), this.info = new Uint8Array(4 * 4096), this.idx = new Uint32Array(6 * 2048), this.nv = 0, this.ni = 0, this.defaultGroup = GRP.ALWAYS, this.detail = !0;
+      this.pos = new Float32Array(3 * 4096), this.uv = new Float32Array(2 * 4096), this.rect = new Uint16Array(4 * 4096), this.nrm = new Int8Array(4 * 4096), this.info = new Uint8Array(4 * 4096), this.idx = new Uint32Array(6 * 2048), this.nv = 0, this.ni = 0, this.defaultGroup = GRP.ALWAYS, this.detail = !0, this.tag = 0;
     }
     // geometry created inside fn is a building body (shades trees)
     body(fn) {
@@ -1556,7 +1608,7 @@ void main() {
     }
     _v(p, u, v, tex2, n, mat, group, seed) {
       let k = this.nv++;
-      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex2.x, this.rect[k * 4 + 1] = tex2.y, this.rect[k * 4 + 2] = tex2.w, this.rect[k * 4 + 3] = tex2.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = 0, this.info[k * 4] = tex2.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group | (tex2.cast === "none" ? CAST.NONE : tex2.cast === "solid" ? CAST.SOLID : 0) | (this.detail ? CAST.DETAIL : 0), this.info[k * 4 + 3] = seed & 255, k;
+      return this.pos[k * 3] = p[0], this.pos[k * 3 + 1] = p[1], this.pos[k * 3 + 2] = p[2], this.uv[k * 2] = u, this.uv[k * 2 + 1] = v, this.rect[k * 4] = tex2.x, this.rect[k * 4 + 1] = tex2.y, this.rect[k * 4 + 2] = tex2.w, this.rect[k * 4 + 3] = tex2.h, this.nrm[k * 4] = Math.round(n[0] * 127), this.nrm[k * 4 + 1] = Math.round(n[1] * 127), this.nrm[k * 4 + 2] = Math.round(n[2] * 127), this.nrm[k * 4 + 3] = this.tag, this.info[k * 4] = tex2.layer, this.info[k * 4 + 1] = mat, this.info[k * 4 + 2] = group | (tex2.cast === "none" ? CAST.NONE : tex2.cast === "solid" ? CAST.SOLID : 0) | (this.detail ? CAST.DETAIL : 0), this.info[k * 4 + 3] = seed & 255, k;
     }
     // p0..p3: TL, TR, BR, BL as seen from the front. uvs: [[u,v] x4]
     quad(p0, p1, p2, p3, uvs, tex2, n, mat = 0, group = this.defaultGroup, seed = 0) {
@@ -3701,13 +3753,22 @@ void main() {
     return P.basket.cast = "solid", C._props = P, P;
   }
   var solidBox = (C, x0, y0, z0, x1, y1, z1, side, top, opt) => C.mb.box(x0, y0, z0, x1, y1, z1, { px: side, nx: side, py: side, ny: side, pz: top || side }, opt);
+  function poleTex(C, P) {
+    C.world.poleTex || (C.world.poleTex = { pole: P.pole, poleDark: P.poleDark, lampHead: P.lampHead, streetSign: P.streetSign, sigHead: P.sigHead, pedHead: P.pedHead, yellow: P.yellow });
+  }
   function streetLamp(C, x, y, ax, ay, o = {}) {
     let P = propTex(C), z = 0.125, h = o.h ?? 4.25;
-    solidBox(C, x - 0.07, y - 0.07, z, x + 0.07, y + 0.07, z + h, P.pole), solidBox(C, x - 0.11, y - 0.11, z, x + 0.11, y + 0.11, z + 0.5, P.pole);
+    poleTex(C, P);
+    let tag0 = C.mb.tag;
+    C.mb.tag = 1, solidBox(C, x - 0.07, y - 0.07, z, x + 0.07, y + 0.07, z + h, P.pole), solidBox(C, x - 0.11, y - 0.11, z, x + 0.11, y + 0.11, z + 0.5, P.pole);
     let L = 1.1, ex = x + ax * L, ey = y + ay * L;
     solidBox(C, Math.min(x, ex) - 0.04, Math.min(y, ey) - 0.04, z + h - 0.08, Math.max(x, ex) + 0.04, Math.max(y, ey) + 0.04, z + h, P.pole);
     let hx0 = ex - (ax ? 0.25 * ax : 0.12), hx1 = ex + (ax ? 0.12 * ax : 0.12), hy0 = ey - (ay ? 0.25 * ay : 0.12), hy1 = ey + (ay ? 0.12 * ay : 0.12);
-    solidBox(C, Math.min(hx0, hx1), Math.min(hy0, hy1), z + h - 0.2, Math.max(hx0, hx1), Math.max(hy0, hy1), z + h - 0.02, P.lampHead, P.pole), C.world.lamps.push({ x: ex, y: ey, z: z + h - 0.25, r: 4.2, color: [1, 0.86, 0.62], k: 1, kind: "street" }), C.world.lampHeads.push({ x: ex, y: ey, z: z + h - 0.25, kind: "street" }), markHeight(C.world, x - 0.1, y - 0.1, x + 0.1, y + 0.1, z + h), C.world.perches.push({ x: (x + ex) / 2, y: (y + ey) / 2, z: z + h });
+    solidBox(C, Math.min(hx0, hx1), Math.min(hy0, hy1), z + h - 0.2, Math.max(hx0, hx1), Math.max(hy0, hy1), z + h - 0.02, P.lampHead, P.pole), C.mb.tag = tag0;
+    let W = C.world;
+    W.lamps.push({ x: ex, y: ey, z: z + h - 0.25, r: 4.2, color: [1, 0.86, 0.62], k: 1, kind: "street" }), W.lampHeads.push({ x: ex, y: ey, z: z + h - 0.25, kind: "street" });
+    let ns = W.solids.length;
+    markHeight(W, x - 0.1, y - 0.1, x + 0.1, y + 0.1, z + h), W.solids.length = ns, W.perches.push({ x: (x + ex) / 2, y: (y + ey) / 2, z: z + h }), W.poles.push({ kind: "lamp", tag: 1, x, y, h, ax, ay, lamp: W.lamps[W.lamps.length - 1], head: W.lampHeads[W.lampHeads.length - 1], perch: W.perches[W.perches.length - 1] });
   }
   function parkLamp(C, x, y) {
     let P = propTex(C), z = 0.125;
@@ -3715,7 +3776,9 @@ void main() {
   }
   function signalPole(C, x, y, sx, sy, i, j, o = {}) {
     let P = propTex(C), z = 0.125, h = 3.3;
-    solidBox(C, x - 0.06, y - 0.06, z, x + 0.06, y + 0.06, z + h, P.poleDark), solidBox(C, x - 0.5, y - 0.02, z + h - 0.15, x + 0.5, y + 0.02, z + h, P.streetSign), solidBox(C, x - 0.02, y - 0.5, z + h + 0.02, x + 0.02, y + 0.5, z + h + 0.17, P.streetSign);
+    poleTex(C, P);
+    let tag0 = C.mb.tag, sig0 = C.world.signals.length;
+    C.mb.tag = 2, solidBox(C, x - 0.06, y - 0.06, z, x + 0.06, y + 0.06, z + h, P.poleDark), solidBox(C, x - 0.5, y - 0.02, z + h - 0.15, x + 0.5, y + 0.02, z + h, P.streetSign), solidBox(C, x - 0.02, y - 0.5, z + h + 0.02, x + 0.02, y + 0.5, z + h + 0.17, P.streetSign);
     let hz = z + h - 1.05, hx = x + sx * 0.05, hy = y - sy * 0.18;
     o.closedX || (solidBox(C, hx - 0.12, hy - 0.12, hz, hx + 0.12, hy + 0.12, hz + 0.75, P.sigHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: hx + sx * 0.13, y: hy, z: hz, face: [sx, 0], type: "car" }));
     let gx = x - sx * 0.18, gy = y + sy * 0.05;
@@ -3723,7 +3786,7 @@ void main() {
     let pz = z + 1.6, px = x - sx * 0.12, py = y;
     o.closedY || (solidBox(C, px - 0.1, py - 0.1, pz, px + 0.1, py + 0.1, pz + 0.38, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "x", x: px - sx * 0.11, y: py, z: pz + 0.08, face: [-sx, 0], type: "ped" }));
     let qx = x, qy = y - sy * 0.12;
-    o.closedX || (solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: "ped" })), C.world.perches.push({ x, y, z: z + h + 0.17 });
+    o.closedX || (solidBox(C, qx - 0.1, qy - 0.1, pz + 0.4, qx + 0.1, qy + 0.1, pz + 0.78, P.pedHead, P.yellow), C.world.signals.push({ i, j, axis: "y", x: qx, y: qy - sy * 0.11, z: pz + 0.48, face: [0, -sy], type: "ped" })), C.mb.tag = tag0, C.world.perches.push({ x, y, z: z + h + 0.17 }), C.world.poles.push({ kind: "signal", tag: 2, x, y, h, sx, sy, closedX: !!o.closedX, closedY: !!o.closedY, signals: C.world.signals.slice(sig0), perch: C.world.perches[C.world.perches.length - 1] });
   }
   function hydrant(C, x, y) {
     let P = propTex(C), z = 0.125;
@@ -4311,8 +4374,8 @@ void main() {
         }
       }
       for (let j = 0; j < 8; j++) {
-        let A = vert(j, 1), B2 = vert(j + 1, 1);
-        mb.tri([cx, cy, zt], [B2[0], B2[1], zt], [A[0], A[1], zt], [[0, 0], [8, 0], [0, 8]], S2.roofSilver, [0, 0, 1], MAT.SNOW);
+        let A = vert(j, 1), B3 = vert(j + 1, 1);
+        mb.tri([cx, cy, zt], [B3[0], B3[1], zt], [A[0], A[1], zt], [[0, 0], [8, 0], [0, 8]], S2.roofSilver, [0, 0, 1], MAT.SNOW);
       }
     }), markHeight(C.world, cx - s0, cy - s0, cx + s0, cy + s0, zt), mb.body(() => mb.cylinder(cx, cy, zt, zt + 1.4, 1.3, 12, S2.metal, S2.metal, { mat: 0 })), mb.body(() => mb.cylinder(cx, cy, zt + 1.4, zt + 14, 0.22, 6, S2.metal, null, { mat: 0 })), mb.cylinder(cx, cy, zt + 14, zt + 24, 0.1, 6, S2.metal, null, { mat: 0 }), beacon(C, cx, cy, zt + 24.1), C.world.lamps.push({ x: cx, y: cy, z: zt + 10, r: 3, color: [0.9, 0.95, 1], k: 0.2, kind: "up" }), C.world.officeDoors.push(...lobbyDoors(cx, cy, 6.5, 6.5)), plaza(C, L, { x0: cx - 6.5, y0: cy - 6.5, x1: cx + 6.5, y1: cy + 6.5 }), landmark(C, "ONE WORLD TRADE CENTER", cx, L.y1 + 3);
   }
@@ -4355,7 +4418,7 @@ void main() {
     C.world.solids.push([cx - r * 0.85, cy - r * 0.85, cx + r * 0.85, cy + r * 0.85, h]);
   }
   function flatiron(C, L) {
-    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, mb = C.mb, W = C.world, A = [L.x0 + 0.6, L.y0 + 0.6], B2 = [L.x0 + 0.6, L.y1 - 0.6], Cc = [L.x0 + 9.4, L.y1 - 0.6], xAt = (y) => A[0] + (y - A[1]) / (Cc[1] - A[1]) * (Cc[0] - A[0]), inside = (x, y) => y > A[1] && y < B2[1] && x > A[0] && x < xAt(y), terra = 14470062, mod = C.atlas.shared("flat_mod", 24, 40, (p) => {
+    let S2 = sharedTex(C), { rng } = C, z0 = C.z0, mb = C.mb, W = C.world, A = [L.x0 + 0.6, L.y0 + 0.6], B3 = [L.x0 + 0.6, L.y1 - 0.6], Cc = [L.x0 + 9.4, L.y1 - 0.6], xAt = (y) => A[0] + (y - A[1]) / (Cc[1] - A[1]) * (Cc[0] - A[0]), inside = (x, y) => y > A[1] && y < B3[1] && x > A[0] && x < xAt(y), terra = 14470062, mod = C.atlas.shared("flat_mod", 24, 40, (p) => {
       stoneFill(p, 0, 0, 24, 40, [terra], 131, 10);
       for (let bx of [3, 13]) drawWindow(p, bx, 6, 8, 24, { frame: 3813416, t: 0.5, panes: "1/1", wall: terra }, rng);
       for (let x = 0; x < 24; x += 3) p.set(x, 34, 12101768);
@@ -4371,18 +4434,18 @@ void main() {
       for (let x = 0; x < 24; x += 4)
         p.set(x, 38, 10127978), p.set(x + 1, 37, 10127978);
       p.rect(0, 42, 24, 6, 12101768), p.hline(0, 42, 24, 15655624);
-    }), zb = z0 + 4, zs = z0 + 28, zc = z0 + 31.5, edges = [[B2, A], [A, Cc], [Cc, B2]];
+    }), zb = z0 + 4, zs = z0 + 28, zc = z0 + 31.5, edges = [[B3, A], [A, Cc], [Cc, B3]];
     mb.body(() => {
       for (let [a, b] of edges)
         wall(C, a, b, z0, zb, base, MAT.OFFICE, 140), wall(C, a, b, zb, zs, mod, MAT.OFFICE, 141), wall(C, a, b, zs, zc, crown2, MAT.OFFICE, 142);
-      mb.tri([A[0], A[1], zc], [Cc[0], Cc[1], zc], [B2[0], B2[1], zc], [[0, 0], [9 * 32, 17 * 32], [0, 17 * 32]], S2.roofTar, [0, 0, 1], MAT.SNOW), mb.cylinder(A[0] + 0.25, A[1] + 0.55, z0, zc, 0.42, 8, mod, null, { mat: MAT.OFFICE });
+      mb.tri([A[0], A[1], zc], [Cc[0], Cc[1], zc], [B3[0], B3[1], zc], [[0, 0], [9 * 32, 17 * 32], [0, 17 * 32]], S2.roofTar, [0, 0, 1], MAT.SNOW), mb.cylinder(A[0] + 0.25, A[1] + 0.55, z0, zc, 0.42, 8, mod, null, { mat: MAT.OFFICE });
       for (let [a, b] of edges) {
-        let mx = (a[0] + b[0]) / 2 - (A[0] + B2[0] + Cc[0]) / 3, my = (a[1] + b[1]) / 2 - (A[1] + B2[1] + Cc[1]) / 3, l = Math.hypot(mx, my) || 1, ox = mx / l * 0.3, oy = my / l * 0.3;
+        let mx = (a[0] + b[0]) / 2 - (A[0] + B3[0] + Cc[0]) / 3, my = (a[1] + b[1]) / 2 - (A[1] + B3[1] + Cc[1]) / 3, l = Math.hypot(mx, my) || 1, ox = mx / l * 0.3, oy = my / l * 0.3;
         wall(C, [a[0] + ox, a[1] + oy], [b[0] + ox, b[1] + oy], zc, zc + 0.5, S2.limestone, 0);
       }
     });
-    for (let y = A[1]; y < B2[1]; y += 0.5) W.solids.push([A[0], y, Math.max(A[0] + 0.3, xAt(y + 0.5)), y + 0.5, zc]);
-    fillHeight(W, inside, A[0], A[1], Cc[0], B2[1], zc), W.officeDoors.push({ x: (B2[0] + Cc[0]) / 2, y: L.y1 + 0.9, dx: (B2[0] + Cc[0]) / 2, dy: L.y1 - 1, kind: "office" }), C.paintWhere(L.x0, L.y0, L.x1, L.y1, (x, y) => !inside(x, y), "plaza");
+    for (let y = A[1]; y < B3[1]; y += 0.5) W.solids.push([A[0], y, Math.max(A[0] + 0.3, xAt(y + 0.5)), y + 0.5, zc]);
+    fillHeight(W, inside, A[0], A[1], Cc[0], B3[1], zc), W.officeDoors.push({ x: (B3[0] + Cc[0]) / 2, y: L.y1 + 0.9, dx: (B3[0] + Cc[0]) / 2, dy: L.y1 - 1, kind: "office" }), C.paintWhere(L.x0, L.y0, L.x1, L.y1, (x, y) => !inside(x, y), "plaza");
     let P = propTex(C);
     for (let i = 0; i < 4; i++) {
       let x = L.x1 - 2.5 - i % 2 * 3.2, y = L.y0 + 3 + Math.floor(i / 2) * 4.5;
@@ -4718,10 +4781,10 @@ void main() {
       return b;
     }, net = { name: "brooklyn", rect: { x0, y0: y0b, x1, y1 }, nodes, edges, gates: [], subways: [], sights: [] };
     if (W.bridgeWalk && L) {
-      let B2 = W.bridgeWalk, base = nodes.length;
-      for (let n of B2.nodes) nodes.push(n);
-      for (let [u, v] of B2.edges) edges.push([base + u, base + v]);
-      edges.push([base + B2.foot, near(B2.nodes[B2.foot].y)]), net.gates = B2.gates.map((g) => ({ node: base + g.node, sx: g.sx, sy: g.sy })), net.sights = B2.sights.map((k) => base + k);
+      let B3 = W.bridgeWalk, base = nodes.length;
+      for (let n of B3.nodes) nodes.push(n);
+      for (let [u, v] of B3.edges) edges.push([base + u, base + v]);
+      edges.push([base + B3.foot, near(B3.nodes[B3.foot].y)]), net.gates = B3.gates.map((g) => ({ node: base + g.node, sx: g.sx, sy: g.sy })), net.sights = B3.sights.map((k) => base + k);
       let sy = yb + 14, before = W.subways.length;
       subwayEntrance(C, x0 + 4.4, sy, "y");
       let sub = W.subways.splice(before)[0];
@@ -5640,7 +5703,7 @@ void main() {
   }
   function suspension(C, o) {
     let X = texes(C, o.color), { y, x0, x1, t0, t1, zd, zt, hw } = o;
-    deck(C, x0, x1, y, zd, hw, X, { lower: o.lower }), tower(C, t0, y, hw, zd, zt, o.style, X, { leg: o.leg }), tower(C, t1, y, hw, zd, zt, o.style, X, { leg: o.leg, noFooting: o.farOnLand });
+    deck(C, x0, o.land ? o.land[0] : x1, y, zd, hw, X, { lower: o.lower }), o.land && landing(C, o.land[0], o.land[1], y, zd, hw, o.color), tower(C, t0, y, hw, zd, zt, o.style, X, { leg: o.leg }), tower(C, t1, y, hw, zd, zt, o.style, X, { leg: o.leg, noFooting: o.farOnLand });
     let xA = o.anchors[0], xB = o.anchors[1], zA = zd + 0.9, zLow = zd + 1, lw = o.leg ?? 1.2, ly = hw + 0.35 + lw / 2;
     for (let dy of o.cables ?? [-ly, ly]) {
       let pts = catenary(xA, t0, t1, xB, zA, zt - 0.2, zLow, y + dy);
@@ -5650,7 +5713,7 @@ void main() {
     landmark(C, o.name, (t0 + t1) / 2, y + hw + 9, o.rot ?? 0), C.world.bridges.push({ name: o.name, y, x0, x1, z: zd, hw });
   }
   function approach(C, L, side, zd, hw, color, o = {}) {
-    let mb = C.mb, S2 = sharedTex(C), X = texes(C, color), y = (L.y0 + L.y1) / 2, n = 6, xs = side === "e" ? L.x0 + 1 : L.x1 - 1, xe = side === "e" ? L.x1 - (o.anchor ? 5.5 : 0) : L.x0 + (o.anchor ? 5.5 : 0), z0 = 0.125 + 0.6;
+    let mb = C.mb, S2 = sharedTex(C), X = texes(C, color), y = (L.y0 + L.y1) / 2, n = 6, xs = side === "e" ? L.x0 - 2 - 0.4 : L.x1 + 2 + 0.4, xe = side === "e" ? L.x1 - (o.anchor ? 5.5 : 0) : L.x0 + (o.anchor ? 5.5 : 0), z0 = 0.02;
     for (let k = 0; k < n; k++) {
       let xa = xs + (xe - xs) * k / n, xb = xs + (xe - xs) * (k + 1) / n, za = z0 + (zd - z0) * k / n, zb = z0 + (zd - z0) * (k + 1) / n, lo = Math.min(xa, xb), hi = Math.max(xa, xb), zlo = side === "e" ? za : zb, zhi = side === "e" ? zb : za;
       mb.quad([lo, y - hw, zlo], [hi, y - hw, zhi], [hi, y + hw, zhi], [lo, y + hw, zlo], [[lo * 32, (y - hw) * 32], [hi * 32, (y - hw) * 32], [hi * 32, (y + hw) * 32], [lo * 32, (y + hw) * 32]], X.road, [0, 0, 1], MAT.SNOW | MAT.WET);
@@ -5668,9 +5731,23 @@ void main() {
         for (let x = L.x0 + 1.8; x < L.x1 - 1; x += 3.4) C.addTree(x, (ya + yb) / 2, "plane", !0);
     return { y, xe };
   }
+  function landing(C, xa, xb, y, zd, hw, color) {
+    let mb = C.mb, X = texes(C, color), n = 5, z1 = 0.125 + 0.03;
+    for (let k = 0; k < n; k++) {
+      let lo = xa + (xb - xa) * k / n, hi = xa + (xb - xa) * (k + 1) / n, zlo = zd + (z1 - zd) * k / n, zhi = zd + (z1 - zd) * (k + 1) / n;
+      mb.quad([lo, y - hw, zlo], [hi, y - hw, zhi], [hi, y + hw, zhi], [lo, y + hw, zlo], [[lo * 32, (y - hw) * 32], [hi * 32, (y - hw) * 32], [hi * 32, (y + hw) * 32], [lo * 32, (y + hw) * 32]], X.road, [0, 0, 1], MAT.SNOW | MAT.WET);
+      for (let sy of [-1, 1]) {
+        let yy = y + sy * hw, d = Math.min(0.6, zhi - 0.125);
+        mb.quad(sy > 0 ? [hi, yy, zhi] : [lo, yy, zlo], sy > 0 ? [lo, yy, zlo] : [hi, yy, zhi], sy > 0 ? [lo, yy, zlo - d] : [hi, yy, zhi - d], sy > 0 ? [hi, yy, zhi - d] : [lo, yy, zlo - d], [[0, 0], [(hi - lo) * 32, 0], [(hi - lo) * 32, 0.6 * 32], [0, 0.6 * 32]], X.plate, [0, sy, 0], 0), mb.quad(sy > 0 ? [hi, yy, zhi + 0.5] : [lo, yy, zlo + 0.5], sy > 0 ? [lo, yy, zlo + 0.5] : [hi, yy, zhi + 0.5], sy > 0 ? [lo, yy, zlo] : [hi, yy, zhi], sy > 0 ? [hi, yy, zhi] : [lo, yy, zlo], [[0, 0], [(hi - lo) * 32, 0], [(hi - lo) * 32, 0.5 * 32], [0, 0.5 * 32]], X.plate, [0, sy, 0], 0), k > 0 && zlo - 0.6 > 0.125 + 0.2 && mb.box(lo - 0.2, y + sy * (hw - 0.4) - 0.2, 0.125, lo + 0.2, y + sy * (hw - 0.4) + 0.2, zlo - 0.6, sides3(X.plate));
+      }
+    }
+    mb.box(xb, y - hw, 0.125, 414, y + hw, z1, { pz: { t: X.road, world: !0 } });
+    for (let sy of [-1, 1]) mb.box(xb, y + sy * hw - (sy > 0 ? 0 : 0.25), 0.125, 414, y + sy * hw + (sy > 0 ? 0.25 : 0), 0.125 + 0.12, sides3(X.granite, { t: X.granite }));
+    C.paintGround(Math.min(xa, xb), y - hw - 1.2, 414, y + hw + 1.2, "plaza");
+  }
   function cantilever(C, o) {
-    let mb = C.mb, X = texes(C, o.color), W = C.world, { y, x0, x1, zd, hw, piers } = o;
-    deck(C, x0, x1, y, zd, hw, X, { lower: !0 });
+    let mb = C.mb, X = texes(C, o.color), W = C.world, { y, x0, zd, hw, piers } = o, x1 = o.land ? o.land[0] : o.x1;
+    deck(C, x0, x1, y, zd, hw, X, { lower: !0 }), o.land && landing(C, o.land[0], o.land[1], y, zd, hw, o.color);
     let peak = zd + 8.5, low = zd + 2.2, prof = (x) => {
       let best = low;
       for (let px of piers) {
@@ -5709,7 +5786,7 @@ void main() {
     }
     for (let x = x0 + 2; x < x1; x += 3.2)
       W.lampHeads.push({ x, y: y - hw, z: prof(x) + 0.25, kind: "globe" }), W.lampHeads.push({ x, y: y + hw, z: prof(x) + 0.25, kind: "globe" });
-    landmark(C, o.name, (x0 + x1) / 2 + 6, y + hw + 10, 0), W.bridges.push({ name: o.name, y, x0, x1, z: zd, hw });
+    landmark(C, o.name, (x0 + x1) / 2 + 6, y + hw + 10, 0), W.bridges.push({ name: o.name, y, x0, x1: o.x1, z: zd, hw });
   }
   function deckArch(C, o) {
     let mb = C.mb, X = texes(C, o.color), { c, a0, a1, s0, s1, zd, hw } = o, alongY = o.axis === "y", P = (a, cc, z) => alongY ? [cc, a, z] : [a, cc, z];
@@ -5803,7 +5880,20 @@ void main() {
     let inw = findBlock("inwoodhill");
     if (inw) {
       let c = inw.x0 + 4.5, top = inw.y0 - 9;
-      deckArch(C, { axis: "y", c, a0: 2, a1: inw.y0 + 6, s0: top - 12.5, s1: top - 0.5, zd: 6.5, hw: 1.6, color: 4872810 }), C.mb.box(c - 1.6, inw.y0 + 2, 0.125, c + 1.6, inw.y0 + 6, 6, sides3(texes(C, 4872810).granite)), landmark(C, "HENRY HUDSON BRIDGE", c + 8, top - 6, 0), W.bridges.push({ name: "HENRY HUDSON BRIDGE", x: c, y0: 2, y1: inw.y0 + 6, z: 6.5, hw: 1.6 });
+      deckArch(C, { axis: "y", c, a0: 2, a1: inw.y0 + 6, s0: top - 12.5, s1: top - 0.5, zd: 6.5, hw: 1.6, color: 4872810 }), C.mb.box(c - 1.6, inw.y0 + 2, 0.125, c + 1.6, inw.y0 + 6, 6, sides3(texes(C, 4872810).granite));
+      {
+        let X = texes(C, 4872810), y0 = inw.y0 + 6, y1 = inw.y1 + 2 + 0.6, zt = 6.5, zb = 0.02, n = 6, hw = 1.6;
+        for (let k = 0; k < n; k++) {
+          let ya = y0 + (y1 - y0) * k / n, yb = y0 + (y1 - y0) * (k + 1) / n, za = zt + (zb - zt) * k / n, zb2 = zt + (zb - zt) * (k + 1) / n;
+          C.mb.quad([c - hw, ya, za], [c + hw, ya, za], [c + hw, yb, zb2], [c - hw, yb, zb2], [[(c - hw) * 32, ya * 32], [(c + hw) * 32, ya * 32], [(c + hw) * 32, yb * 32], [(c - hw) * 32, yb * 32]], X.road, [0, 0, 1], MAT.SNOW | MAT.WET);
+          for (let sx of [-1, 1]) {
+            let xx = c + sx * hw;
+            C.mb.quad(sx > 0 ? [xx, ya, za + 0.5] : [xx, yb, zb2 + 0.5], sx > 0 ? [xx, yb, zb2 + 0.5] : [xx, ya, za + 0.5], sx > 0 ? [xx, yb, zb2 - 0.5] : [xx, ya, za - 0.5], sx > 0 ? [xx, ya, za - 0.5] : [xx, yb, zb2 - 0.5], [[0, 0], [(yb - ya) * 32, 0], [(yb - ya) * 32, 32], [0, 32]], X.plate, [sx, 0, 0], 0), k > 0 && za - 0.6 > 0.125 + 0.2 && C.mb.box(xx - sx * 0.4 - 0.2, ya - 0.2, 0.125, xx - sx * 0.4 + 0.2, ya + 0.2, za - 0.6, sides3(X.plate));
+          }
+          za > 1.3 && markHeight(W, c - hw, ya, c + hw, yb, za - 0.6);
+        }
+      }
+      landmark(C, "HENRY HUDSON BRIDGE", c + 8, top - 6, 0), W.bridges.push({ name: "HENRY HUDSON BRIDGE", x: c, y0: 2, y1: inw.y0 + 6, z: 6.5, hw: 1.6, ridge: top - 13.2 });
     }
     let hb = findBlock("highbridge");
     hb && highBridge(C, hb);
@@ -5813,29 +5903,29 @@ void main() {
       deck(C, edge, 362, a.y, 7.2, 2.6, X);
       for (let tx of [edge + 1.5, edge + 10]) tower(C, tx, a.y, 2.6, 7.2, 7.2 + 9, "deco", X, { leg: 1 });
       for (let x = edge + 14; x < 358; x += 5) C.mb.box(x - 0.4, a.y - 2.6 + 0.4, 0.125, x + 0.4, a.y + 2.6 - 0.4, 7.2 - 0.5, sides3(X.plate));
-      suspension(C, { name: "TRIBOROUGH BRIDGE", y: a.y, x0: 362, x1: 414, t0: 364, t1: BROOKLYN_X + 4, zd: 7.2, zt: 21, hw: 2.6, style: "deco", color: 8030842, leg: 1.2, anchors: [358, 418], farOnLand: !0, rot: 0 });
+      suspension(C, { name: "TRIBOROUGH BRIDGE", y: a.y, x0: 362, x1: 414, t0: 364, t1: BROOKLYN_X + 3, zd: 7.2, zt: 21, hw: 2.6, style: "deco", color: 8030842, leg: 1.2, anchors: [358, BROOKLYN_X + 9], land: [BROOKLYN_X + 11, 414 - 2.5], farOnLand: !0, rot: 0 });
     }
     hellGate(C);
     let qb = findBlock("qbridge");
     if (qb) {
       let a = approach(C, qb, "e", 7.6, 2.8, 10129016, { trees: "south" }), edge = qb.x1 + 9, RI = { x0: 349, x1: 360 };
-      cantilever(C, { name: "QUEENSBORO BRIDGE", y: a.y, x0: edge, x1: 414, zd: 7.6, hw: 2.8, color: 10129016, piers: [edge + 3, RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], landPiers: [RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3] }), tram(C, qb.x1 - 2.4, RI.x0 + 4, qb.y0 + 2.2, edge + 4);
+      cantilever(C, { name: "QUEENSBORO BRIDGE", y: a.y, x0: edge, x1: 414, zd: 7.6, hw: 2.8, color: 10129016, piers: [edge + 3, RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], landPiers: [RI.x0 + 2, RI.x1 - 2, BROOKLYN_X + 3], land: [BROOKLYN_X + 7, 414 - 2.5] }), tram(C, qb.x1 - 2.4, RI.x0 + 4, qb.y0 + 2.2, edge + 4);
     }
     let wb = findBlock("wbridge");
     if (wb) {
       let a = approach(C, wb, "e", 7.2, 2.8, 6051410, { anchor: !0 }), edge = wb.x1 + 9;
-      suspension(C, { name: "WILLIAMSBURG BRIDGE", y: a.y, x0: edge, x1: 414, t0: edge + 5, t1: BROOKLYN_X - 5, zd: 7.2, zt: 19, hw: 2.8, style: "lattice", color: 6051410, leg: 1.3, anchors: [wb.x1 - 3, BROOKLYN_X + 14], rot: 0 });
+      suspension(C, { name: "WILLIAMSBURG BRIDGE", y: a.y, x0: edge, x1: 414, t0: edge + 5, t1: BROOKLYN_X - 5, zd: 7.2, zt: 19, hw: 2.8, style: "lattice", color: 6051410, leg: 1.3, anchors: [wb.x1 - 3, BROOKLYN_X + 5], land: [BROOKLYN_X + 7.5, 414 - 2.5], rot: 0 });
     }
     let mbr = findBlock("mbridge");
     if (mbr) {
       let a = approach(C, mbr, "e", 7.4, 3, 6982314, { anchor: !0 }), edge = mbr.x1 + 9;
-      suspension(C, { name: "MANHATTAN BRIDGE", y: a.y, x0: edge, x1: 414, t0: edge + 6, t1: BROOKLYN_X - 6, zd: 7.4, zt: 20, hw: 3, style: "arch", color: 6982314, leg: 1.4, anchors: [mbr.x1 - 3, BROOKLYN_X + 14], rot: 0 }), colonnade(C, mbr.x0 + 0.8, a.y, 3);
+      suspension(C, { name: "MANHATTAN BRIDGE", y: a.y, x0: edge, x1: 414, t0: edge + 6, t1: BROOKLYN_X - 6, zd: 7.4, zt: 20, hw: 3, style: "arch", color: 6982314, leg: 1.4, anchors: [mbr.x1 - 3, BROOKLYN_X + 5], land: [BROOKLYN_X + 7.5, 414 - 2.5], rot: 0 }), colonnade(C, mbr.x0 + 0.8, a.y, 3);
     }
   }
   function hellGate(C) {
     let RI = BOROUGHS.find((b) => b.name === "queens");
     if (!RI) return;
-    let mb = C.mb, W = C.world, X = texes(C, 9058870), S2 = sharedTex(C), y = RI.y0 + 38, hw = 1.5, zd = 8.4, xa = 338, xb = RI.x0 + 14, t0 = 357.5, t1 = RI.x0 + 1.5, rail = C.atlas.shared("hg_rail", 32, 32, (p) => {
+    let mb = C.mb, W = C.world, X = texes(C, 9058870), S2 = sharedTex(C), y = RI.y0 + 38, hw = 1.5, zd = 8.4, xa = 338, xb = 414, t0 = 357.5, t1 = RI.x0 + 1.5, rail = C.atlas.shared("hg_rail", 32, 32, (p) => {
       for (let yy = 0; yy < 32; yy++) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, shade(6971992, 0.9 + hash2i(xx, yy, 331) * 0.14));
       for (let xx = 0; xx < 32; xx += 4) for (let yy = 4; yy < 28; yy++) p.set(xx, yy, 4864554);
       for (let yy of [9, 13, 19, 23]) for (let xx = 0; xx < 32; xx++) p.set(xx, yy, 11053744);
@@ -6315,7 +6405,13 @@ void main() {
   function bronx(C) {
     let R2 = region4("bronx"), L = looks(C), rng = C.rng, ys = { x0: 272, y0: 136, x1: 310, y1: 174 }, keep = (x, y) => x > ys.x0 - 3 && x < ys.x1 + 3 && y > ys.y0 - 3 && y < ys.y1 + 3;
     patch(C, R2.x0, R2.y0, R2.x1, 30, L.grass, 0.125 + 0.016);
-    for (let x = R2.x0 + 2; x < R2.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) clsAt(x, y) === CL.BORO && rng.chance(0.7) && addTreeAt(C, x + rng.range(-0.6, 0.6), y, 0.125, rng.pick(["oak", "elm", "pine", "locust"]));
+    let hh = (C.world.bridges || []).find((b) => b.name === "HENRY HUDSON BRIDGE"), ridge = hh ? { x0: Math.max(R2.x0 + 0.5, hh.x - 10), x1: hh.x + 10, y0: 0, y1: hh.ridge, z: hh.z - 0.5 } : null;
+    if (ridge) {
+      C.mb.box(ridge.x0, ridge.y0, 0.125, ridge.x1, ridge.y1, ridge.z, { px: L.rock, nx: L.rock, py: L.rock, pz: { t: L.grass, world: !0 } }), markHeight(C.world, ridge.x0, ridge.y0, ridge.x1, ridge.y1, ridge.z);
+      for (let x = ridge.x0 + 1.2; x < ridge.x1 - 1; x += 2.4) for (let y = 1.5; y < ridge.y1 - 1; y += 2.8) Math.abs(x - hh.x) > hh.hw + 1.2 && rng.chance(0.75) && addTreeAt(C, x + rng.range(-0.5, 0.5), y, ridge.z, rng.pick(["oak", "pine", "elm"]));
+    }
+    let onRidge = (x, y) => ridge && x > ridge.x0 - 1 && x < ridge.x1 + 1 && y < ridge.y1 + 1;
+    for (let x = R2.x0 + 2; x < R2.x1 - 2; x += 2.6) for (let y = 2; y < 26; y += 3.2) clsAt(x, y) === CL.BORO && !onRidge(x, y) && rng.chance(0.7) && addTreeAt(C, x + rng.range(-0.6, 0.6), y, 0.125, rng.pick(["oak", "elm", "pine", "locust"]));
     let lots = wholeLots(C, { ...R2, y0: 34 }, keep);
     for (let lot of lots) offIslandBlock(C, lot, rng.pick(["redbrick", "redbrick", "tenements", "walkups", "shops", "redbrick"]), lot.bx, lot.by);
     boroGrid(C, { ...R2, y0: 30 }, keep), yankeeStadium(C, ys);
@@ -6750,21 +6846,21 @@ void main() {
   function centralPark(C) {
     let R2 = parkRect(), W = C.world, mb = C.mb, g = W.ground.p, rng = new RNG(5107), S2 = sharedTex(C), P = propTex(C), cx = (R2.x0 + R2.x1) / 2, y0 = R2.y0, x0 = R2.x0, k = (R2.y1 - R2.y0) / 126, inPark = (x, y, m = 0) => x > R2.x0 + m && x < R2.x1 - m && y > R2.y0 + m && y < R2.y1 - m, net = new Net(), loopIn = 2.6, loopR = 6, loopW = 1.7, gateW = 2, lx0 = R2.x0 + loopIn, lx1 = R2.x1 - loopIn, ly0 = R2.y0 + loopIn, ly1 = R2.y1 - loopIn, gateYs = [];
     for (let j = PARK.by0 + 1; j <= PARK.by1; j++) gateYs.push(roadCenter(j));
-    let meer = [{ x: cx + 10.5, y: y0 + k * 12, rx: 6.5, ry: 4.8 }, { x: cx + 4, y: y0 + k * 13.5, rx: 4, ry: 3 }, { x: cx + 15.5, y: y0 + k * 15.5, rx: 2.8, ry: 2.6 }], meerF = lakeField(meer, 81), pool = { x: x0 + 7, y: y0 + k * 26.5, r: 2 }, loch = spline([[pool.x + 1.6, pool.y - 0.8], [x0 + 11.5, y0 + k * 24.4], [x0 + 15, y0 + k * 25.2], [x0 + 18.6, y0 + k * 22.8], [cx - 3.2, y0 + k * 18.6], [cx + 1.5, y0 + k * 14.4]], 8), greatHill = { x: x0 + 9.5, y: y0 + k * 12.5, r: 3.4 }, CG = { x0: cx + 7, y0: y0 + k * 23.5, x1: lx1 - 0.9, y1: y0 + k * 30.8 }, DR = { x0: x0 + 3.6, y0: y0 + k * 29.2, x1: x0 + 10.2, y1: y0 + k * 33.4 }, RV = { x: cx, y: y0 + k * 46, rx: 16, ry: 11.3 }, trackRx = RV.rx + 1.15, trackRy = RV.ry + 1.15, GL = { x: cx, y: y0 + k * 70, rx: 11, ry: 6.8 }, glRx = GL.rx + 1, glRy = GL.ry + 1, turtle = [{ x: cx + 2, y: y0 + k * 81.4, rx: 7.2, ry: 2.2 }, { x: cx + 8.2, y: y0 + k * 82.2, rx: 3, ry: 1.8 }], turtleF = lakeField(turtle, 82), castle = { x: cx - 8.4, y: y0 + k * 81.6 }, needle = { x: cx + 15.6, y: y0 + k * 68.6 }, lake = [{ x: cx - 8.5, y: y0 + k * 95.6, rx: 6.4, ry: 3.8 }, { x: cx + 2.5, y: y0 + k * 97, rx: 8, ry: 3.3 }, { x: cx + 13, y: y0 + k * 95.2, rx: 4.6, ry: 3.4 }], lakeF = lakeField(lake, 61), bowX = cx - 3, boathouse = { x: cx + 13, y: y0 + k * 101.2 }, BT = { x: cx, y: y0 + k * 105.4, r: 5, basin: 2.7, ring: 3.9 }, mallW = 2.6, meadow = { x0: lx0 + 1.6, y0: y0 + k * 108.4, x1: cx - 5.2, y1: y0 + k * 120.4 }, SF2 = { x: lx0 + 4.2, y: y0 + k * 102.2, r: 2.3 }, rink = { x0: cx + 6.6, y0: y0 + k * 105.8, x1: cx + 15.6, y1: y0 + k * 110 }, pond = [{ x: cx + 12, y: y0 + k * 117.4, rx: 5.2, ry: 2.4 }, { x: cx + 7.2, y: y0 + k * 118.4, rx: 2.4, ry: 1.6 }], pondF = lakeField(pond, 83), gapX = cx + 12.4, anyWater = (x, y) => meerF(x, y) > -0.2 || turtleF(x, y) > -0.2 || lakeF(x, y) > -0.2 || pondF(x, y) > -0.2 || ((x - RV.x) / (RV.rx + 0.4)) ** 2 + ((y - RV.y) / (RV.ry + 0.4)) ** 2 < 1 || x > rink.x0 - 0.3 && x < rink.x1 + 0.3 && y > rink.y0 - 0.3 && y < rink.y1 + 0.3, shoreAlong = (F, x, yFrom, yTo) => {
+    let meer = [{ x: cx + 10.5, y: y0 + k * 12, rx: 6.5, ry: 4.8 }, { x: cx + 4, y: y0 + k * 13.5, rx: 4, ry: 3 }, { x: cx + 15.5, y: y0 + k * 15.5, rx: 2.8, ry: 2.6 }], meerF = lakeField(meer, 81), pool = { x: x0 + 7, y: y0 + k * 26.5, r: 2 }, loch = spline([[pool.x + 1.6, pool.y - 0.8], [x0 + 11.5, y0 + k * 24.4], [x0 + 15, y0 + k * 25.2], [x0 + 18.6, y0 + k * 22.8], [cx - 3.2, y0 + k * 18.6], [cx + 1.5, y0 + k * 14.4]], 8), greatHill = { x: x0 + 9.5, y: y0 + k * 12.5, r: 3.4 }, CG = { x0: cx + 7, y0: y0 + k * 23.5, x1: lx1 - 0.9, y1: y0 + k * 30.8 }, DR = { x0: x0 + 3.6, y0: y0 + k * 29.2, x1: x0 + 10.2, y1: y0 + k * 33.4 }, RV = { x: cx, y: y0 + k * 46, rx: 16, ry: 11.3 }, trackRx = RV.rx + 1.15, trackRy = RV.ry + 1.15, GL = { x: cx, y: y0 + k * 70, rx: 11, ry: 6.8 }, glRx = GL.rx + 1, glRy = GL.ry + 1, turtle = [{ x: cx + 2, y: y0 + k * 81.4, rx: 7.2, ry: 2.2 }, { x: cx + 8.2, y: y0 + k * 82.2, rx: 3, ry: 1.8 }], turtleF = lakeField(turtle, 82), castle = { x: cx - 8.4, y: y0 + k * 81.6 }, needle = { x: cx + 15.6, y: y0 + k * 68.6 }, lake = [{ x: cx - 8.5, y: y0 + k * 95.6, rx: 6.4, ry: 3.8 }, { x: cx + 2.5, y: y0 + k * 97, rx: 8, ry: 3.3 }, { x: cx + 13, y: y0 + k * 95.2, rx: 4.6, ry: 3.4 }], lakeF = lakeField(lake, 61), bowX = cx - 3, boathouse = { x: cx + 13, y: y0 + k * 101.2 }, BT = { x: cx, y: y0 + k * 105.4, r: 5, basin: 2.7, ring: 3.9 }, mallW = 2.6, meadow = { x0: lx0 + 1.6, y0: y0 + k * 108.4, x1: cx - 5.2, y1: y0 + k * 120.4 }, SF2 = { x: lx0 + 4.2, y: y0 + k * 102.2, r: 2.3 }, rink = { x0: cx + 6.6, y0: y0 + k * 105.8, x1: cx + 15.6, y1: y0 + k * 110 }, pond = [{ x: cx + 12, y: y0 + k * 117.4, rx: 5.2, ry: 2.4 }, { x: cx + 7.2, y: y0 + k * 118.4, rx: 2.4, ry: 1.6 }], pondF = lakeField(pond, 83), gapX = cx + 12.4, anyWater = (x, y) => meerF(x, y) > -0.2 || turtleF(x, y) > -0.2 || lakeF(x, y) > -0.2 || pondF(x, y) > -0.2 || ((x - RV.x) / (RV.rx + 0.4)) ** 2 + ((y - RV.y) / (RV.ry + 0.4)) ** 2 < 1 || x > rink.x0 - 0.3 && x < rink.x1 + 0.3 && y > rink.y0 - 0.3 && y < rink.y1 + 0.3, shoreAlong = (F2, x, yFrom, yTo) => {
       let a = null, b = null;
       for (let y = yFrom; y <= yTo; y += 0.05)
-        F(x, y) > -0.2 && (a == null && (a = y), b = y);
+        F2(x, y) > -0.2 && (a == null && (a = y), b = y);
       return [a, b];
     }, sideJ = [];
     for (let gy of gateYs) sideJ.push([lx0, gy], [lx1, gy]);
     let extraJ = [[lx0, y0 + k * 36], [lx1, CG.y0 + 3.6], [lx1, y0 + k * 79.6], [lx0, y0 + k * 90.4], [lx1, y0 + k * 89.4], [lx1, y0 + k * 113], [gapX, ly1], [cx, ly0], [cx, ly1]], arcMid = (sx, sy) => [sx < 0 ? lx0 + loopR * (1 - Math.SQRT1_2) : lx1 - loopR * (1 - Math.SQRT1_2), sy < 0 ? ly0 + loopR * (1 - Math.SQRT1_2) : ly1 - loopR * (1 - Math.SQRT1_2)], cornerJ = [arcMid(-1, -1), arcMid(1, -1), arcMid(1, 1), arcMid(-1, 1)], loop = splitClosed(roundedRect(lx0, ly0, lx1, ly1, loopR), [...sideJ, ...extraJ, ...cornerJ]), perimeter = [];
     for (let piece of loop.pieces) for (let id of net.path(piece, loopW, { step: 2.8, kind: "drive" })) perimeter[perimeter.length - 1] !== id && perimeter[0] !== id && perimeter.push(id);
-    let J = (x, y) => loop.at[[...sideJ, ...extraJ, ...cornerJ].findIndex(([a, b]) => Math.abs(a - x) < 1e-6 && Math.abs(b - y) < 1e-6)], gates = [], gate = (x, y, sx, sy, corner = !1) => {
+    let J2 = (x, y) => loop.at[[...sideJ, ...extraJ, ...cornerJ].findIndex(([a, b]) => Math.abs(a - x) < 1e-6 && Math.abs(b - y) < 1e-6)], gates = [], gate = (x, y, sx, sy, corner = !1) => {
       gates.push({ node: net.node(x, y), sx, sy, corner });
     };
     for (let gy of gateYs)
-      gate(R2.x0, gy, R2.x0 - 1, gy), net.path([[R2.x0, gy], J(lx0, gy)], gateW), gate(R2.x1, gy, R2.x1 + 1, gy), net.path([[R2.x1, gy], J(lx1, gy)], gateW);
-    gate(cx, R2.y0, cx, R2.y0 - 1), net.path([[cx, R2.y0], J(cx, ly0)], gateW), gate(cx, R2.y1, cx, R2.y1 + 1), net.path([[cx, R2.y1], J(cx, ly1)], mallW);
+      gate(R2.x0, gy, R2.x0 - 1, gy), net.path([[R2.x0, gy], J2(lx0, gy)], gateW), gate(R2.x1, gy, R2.x1 + 1, gy), net.path([[R2.x1, gy], J2(lx1, gy)], gateW);
+    gate(cx, R2.y0, cx, R2.y0 - 1), net.path([[cx, R2.y0], J2(cx, ly0)], gateW), gate(cx, R2.y1, cx, R2.y1 + 1), net.path([[cx, R2.y1], J2(cx, ly1)], mallW);
     for (let [k2, [sx, sy]] of [[-1, -1], [1, -1], [1, 1], [-1, 1]].entries()) {
       let gx = sx < 0 ? R2.x0 + 0.3 : R2.x1 - 0.3, gy = sy < 0 ? R2.y0 + 0.3 : R2.y1 - 0.3;
       gate(gx, gy, sx < 0 ? R2.x0 - 1 : R2.x1 + 1, sy < 0 ? R2.y0 - 1 : R2.y1 + 1, !0), net.path([[gx, gy], cornerJ[k2]], loopW);
@@ -6772,33 +6868,33 @@ void main() {
     let MW = [cx - 4.2, y0 + k * 21.8], ghRing = splitClosed(ellipsePts(greatHill.x, greatHill.y, greatHill.r + 0.9, greatHill.r + 0.9), [[greatHill.x, greatHill.y + greatHill.r + 0.9], [greatHill.x + greatHill.r + 0.9, greatHill.y], [greatHill.x - 2.9, greatHill.y - 2.9]]);
     for (let piece of ghRing.pieces) net.path(piece, 1.2, { step: 2.4 });
     net.path(spline([ghRing.at[2], [x0 + 5.6, y0 + k * 6.4], cornerJ[0]]), 1.2);
-    let lochPath = spline([J(lx0, gateYs[0]), [x0 + 7.6, y0 + k * 21.4], [x0 + 12.2, y0 + k * 20.6], [x0 + 16.4, y0 + k * 21], MW]);
-    net.path(lochPath, 1.4, { step: 2.4 }), net.path(spline([ghRing.at[0], [greatHill.x + 0.4, y0 + k * 19.2], lochPath[Math.floor(lochPath.length * 0.35)]]), 1.2), net.path(spline([J(cx, ly0), [cx - 2.4, y0 + k * 8.2], [cx - 4.6, y0 + k * 14.4], MW]), 1.4), net.path(spline([ghRing.at[1], [x0 + 15.4, y0 + k * 11], [cx - 4.6, y0 + k * 14.4]]), 1.2);
+    let lochPath = spline([J2(lx0, gateYs[0]), [x0 + 7.6, y0 + k * 21.4], [x0 + 12.2, y0 + k * 20.6], [x0 + 16.4, y0 + k * 21], MW]);
+    net.path(lochPath, 1.4, { step: 2.4 }), net.path(spline([ghRing.at[0], [greatHill.x + 0.4, y0 + k * 19.2], lochPath[Math.floor(lochPath.length * 0.35)]]), 1.2), net.path(spline([J2(cx, ly0), [cx - 2.4, y0 + k * 8.2], [cx - 4.6, y0 + k * 14.4], MW]), 1.4), net.path(spline([ghRing.at[1], [x0 + 15.4, y0 + k * 11], [cx - 4.6, y0 + k * 14.4]]), 1.2);
     let meerS = spline([MW, [cx + 1.6, y0 + k * 20.4], [cx + 8.2, y0 + k * 20.4], [cx + 15, y0 + k * 21.6], [lx1 - 0.2, gateYs[0] - 0.8]]);
     net.path(meerS, 1.6);
     let cgc = [(CG.x0 + CG.x1) / 2, (CG.y0 + CG.y1) / 2];
-    net.path([[cgc[0], meerS[Math.floor(meerS.length * 0.62)][1]], [cgc[0], CG.y0], cgc], 1.4, { kind: "gravel" }), net.path([[CG.x0 - 0.2, cgc[1]], cgc], 1.4, { kind: "gravel" }), net.path([cgc, J(lx1, CG.y0 + 3.6)], 1.4, { kind: "gravel" });
-    let dogGateXY = [(DR.x0 + DR.x1) / 2, DR.y1 + 0.55], dogPath = net.path([J(lx0, y0 + k * 36), [dogGateXY[0], y0 + k * 36], dogGateXY], 1.2), dogGate = dogPath[dogPath.length - 1], tr = splitClosed(ellipsePts(RV.x, RV.y, trackRx, trackRy), [[RV.x, RV.y - trackRy], [RV.x + trackRx, RV.y], [RV.x, RV.y + trackRy], [RV.x - trackRx, RV.y]]), track = [];
+    net.path([[cgc[0], meerS[Math.floor(meerS.length * 0.62)][1]], [cgc[0], CG.y0], cgc], 1.4, { kind: "gravel" }), net.path([[CG.x0 - 0.2, cgc[1]], cgc], 1.4, { kind: "gravel" }), net.path([cgc, J2(lx1, CG.y0 + 3.6)], 1.4, { kind: "gravel" });
+    let dogGateXY = [(DR.x0 + DR.x1) / 2, DR.y1 + 0.55], dogPath = net.path([J2(lx0, y0 + k * 36), [dogGateXY[0], y0 + k * 36], dogGateXY], 1.2), dogGate = dogPath[dogPath.length - 1], tr = splitClosed(ellipsePts(RV.x, RV.y, trackRx, trackRy), [[RV.x, RV.y - trackRy], [RV.x + trackRx, RV.y], [RV.x, RV.y + trackRy], [RV.x - trackRx, RV.y]]), track = [];
     for (let piece of tr.pieces) track.push(...net.path(piece, 1.1, { step: 2.6, kind: "gravel" }));
     let [TN, TE, TS, TW] = tr.at;
-    net.path(spline([TN, [cx - 1.2, y0 + k * 30.2], [cx - 3.6, y0 + k * 25.2], MW]), 1.4), net.path([TW, J(lx0, gateYs[1])], 1.4), net.path([TE, J(lx1, gateYs[1])], 1.4);
+    net.path(spline([TN, [cx - 1.2, y0 + k * 30.2], [cx - 3.6, y0 + k * 25.2], MW]), 1.4), net.path([TW, J2(lx0, gateYs[1])], 1.4), net.path([TE, J2(lx1, gateYs[1])], 1.4);
     let gl = splitClosed(ellipsePts(GL.x, GL.y, glRx, glRy), [[GL.x, GL.y - glRy], [GL.x + glRx, GL.y], [GL.x, GL.y + glRy], [GL.x - glRx, GL.y]]);
     for (let piece of gl.pieces) net.path(piece, 1.3, { step: 2.4 });
     let [GN, GE, GS, GW] = gl.at;
-    net.path([TS, GN], 1.4), net.path(spline([GW, [lx0 + 3.6, GL.y + 2.4], J(lx0, gateYs[2])]), 1.4), net.path(spline([GE, [needle.x - 1.4, needle.y + 1.6], J(lx1, y0 + k * 79.6)]), 1.4);
+    net.path([TS, GN], 1.4), net.path(spline([GW, [lx0 + 3.6, GL.y + 2.4], J2(lx0, gateYs[2])]), 1.4), net.path(spline([GE, [needle.x - 1.4, needle.y + 1.6], J2(lx1, y0 + k * 79.6)]), 1.4);
     let castleN = [castle.x + 0.4, castle.y - 2.3], castleS = [castle.x + 0.9, castle.y + 2.5];
-    net.path(spline([GS, [cx - 4.4, GL.y + glRy + 0.6], castleN]), 1.3), net.path(spline([castleN, [castle.x - 3.2, castle.y - 1.4], J(lx0, gateYs[2])]), 1.2);
-    let pondSouth = spline([castleS, [cx - 3, y0 + k * 84.4], [cx + 4.4, y0 + k * 84.6], [cx + 11.6, y0 + k * 84.2], [cx + 16, y0 + k * 86.8], J(lx1, y0 + k * 89.4)]);
+    net.path(spline([GS, [cx - 4.4, GL.y + glRy + 0.6], castleN]), 1.3), net.path(spline([castleN, [castle.x - 3.2, castle.y - 1.4], J2(lx0, gateYs[2])]), 1.2);
+    let pondSouth = spline([castleS, [cx - 3, y0 + k * 84.4], [cx + 4.4, y0 + k * 84.6], [cx + 11.6, y0 + k * 84.2], [cx + 16, y0 + k * 86.8], J2(lx1, y0 + k * 89.4)]);
     net.path(pondSouth, 1.3, { step: 2.4 });
     let [bowN, bowS] = (() => {
       let [a, b] = shoreAlong(lakeF, bowX, y0 + k * 88, y0 + k * 104);
       return [a - 0.5, b + 0.5];
     })(), rambleA = spline([castleS, [castle.x + 2.4, y0 + k * 87.4], [bowX - 1.6, y0 + k * 89.6], [bowX, bowN]]);
-    net.path(rambleA, 1.2, { step: 2.3 }), net.path(spline([rambleA[Math.floor(rambleA.length * 0.45)], [castle.x - 3.6, y0 + k * 89.6], J(lx0, y0 + k * 90.4)]), 1.2, { step: 2.3 }), net.path(spline([pondSouth[Math.floor(pondSouth.length * 0.45)], [cx + 4.6, y0 + k * 88.2], [cx + 9, y0 + k * 90], [cx + 12.6, y0 + k * 91.2]]), 1.2, { step: 2.3 });
+    net.path(rambleA, 1.2, { step: 2.3 }), net.path(spline([rambleA[Math.floor(rambleA.length * 0.45)], [castle.x - 3.6, y0 + k * 89.6], J2(lx0, y0 + k * 90.4)]), 1.2, { step: 2.3 }), net.path(spline([pondSouth[Math.floor(pondSouth.length * 0.45)], [cx + 4.6, y0 + k * 88.2], [cx + 9, y0 + k * 90], [cx + 12.6, y0 + k * 91.2]]), 1.2, { step: 2.3 });
     let bowZ = (t) => 0.125 + 0.32 + Math.sin(PI9 * t) * 0.62;
     net.path([[bowX, bowN], [bowX, bowS]], 0, { step: 1.3, z: bowZ });
     let sfN = [SF2.x + SF2.r * 0.7, SF2.y - SF2.r * 0.7];
-    net.path(spline([[bowX, bowS], [cx - 9, y0 + k * 100.6], sfN]), 1.4), net.path([[SF2.x - SF2.r, SF2.y], J(lx0, gateYs[3])], 1.4);
+    net.path(spline([[bowX, bowS], [cx - 9, y0 + k * 100.6], sfN]), 1.4), net.path([[SF2.x - SF2.r, SF2.y], J2(lx0, gateYs[3])], 1.4);
     let ring = [];
     for (let k2 = 0; k2 < 8; k2++) {
       let a = k2 / 8 * 2 * PI9 - PI9 / 2;
@@ -6808,12 +6904,12 @@ void main() {
     let rN = [BT.x, BT.y - BT.ring], rE = [BT.x + BT.ring, BT.y], rS = [BT.x, BT.y + BT.ring], rW = [BT.x - BT.ring, BT.y];
     net.path([[bowX, bowS], [BT.x - 2.2, BT.y - 3.2]], 0), net.edge(net.node(BT.x - 2.2, BT.y - 3.2), ring[7]), net.path(spline([rW, [cx - 7.6, BT.y + 0.6], [SF2.x + SF2.r, SF2.y + 0.4]]), 1.4);
     let dockX = boathouse.x - 3.4, dockRoot = [dockX, boathouse.y - 1.6], bhFront = [boathouse.x - 0.6, boathouse.y + 2.4];
-    net.path(spline([rE, [cx + 7.6, BT.y - 0.6], [dockX + 0.4, bhFront[1] - 0.2], bhFront]), 1.6), net.path([bhFront, [boathouse.x + 3.6, bhFront[1]], J(lx1, gateYs[3])], 1.4);
+    net.path(spline([rE, [cx + 7.6, BT.y - 0.6], [dockX + 0.4, bhFront[1] - 0.2], bhFront]), 1.6), net.path([bhFront, [boathouse.x + 3.6, bhFront[1]], J2(lx1, gateYs[3])], 1.4);
     let dockIds = net.path([[dockX, bhFront[1] - 0.4], dockRoot], 1), dockEnd = net.node(dockX, dockRoot[1] - 2.1);
     net.edge(dockIds[dockIds.length - 1], dockEnd);
     let MJ = [cx, y0 + k * 113.4];
-    net.path([rS, MJ], mallW), net.path([MJ, J(cx, ly1)], mallW);
-    let se = spline([MJ, [cx + 5, MJ[1] - 0.2], [gapX - 1.6, y0 + k * 112.6], [gapX + 3.6, y0 + k * 112.8], J(lx1, y0 + k * 113)]);
+    net.path([rS, MJ], mallW), net.path([MJ, J2(cx, ly1)], mallW);
+    let se = spline([MJ, [cx + 5, MJ[1] - 0.2], [gapX - 1.6, y0 + k * 112.6], [gapX + 3.6, y0 + k * 112.8], J2(lx1, y0 + k * 113)]);
     net.path(se, 1.5);
     let [gapN, gapS] = (() => {
       let [a, b] = shoreAlong(pondF, gapX, y0 + k * 112, y0 + k * 123);
@@ -6821,7 +6917,7 @@ void main() {
     })();
     net.path([[gapX, se[Math.floor(se.length * 0.62)][1]], [gapX, gapN]], 1.3);
     let gapZ = (t) => 0.125 + 0.3 + Math.sin(PI9 * t) * 0.85;
-    net.path([[gapX, gapN], [gapX, gapS]], 0, { step: 1.2, z: gapZ }), net.path([[gapX, gapS], J(gapX, ly1)], 1.3), net.path(spline([[rink.x0 - 0.9, rink.y1 + 0.2], [rink.x0 - 1, rink.y0 - 0.6], [rink.x1 - 1.2, rink.y0 - 0.9]]), 1.1), C.paintGround(R2.x0, R2.y0, R2.x1, R2.y1, "grass"), C.paintWhere(R2.x0, R2.y0, cx + 2, y0 + k * 34, (x, y) => valueNoise(x * 0.17, y * 0.17, 91) > 0.28, "woods"), C.paintWhere(R2.x0, y0 + k * 83, R2.x1, y0 + k * 93, (x, y) => valueNoise(x * 0.2, y * 0.2, 92) > 0.3, "woods"), C.paintWhere(R2.x0, R2.y0, R2.x1, R2.y1, (x, y) => valueNoise(x * 0.12, y * 0.12, 93) > 0.66, "woods"), C.paintWhere(greatHill.x - greatHill.r, greatHill.y - greatHill.r, greatHill.x + greatHill.r, greatHill.y + greatHill.r, (x, y) => dist4(x, y, greatHill.x, greatHill.y) < greatHill.r, "lawn"), C.paintWhere(GL.x - GL.rx, GL.y - GL.ry, GL.x + GL.rx, GL.y + GL.ry, (x, y) => ((x - GL.x) / GL.rx) ** 2 + ((y - GL.y) / GL.ry) ** 2 <= 1, "lawn"), C.paintWhere(meadow.x0, meadow.y0, meadow.x1, meadow.y1, (x, y) => {
+    net.path([[gapX, gapN], [gapX, gapS]], 0, { step: 1.2, z: gapZ }), net.path([[gapX, gapS], J2(gapX, ly1)], 1.3), net.path(spline([[rink.x0 - 0.9, rink.y1 + 0.2], [rink.x0 - 1, rink.y0 - 0.6], [rink.x1 - 1.2, rink.y0 - 0.9]]), 1.1), C.paintGround(R2.x0, R2.y0, R2.x1, R2.y1, "grass"), C.paintWhere(R2.x0, R2.y0, cx + 2, y0 + k * 34, (x, y) => valueNoise(x * 0.17, y * 0.17, 91) > 0.28, "woods"), C.paintWhere(R2.x0, y0 + k * 83, R2.x1, y0 + k * 93, (x, y) => valueNoise(x * 0.2, y * 0.2, 92) > 0.3, "woods"), C.paintWhere(R2.x0, R2.y0, R2.x1, R2.y1, (x, y) => valueNoise(x * 0.12, y * 0.12, 93) > 0.66, "woods"), C.paintWhere(greatHill.x - greatHill.r, greatHill.y - greatHill.r, greatHill.x + greatHill.r, greatHill.y + greatHill.r, (x, y) => dist4(x, y, greatHill.x, greatHill.y) < greatHill.r, "lawn"), C.paintWhere(GL.x - GL.rx, GL.y - GL.ry, GL.x + GL.rx, GL.y + GL.ry, (x, y) => ((x - GL.x) / GL.rx) ** 2 + ((y - GL.y) / GL.ry) ** 2 <= 1, "lawn"), C.paintWhere(meadow.x0, meadow.y0, meadow.x1, meadow.y1, (x, y) => {
       let ex = Math.max(meadow.x0 + 2.4 - x, 0, x - (meadow.x1 - 2.4)), ey = Math.max(meadow.y0 + 2.4 - y, 0, y - (meadow.y1 - 2.4));
       return ex * ex + ey * ey <= 2.4 * 2.4;
     }, "lawn");
@@ -6835,8 +6931,8 @@ void main() {
         return u > 0.45 && v > 0.45 && u < 1.55 && v < 1.55;
       }, "lawn");
     }
-    let paintLake = (F, b) => {
-      C.paintWhere(b.x0, b.y0, b.x1, b.y1, (x, y) => F(x, y) > -0.2, "shore"), C.paintWhere(b.x0, b.y0, b.x1, b.y1, (x, y) => F(x, y) > 0, "water");
+    let paintLake = (F2, b) => {
+      C.paintWhere(b.x0, b.y0, b.x1, b.y1, (x, y) => F2(x, y) > -0.2, "shore"), C.paintWhere(b.x0, b.y0, b.x1, b.y1, (x, y) => F2(x, y) > 0, "water");
     };
     paintLake(meerF, boundsOf(meer)), C.paintWhere(pool.x - pool.r - 1, pool.y - pool.r - 1, pool.x + pool.r + 1, pool.y + pool.r + 1, (x, y) => dist4(x, y, pool.x, pool.y) < pool.r + 0.5, "shore"), C.paintWhere(pool.x - pool.r - 1, pool.y - pool.r - 1, pool.x + pool.r + 1, pool.y + pool.r + 1, (x, y) => dist4(x, y, pool.x, pool.y) < pool.r, "water");
     {
@@ -6959,9 +7055,9 @@ void main() {
       chainFence(C, DR.x0, DR.y1, gx - 0.6, DR.y1, 1.1, !0), chainFence(C, gx + 0.6, DR.y1, DR.x1, DR.y1, 1.1, !0), chainFence(C, DR.x0, DR.y0, DR.x0, DR.y1, 1.1, !0), chainFence(C, DR.x1, DR.y0, DR.x1, DR.y1, 1.1, !0), chainFence(C, DR.x0, DR.y0, DR.x1, DR.y0, 1.1, !0), W.dogRun = { x0: DR.x0 + 0.4, y0: DR.y0 + 0.4, x1: DR.x1 - 0.4, y1: DR.y1 - 0.4, gate: { x: gx, y: DR.y1 + 0.25 } }, mb.cylinder(DR.x1 - 1.6, DR.y0 + 1.2, 0.125, 0.125 + 0.25, 0.22, 6, S2.wood, S2.wood);
     }
     for (let [x, y, r, h] of [[castle.x - 2.4, castle.y + 1.6, 0.9, 0.8], [castle.x + 2.6, castle.y + 1.2, 0.7, 0.6], [cx + 3.2, y0 + k * 88.4, 0.8, 0.7], [cx - 1.6, y0 + k * 86.8, 0.55, 0.45], [x0 + 13.4, y0 + k * 16, 0.9, 0.9], [x0 + 6.2, y0 + k * 18.6, 0.7, 0.6], [cx - 6, y0 + k * 9.4, 0.6, 0.5], [cx - 10.6, y0 + k * 112.6, 0.8, 0.7]]) rock(x, y, r, h);
-    for (let [F, lobes] of [[meerF, meer], [lakeF, lake], [pondF, pond], [turtleF, turtle]])
+    for (let [F2, lobes] of [[meerF, meer], [lakeF, lake], [pondF, pond], [turtleF, turtle]])
       for (let k2 = 0; k2 < 26; k2++) {
-        let l = rng.pick(lobes), a = rng.range(0, 2 * PI9), x = l.x + Math.cos(a) * (l.rx + 0.15), y = l.y + Math.sin(a) * (l.ry + 0.15), f = F(x, y);
+        let l = rng.pick(lobes), a = rng.range(0, 2 * PI9), x = l.x + Math.cos(a) * (l.rx + 0.15), y = l.y + Math.sin(a) * (l.ry + 0.15), f = F2(x, y);
         f > -0.22 && f < 0.02 && rng.chance(0.4) && dist4(x, y, boathouse.x, boathouse.y) > 3.5 && Math.abs(x - bowX) > 1.2 && Math.abs(x - gapX) > 1.2 && rock(x, y, rng.range(0.25, 0.45), rng.range(0.2, 0.4));
       }
     let trees = [], lamps = [], benches = [], groundAt = (x, y) => g.getA(Math.floor(x * 32), Math.floor(y * 32)), soft = (x, y) => groundAt(x, y) === GC.GRASS, inLawn = (x, y, m = 0.6) => ((x - GL.x) / (GL.rx + m)) ** 2 + ((y - GL.y) / (GL.ry + m)) ** 2 <= 1 || x > meadow.x0 - m && x < meadow.x1 + m && y > meadow.y0 - m && y < meadow.y1 + m || dist4(x, y, greatHill.x, greatHill.y) < greatHill.r + m, clearOf = (x, y, r) => [[0, 0], [r, 0], [-r, 0], [0, r], [0, -r]].every(([dx, dy]) => soft(x + dx, y + dy)), tree = (x, y, sp, scale) => {
@@ -6981,10 +7077,10 @@ void main() {
         !soft(x, y) || !roomFor(x, y, 2.2) || tree(x, y, rng.pick(["plane", "plane", "oak", "elm", "locust"]));
       }
     }
-    for (let [F, lobes] of [[lakeF, lake], [meerF, meer]])
+    for (let [F2, lobes] of [[lakeF, lake], [meerF, meer]])
       for (let k2 = 0; k2 < 16; k2++) {
         let l = rng.pick(lobes), a = rng.range(0, 2 * PI9), x = l.x + Math.cos(a) * (l.rx + 1), y = l.y + Math.sin(a) * (l.ry + 1);
-        F(x, y) < -0.35 && soft(x, y) && roomFor(x, y, 2) && tree(x, y, "elm", rng.range(0.95, 1.2));
+        F2(x, y) < -0.35 && soft(x, y) && roomFor(x, y, 2) && tree(x, y, "elm", rng.range(0.95, 1.2));
       }
     let nearPath = (x, y, m) => net.strokes.some((s) => {
       for (let k2 = 1; k2 < s.pts.length; k2++) if (segDist(x, y, s.pts[k2 - 1][0], s.pts[k2 - 1][1], s.pts[k2][0], s.pts[k2][1]) < s.w / 2 + m) return !0;
@@ -7409,7 +7505,7 @@ void main() {
     return C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.6, r: 3, color: [1, 0.92, 0.8], k: 0.6, kind: "shop" }), { H: z0 + H };
   }
   function billboardsBlock(C, L, sq, seed) {
-    let rng = new RNG(seed), F = {
+    let rng = new RNG(seed), F2 = {
       N: new Frame(L.x1, L.y0, 0, -1),
       S: new Frame(L.x0, L.y1, 0, 1),
       E: new Frame(L.x1, L.y1, 1, 0),
@@ -7417,10 +7513,10 @@ void main() {
     };
     C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
     let D = 8;
-    signTower(C, F[sq], 0, 9, D, rng.int(14, 16), rng, { sides: ["left"] }), signTower(C, F[sq], 9, 9, D, rng.int(11, 13), rng, { sides: ["right"] });
-    let sSide = F.S;
+    signTower(C, F2[sq], 0, 9, D, rng.int(14, 16), rng, { sides: ["left"] }), signTower(C, F2[sq], 9, 9, D, rng.int(11, 13), rng, { sides: ["right"] });
+    let sSide = F2.S;
     sq === "E" ? signTower(C, sSide, 0, 10, 7, rng.int(8, 10), rng, { heights: [2.5, 3], split: 0.6, sides: ["left"] }) : signTower(C, sSide, 8, 10, 7, rng.int(8, 10), rng, { heights: [2.5, 3], split: 0.6, sides: ["right"] });
-    let nSide = F.N;
+    let nSide = F2.N;
     sq === "E" ? signTower(C, nSide, 8, 10, 7, rng.int(7, 9), rng, { screens: 0.3, sides: ["right"] }) : signTower(C, nSide, 0, 10, 7, rng.int(7, 9), rng, { screens: 0.3, sides: ["left"] });
   }
   function timesSquareBlock(C, L, seed) {
@@ -7493,25 +7589,25 @@ void main() {
           C.paintGround(L.x0, L.y0, L.x1, L.y1, "tsq");
           continue;
         }
-        let sx = bx === M.bx0 ? 1 : -1, sy = by === M.by0 ? 1 : -1, F2 = {
+        let sx = bx === M.bx0 ? 1 : -1, sy = by === M.by0 ? 1 : -1, F3 = {
           E: new Frame(L.x1, L.y1, 1, 0),
           Wf: new Frame(L.x0, L.y0, -1, 0),
           N: new Frame(L.x1, L.y0, 0, -1),
           S: new Frame(L.x0, L.y1, 0, 1)
         };
         C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
-        let vert = sx > 0 ? F2.E : F2.Wf, horz = sy > 0 ? F2.S : F2.N, outY = sy > 0 ? F2.N : F2.S, half = (fr, nearInner) => nearInner ? 0 : 9, vNear = (fr) => fr === F2.E ? sy > 0 ? 0 : 9 : sy > 0 ? 9 : 0, hNear = (fr) => fr === F2.S ? sx > 0 ? 9 : 0 : sx > 0 ? 0 : 9, va = vNear(vert), ha = hNear(horz), sideAt = (a0, cornerAtStart) => cornerAtStart ? "left" : "right";
+        let vert = sx > 0 ? F3.E : F3.Wf, horz = sy > 0 ? F3.S : F3.N, outY = sy > 0 ? F3.N : F3.S, half = (fr, nearInner) => nearInner ? 0 : 9, vNear = (fr) => fr === F3.E ? sy > 0 ? 0 : 9 : sy > 0 ? 9 : 0, hNear = (fr) => fr === F3.S ? sx > 0 ? 9 : 0 : sx > 0 ? 0 : 9, va = vNear(vert), ha = hNear(horz), sideAt = (a0, cornerAtStart) => cornerAtStart ? "left" : "right";
         signTower(C, vert, va, 9, 9, rng.int(21, 26), rng, { sides: [sideAt(va, va === 0)], wrapFull: !0, screens: 0.9, heights: [3, 3.5, 4, 5], split: 0.3 });
         let va2 = 9 - va;
         signTower(C, vert, va2, 9, 9, rng.int(14, 18), rng, { sides: [sideAt(va2, va2 === 0)], screens: 0.75 });
         let ha2 = 9 - ha;
         signTower(C, horz, ha2, 9, 9, rng.int(12, 16), rng, { sides: [sideAt(ha2, ha2 === 0)], screens: 0.7 });
-        let oa = outY === F2.N ? sx > 0 ? 9 : 0 : sx > 0 ? 0 : 9;
+        let oa = outY === F3.N ? sx > 0 ? 9 : 0 : sx > 0 ? 0 : 9;
         signTower(C, outY, oa, 9, 9, rng.int(8, 11), rng, { sides: [sideAt(oa, oa === 0)], screens: 0.35, heights: [2.5, 3], split: 0.6 });
       }
     let tx0 = cx - 2.5, tx1 = cx + 2.5, ty0 = ey1 - 2 - 9.5, ty1 = ey1 - 2 - 2, faces = [new Frame(tx1, ty0, 0, -1), new Frame(tx1, ty1, 1, 0), new Frame(tx0, ty1, 0, 1), new Frame(tx0, ty0, -1, 0)], top = signTower(C, faces[0], 0, tx1 - tx0, ty1 - ty0, 24, rng, { heights: [3, 3.5, 4], split: 0.2, screens: 0.85 }).H;
     coverFace(C, faces[1], 0, ty1 - ty0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 }), coverFace(C, faces[3], 0, ty1 - ty0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4, 5], split: 0, screens: 0.7 }), coverFace(C, faces[2], 0, tx1 - tx0, 0.125 + 3.6, top - 0.6, rng, { heights: [3, 4], split: 0.3, screens: 0.5 }), mb.box(tx0 + 0.6, ty0 + 0.6, top, tx1 - 0.6, ty1 - 0.6, top + 1.2, { px: S2.darkMetal, nx: S2.darkMetal, py: S2.darkMetal, ny: S2.darkMetal, pz: { t: S2.darkMetal } }), mb.box(cx - 0.08, (ty0 + ty1) / 2 - 0.08, top + 1.2, cx + 0.08, (ty0 + ty1) / 2 + 0.08, top + 4.6, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver }), W.ball = { x: cx, y: (ty0 + ty1) / 2, z0: top + 1.3, z1: top + 4.4 }, W.beacons.push({ x: cx, y: (ty0 + ty1) / 2, z: top + 4.7 });
-    let F = blockRect2(M.bx1, M.by1), fcx = (F.x0 + F.x1) / 2, fcy = (F.y0 + F.y1) / 2, sx0 = fcx - 4, sx1 = fcx + 4, steps = 7, sd = 0.5, rise = 0.32, sy1 = fcy + 2.5, sy0 = sy1 - steps * sd, scx2 = (sx0 + sx1) / 2, red = C.atlas.shared("red_step", 32, 10, (p) => {
+    let F2 = blockRect2(M.bx1, M.by1), fcx = (F2.x0 + F2.x1) / 2, fcy = (F2.y0 + F2.y1) / 2, sx0 = fcx - 4, sx1 = fcx + 4, steps = 7, sd = 0.5, rise = 0.32, sy1 = fcy + 2.5, sy0 = sy1 - steps * sd, scx2 = (sx0 + sx1) / 2, red = C.atlas.shared("red_step", 32, 10, (p) => {
       p.rect(0, 0, 32, 10, 13114922, winCode(0, !0)), p.rect(0, 0, 32, 2, 16738922, winCode(0, !0)), p.rect(0, 8, 32, 2, 9048088, winCode(0, !0));
     }), redTop = C.atlas.shared("red_step_t", 32, 16, (p) => {
       p.rect(0, 0, 32, 16, 12065318, winCode(0, !0));
@@ -7538,7 +7634,7 @@ void main() {
     mb.box(stx - 0.7, sty - 0.7, 0.125, stx + 0.7, sty + 0.7, 0.125 + 0.25, { px: S2.greystone, nx: S2.greystone, py: S2.greystone, ny: S2.greystone, pz: { t: S2.limeTop } }), mb.box(stx - 0.55, sty - 0.55, 0.125 + 0.25, stx + 0.55, sty + 0.55, 0.125 + 1.4, { px: S2.greystone, nx: S2.greystone, py: S2.greystone, ny: S2.greystone, pz: { t: S2.limeTop } }), C.addSprite("statue", stx, sty, 0.125 + 1.4), W.solids.push([stx - 0.7, sty - 0.7, stx + 0.7, sty + 0.7, 1.4]);
     let tables = [], tableAt = [];
     for (let side of [-1, 1]) for (let i = 0; i < 3; i++) for (let j = 0; j < 2; j++) tableAt.push([cx + side * (7.5 + i * 3.6), cy + (j ? 1.9 : -1.9), i, j, side]);
-    for (let i = 0; i < 4; i++) tableAt.push([F.x0 + 3 + i * ((F.x1 - F.x0 - 6) / 3), F.y1 - 3.2, i, i, 1]);
+    for (let i = 0; i < 4; i++) tableAt.push([F2.x0 + 3 + i * ((F2.x1 - F2.x0 - 6) / 3), F2.y1 - 3.2, i, i, 1]);
     for (let [x, y, i, j, side] of tableAt) {
       tables.push([x, y]), mb.cylinder(x, y, 0.125, 0.125 + 0.7, 0.06, 6, S2.darkMetal, null), mb.cylinder(x, y, 0.125 + 0.7, 0.125 + 0.74, 0.4, 10, P.silver, P.silver), mb.cylinder(x, y, 0.125 + 0.74, 0.125 + 1.75, 0.03, 4, P.silver, null);
       for (let [dx, dy] of [[0.55, 0], [-0.55, 0], [0, 0.55]]) mb.box(x + dx - 0.15, y + dy - 0.15, 0.125, x + dx + 0.15, y + dy + 0.15, 0.125 + 0.42, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.wood });
@@ -7553,17 +7649,17 @@ void main() {
       [cx + 16, hy0 + 0.8],
       [stx - 2.2, sty],
       [stx + 2.2, sty],
-      [F.x1 - 1.2, F.y0 + 1.2],
-      [F.x1 - 1.2, fcy],
-      [F.x0 + 1.2, F.y1 - 1.2],
-      [F.x1 - 1.2, F.y1 - 1.2]
+      [F2.x1 - 1.2, F2.y0 + 1.2],
+      [F2.x1 - 1.2, fcy],
+      [F2.x0 + 1.2, F2.y1 - 1.2],
+      [F2.x1 - 1.2, F2.y1 - 1.2]
     ];
     for (let [x, y] of planters)
       C.addPlanter(x, y), W.solids.push([x - 0.5, y - 0.5, x + 0.5, y + 0.5, 0.6]);
     W.carts.push({ x: vx0 + 1.6, y: cy + 5.5, kind: "pretzel", axis: "y" }), W.carts.push({ x: vx1 - 1.6, y: cy - 5.5, kind: "halal", axis: "y" }), W.carts.push({ x: cx + 19, y: hy0 + 1.4, kind: "hotdog", axis: "x" }), subwayEntrance(C, cx - 19.5, hy1 - 1, "x");
-    for (let [x, y] of [[vx0 + 0.5, ey02 + 2.5], [vx1 - 0.5, ey02 + 2.5], [vx0 + 0.5, ey1 - 2.5], [ex0 + 2.5, hy0 + 0.5], [ex0 + 2.5, hy1 - 0.5], [ex1 - 2.5, hy0 + 0.5], [F.x1 - 0.5, F.y1 - 0.5], [F.x0 + 0.5, F.y1 - 0.5]])
+    for (let [x, y] of [[vx0 + 0.5, ey02 + 2.5], [vx1 - 0.5, ey02 + 2.5], [vx0 + 0.5, ey1 - 2.5], [ex0 + 2.5, hy0 + 0.5], [ex0 + 2.5, hy1 - 0.5], [ex1 - 2.5, hy0 + 0.5], [F2.x1 - 0.5, F2.y1 - 0.5], [F2.x0 + 0.5, F2.y1 - 0.5]])
       mb.box(x - 0.08, y - 0.08, 0.125, x + 0.08, y + 0.08, 0.125 + 5.2, { px: P.silver, nx: P.silver, py: P.silver, ny: P.silver, pz: P.silver }), mb.box(x - 0.3, y - 0.3, 0.125 + 5.2, x + 0.3, y + 0.3, 0.125 + 5.45, { px: P.lampHead, nx: P.lampHead, py: P.lampHead, ny: P.lampHead, pz: P.silver }), W.lamps.push({ x: x + (cx - x) * 0.15, y: y + (cy - y) * 0.15, z: 0.125 + 5, r: 7, color: [0.95, 0.97, 1], k: 0.8, kind: "flood" }), W.lampHeads.push({ x, y, z: 0.125 + 5.2, kind: "flood" });
-    let nodes = [], edges = [], gates = [], idx = /* @__PURE__ */ new Map(), step = 2.2, inCross = (x, y) => x > vx0 + 0.6 && x < vx1 - 0.6 && y > ey02 + 2.4 && y < ey1 - 2.4 || y > hy0 + 0.6 && y < hy1 - 0.6 && x > ex0 + 2.4 && x < ex1 - 2.4 || x > F.x0 - 0.6 && x < F.x1 - 0.4 && y > F.y0 - 0.6 && y < F.y1 - 0.4, blocked = (x, y) => x > tx0 - 0.7 && x < tx1 + 0.7 && y > ty0 - 0.7 && y < ty1 + 0.7 || x > sx0 - 0.5 && x < sx1 + 0.5 && y > sy0 - 0.5 && y < sy1 + 1.6 || Math.hypot(stx - x, sty - y) < 1.2 || tables.some(([tx, ty]) => Math.hypot(tx - x, ty - y) < 1) || planters.some(([px, py]) => Math.hypot(px - x, py - y) < 0.9), nx = Math.ceil((ex1 - ex0) / step), ny = Math.ceil((ey1 - ey02) / step);
+    let nodes = [], edges = [], gates = [], idx = /* @__PURE__ */ new Map(), step = 2.2, inCross = (x, y) => x > vx0 + 0.6 && x < vx1 - 0.6 && y > ey02 + 2.4 && y < ey1 - 2.4 || y > hy0 + 0.6 && y < hy1 - 0.6 && x > ex0 + 2.4 && x < ex1 - 2.4 || x > F2.x0 - 0.6 && x < F2.x1 - 0.4 && y > F2.y0 - 0.6 && y < F2.y1 - 0.4, blocked = (x, y) => x > tx0 - 0.7 && x < tx1 + 0.7 && y > ty0 - 0.7 && y < ty1 + 0.7 || x > sx0 - 0.5 && x < sx1 + 0.5 && y > sy0 - 0.5 && y < sy1 + 1.6 || Math.hypot(stx - x, sty - y) < 1.2 || tables.some(([tx, ty]) => Math.hypot(tx - x, ty - y) < 1) || planters.some(([px, py]) => Math.hypot(px - x, py - y) < 0.9), nx = Math.ceil((ex1 - ex0) / step), ny = Math.ceil((ey1 - ey02) / step);
     for (let gy = 0; gy <= ny; gy++)
       for (let gx = 0; gx <= nx; gx++) {
         let x = ex0 + gx * step, y = ey02 + gy * step;
@@ -7576,7 +7672,7 @@ void main() {
         j != null && edges.push([i, j]);
       }
     }
-    let ends = [[cx, ey02 + 1], [cx, ey1 - 1], [ex0 + 1, cy], [ex1 - 1, cy], [fcx + 5, F.y1 + 1], [F.x1 + 1, fcy + 4]];
+    let ends = [[cx, ey02 + 1], [cx, ey1 - 1], [ex0 + 1, cy], [ex1 - 1, cy], [fcx + 5, F2.y1 + 1], [F2.x1 + 1, fcy + 4]];
     for (let [gxp, gyp] of ends) {
       let best = -1, bd = 1e9;
       nodes.forEach((n, i) => {
@@ -7929,11 +8025,11 @@ void main() {
     }
   };
   function brownstoneBlock(C, L) {
-    let { rng } = C, F = frames(L), style = rng.pick(["brownstone", "brick", "mixed", "mixed"]);
+    let { rng } = C, F2 = frames(L), style = rng.pick(["brownstone", "brick", "mixed", "mixed"]);
     C.paintGround(L.x0, L.y0, L.x1, L.y1, "grass");
     let num = rng.int(10, 80) * 2;
     for (let side of ["N", "S"]) {
-      let fr = F[side];
+      let fr = F2[side];
       walkup(C, fr, 0, 4.5, 8, { cornerSide: "L", floors: rng.int(4, 5), shop: rng.pick(["bodega", "pizza", "coffee", "laundry", "bar", "diner", "flowers", null]) }), walkup(C, fr, 13.5, 4.5, 8, { cornerSide: "R", floors: rng.int(4, 5), shop: rng.pick(["bodega", "pizza", "coffee", "chinese", "bar", "nails", null]) });
       for (let k = 0; k < 3; k++) {
         let st = style === "mixed" ? void 0 : style;
@@ -7941,7 +8037,7 @@ void main() {
       }
     }
     for (let side of ["E", "W"]) {
-      let fr = F[side];
+      let fr = F2[side];
       gardenWall(C, fr, 8, 10, 0, 0.125, 1.4, "brick"), C.world.backyardGates = C.world.backyardGates || [];
     }
     let ym0 = L.y0 + 7.5, ym1 = L.y1 - 7.5;
@@ -7963,11 +8059,11 @@ void main() {
     return { px: side, nx: side, py: side, ny: side, pz: top };
   }
   function walkupBlock(C, L, o) {
-    let { rng } = C, F = frames(L);
+    let { rng } = C, F2 = frames(L);
     C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
     let shopP = o.shops ?? 0.6, kinds = o.shopKinds ?? ["bodega", "pizza", "laundry", "coffee", "bar", "books", "flowers", "chinese", "nails", "hardware", "bagels", "diner", "pharmacy"], pickShop = () => rng.chance(shopP) ? rng.pick(kinds) : null, fl = o.floors ?? [4, 6], brick = () => o.brick ? rng.pick(o.brick) : void 0, num = rng.int(100, 400);
     for (let side of ["N", "S"]) {
-      let fr = F[side];
+      let fr = F2[side];
       if (o.dept === side) {
         deptStore(C, fr, 0, 18, 7), num += 8;
         continue;
@@ -7999,7 +8095,7 @@ void main() {
       });
     }
     for (let side of ["E", "W"]) {
-      let fr = F[side];
+      let fr = F2[side];
       walkup(C, fr, 7, 4, 6.5, { shop: pickShop(), floors: rng.int(fl[0], Math.max(fl[0], fl[1] - 1)), number: num++, brick: brick(), canopy: o.canopy && rng.chance(o.canopy * 0.5), awning: o.awning });
     }
     C.addTree((L.x0 + L.x1) / 2, (L.y0 + L.y1) / 2, "plane", !1, { scale: 0.9 }), C.addSprite("laundry", (L.x0 + L.x1) / 2 + 1.2, (L.y0 + L.y1) / 2 - 1, 0.125, { group: "warm" });
@@ -8060,15 +8156,15 @@ void main() {
     C.world.lamps.push({ x: lp[0], y: lp[1], z: 0.5, r: 3.4, color: [1, 0.85, 0.5], k: 0.9, kind: "marquee" }), C.world.marquees.push({ x: lp[0], y: lp[1] }), C.world.shops.push({ kind: "theater", name, x: lp[0], y: lp[1], n: fr.n });
   }
   function loftBlock(C, L) {
-    let { rng } = C, F = frames(L);
+    let { rng } = C, F2 = frames(L);
     C.paintGround(L.x0, L.y0, L.x1, L.y1, "patio");
     for (let side of ["N", "S"]) {
-      let fr = F[side], a = 0;
+      let fr = F2[side], a = 0;
       for (let w of [6, 6, 6])
         loft(C, fr, a, w, 8, { floors: rng.int(5, 7) }), a += w;
     }
-    for (let side of ["E", "W"]) gardenWall(C, F[side], 8, 10, 0, 0.125, 1.6, "brick");
-    scaffolding(C, F.S, 6.2, 11.8);
+    for (let side of ["E", "W"]) gardenWall(C, F2[side], 8, 10, 0, 0.125, 1.6, "brick");
+    scaffolding(C, F2.S, 6.2, 11.8);
   }
   function courtBlock(C, L) {
     let { rng } = C;
@@ -8393,8 +8489,8 @@ void main() {
       p.rect(18, 4, 11, 9, 14196816);
       for (let k = 0; k < 3; k++) p.ellipse(21 + k * 3, 8, 1.2, 1.2, 10115616);
       p.rect(4, 18, 24, 10, 10133672), p.frame(4, 18, 24, 10, 6975092);
-    }), F = c.axis === "x" ? { py: longSide, ny: longSide, px: shortSide, nx: shortSide } : { px: longSide, nx: longSide, py: shortSide, ny: shortSide };
-    C.mb.box(x0, y0, 0.125 + 0.2, x1, y1, 0.125 + H, { ...F, pz: { t: top } });
+    }), F2 = c.axis === "x" ? { py: longSide, ny: longSide, px: shortSide, nx: shortSide } : { px: longSide, nx: longSide, py: shortSide, ny: shortSide };
+    C.mb.box(x0, y0, 0.125 + 0.2, x1, y1, 0.125 + H, { ...F2, pz: { t: top } });
     for (let [wx, wy] of [[x0 + 0.1, y0 + 0.1], [x1 - 0.1, y1 - 0.1]]) C.mb.box(wx - 0.06, wy - 0.06, 0.125, wx + 0.06, wy + 0.06, 0.125 + 0.25, { px: P.black, nx: P.black, py: P.black, ny: P.black, pz: P.black });
     C.addSprite("cartUmbrella", cx, cy, 0.125 + H, { cart: c.kind }), C.world.steam.push({ x: cx, y: cy, z: 0.125 + H + 0.1, kind: "cart", rate: 0.6 }), C.world.lamps.push({ x: cx, y: cy, z: 1.5, r: 1.5, color: [1, 0.9, 0.7], k: 0.45, kind: "shop", group: GRP.DAY });
   }
@@ -8452,6 +8548,7 @@ void main() {
       canopies: [],
       extraNets: [],
       solids: [],
+      poles: [],
       blocks: []
     };
     for (let by = 0; by < 36; by++)
@@ -9308,17 +9405,17 @@ void main() {
     poodle: { len: 12, hgt: 7, leg: 6, head: 6, ears: "flop", tail: "pom", fluffy: !0 },
     husky: { len: 16, hgt: 8, leg: 6, head: 7, ears: "up", tail: "curl", mask: !0 }
   }, dogFrameSize = (breed) => {
-    let B2 = DOG_BREEDS[breed];
-    return [B2.len + 16, B2.hgt + B2.leg + B2.head + 6];
+    let B3 = DOG_BREEDS[breed];
+    return [B3.len + 16, B3.hgt + B3.leg + B3.head + 6];
   };
   function paintDog(sp, breed, anim, f) {
-    let B2 = DOG_BREEDS[breed], g = sp.h - 1, x0 = 5, legTop = g - B2.leg + 1, bodyTop = legTop - B2.hgt, sit = anim === "sit", sniff = anim === "sniff", run = anim === "run", walk = anim === "walk", xEnd = x0 + B2.len - 1, drop = (x) => sit ? Math.round((1 - (x - x0) / B2.len) * (B2.leg + 1)) : 0, legs = [
+    let B3 = DOG_BREEDS[breed], g = sp.h - 1, x0 = 5, legTop = g - B3.leg + 1, bodyTop = legTop - B3.hgt, sit = anim === "sit", sniff = anim === "sniff", run = anim === "run", walk = anim === "walk", xEnd = x0 + B3.len - 1, drop = (x) => sit ? Math.round((1 - (x - x0) / B3.len) * (B3.leg + 1)) : 0, legs = [
       { x: x0 + 1, far: !0, ph: 0 },
       { x: xEnd - 4, far: !0, ph: 1 },
       { x: x0 + 3, far: !1, ph: 2 },
       { x: xEnd - 2, far: !1, ph: 3 }
     ], drawLeg = (L) => {
-      if (sit && L.x < x0 + B2.len / 2) return;
+      if (sit && L.x < x0 + B3.len / 2) return;
       let dx = 0, lift = 0;
       if (walk) {
         let p = (f + L.ph) % 4;
@@ -9338,34 +9435,34 @@ void main() {
     legs.filter((L) => L.far).forEach(drawLeg);
     for (let x = x0; x <= xEnd; x++)
       for (let y = bodyTop; y < legTop; y++) {
-        let ry = (y - bodyTop) / Math.max(1, B2.hgt - 1);
+        let ry = (y - bodyTop) / Math.max(1, B3.hgt - 1);
         if ((x === x0 || x === xEnd) && (y === bodyTop || y === legTop - 1)) continue;
         let slot = ry > 0.72 && x > x0 + 2 && x < xEnd - 2 ? S.BODY_L : S.BODY;
-        B2.mask && ry > 0.6 && (slot = S.BODY_L);
+        B3.mask && ry > 0.6 && (slot = S.BODY_L);
         let sh = ry < 0.2 ? 148 : ry > 0.8 ? 104 : 126;
-        (B2.fluffy || B2.wiry) && (sh += hash2i(x, y, 3) < 0.35 ? 16 : hash2i(x, y, 4) < 0.25 ? -14 : 0), sp.set(x, y + drop(x), slot, sh);
+        (B3.fluffy || B3.wiry) && (sh += hash2i(x, y, 3) < 0.35 ? 16 : hash2i(x, y, 4) < 0.25 ? -14 : 0), sp.set(x, y + drop(x), slot, sh);
       }
-    if (B2.fluffy) for (let x = x0 + 1; x < xEnd; x++) hash2i(x, 0, 5) < 0.6 && sp.set(x, bodyTop - 1 + drop(x), S.BODY, 150);
+    if (B3.fluffy) for (let x = x0 + 1; x < xEnd; x++) hash2i(x, 0, 5) < 0.6 && sp.set(x, bodyTop - 1 + drop(x), S.BODY, 150);
     if (sit) for (let x = x0; x < x0 + 5; x++) sp.set(x, g, S.BODY_D, 100);
     legs.filter((L) => !L.far).forEach(drawLeg);
-    let hw = B2.head + 1, hx = xEnd - 2, hy = (sniff ? legTop - 2 : bodyTop - B2.head + 3) - (sit ? 2 : 0);
-    for (let y = hy; y < hy + B2.head; y++)
+    let hw = B3.head + 1, hx = xEnd - 2, hy = (sniff ? legTop - 2 : bodyTop - B3.head + 3) - (sit ? 2 : 0);
+    for (let y = hy; y < hy + B3.head; y++)
       for (let x = hx; x < hx + hw; x++)
-        (x === hx || x === hx + hw - 1) && (y === hy || y === hy + B2.head - 1) || sp.set(x, y, B2.mask && y > hy + 2 ? S.BODY_L : S.BODY, y === hy ? 148 : x === hx + hw - 1 ? 110 : 130);
-    let sy = hy + B2.head - 3;
+        (x === hx || x === hx + hw - 1) && (y === hy || y === hy + B3.head - 1) || sp.set(x, y, B3.mask && y > hy + 2 ? S.BODY_L : S.BODY, y === hy ? 148 : x === hx + hw - 1 ? 110 : 130);
+    let sy = hy + B3.head - 3;
     for (let x = hx + hw - 1; x < hx + hw + 2; x++)
       sp.set(x, sy, S.BODY, 132), sp.set(x, sy + 1, S.BODY_L, 116);
-    if (sp.set(hx + hw + 2, sy, S.NOSE, 128), sp.set(hx + hw + 1, sy - 1, S.BODY, 120), sp.set(hx + hw - 2, hy + 2, S.EYE, 128), run && sp.set(hx + hw, sy + 2, S.COLLAR, 150), B2.ears === "up")
+    if (sp.set(hx + hw + 2, sy, S.NOSE, 128), sp.set(hx + hw + 1, sy - 1, S.BODY, 120), sp.set(hx + hw - 2, hy + 2, S.EYE, 128), run && sp.set(hx + hw, sy + 2, S.COLLAR, 150), B3.ears === "up")
       sp.set(hx + 1, hy - 1, S.BODY_D, 128), sp.set(hx + 2, hy - 1, S.BODY_D, 116), sp.set(hx + 1, hy - 2, S.BODY_D, 110);
     else for (let y = hy + 1; y < hy + 5; y++)
       sp.set(hx, y, S.BODY_D, 104), sp.set(hx + 1, y, S.BODY_D, 116);
-    for (let y = hy + B2.head - 2; y < Math.min(legTop, hy + B2.head + 2); y++)
+    for (let y = hy + B3.head - 2; y < Math.min(legTop, hy + B3.head + 2); y++)
       sp.set(hx - 1, y, S.COLLAR, 128), sp.set(hx, y, S.COLLAR, 110);
     let ty = bodyTop + drop(x0), wag = f % 2;
-    if (B2.tail === "up") for (let k = 0; k < 4; k++)
+    if (B3.tail === "up") for (let k = 0; k < 4; k++)
       sp.set(x0 - 1 - (k >> 1) + (k === 3 ? wag : 0), ty - k, S.BODY, 134), sp.set(x0 - (k >> 1), ty - k, S.BODY, 116);
-    else if (B2.tail === "out") for (let k = 0; k < 5; k++) sp.set(x0 - 1 - k, ty + 1 + (k > 2 ? wag : 0), S.BODY, 128 - k * 4);
-    else if (B2.tail === "pom")
+    else if (B3.tail === "out") for (let k = 0; k < 5; k++) sp.set(x0 - 1 - k, ty + 1 + (k > 2 ? wag : 0), S.BODY, 128 - k * 4);
+    else if (B3.tail === "pom")
       sp.set(x0 - 1, ty, S.BODY, 128), sp.set(x0 - 2, ty - 1, S.BODY, 128), sp.ellipse(x0 - 3, ty - 3 - wag, 1.6, 1.6, S.BODY, 150);
     else for (let [dx, dy] of [[-1, 0], [-1, -1], [0, -2], [1, -3], [2, -3], [3, -2 + wag]])
       sp.set(x0 + dx, ty + dy, S.BODY_L, 140), sp.set(x0 + dx, ty + dy + 1, S.BODY, 120);
@@ -9991,8 +10088,8 @@ void main() {
       this.gl = gl, this.atlas = atlas, this.pal = pal, this.prog = createProgram(gl, VS, FS, "sprites"), this.shadowProg = createProgram(gl, SHADOW_VS2, SHADOW_FS2, "spriteShadow"), this.cap = 16384, this.data = new Float32Array(this.cap * STRIDE), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
       let corner = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, corner), gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
-      let B2 = STRIDE * 4, attr = (loc, n, off) => {
-        gl.enableVertexAttribArray(loc), gl.vertexAttribPointer(loc, n, gl.FLOAT, !1, B2, off * 4), gl.vertexAttribDivisor(loc, 1);
+      let B3 = STRIDE * 4, attr = (loc, n, off) => {
+        gl.enableVertexAttribArray(loc), gl.vertexAttribPointer(loc, n, gl.FLOAT, !1, B3, off * 4), gl.vertexAttribDivisor(loc, 1);
       };
       attr(1, 3, 0), attr(2, 4, 3), attr(3, 4, 7), attr(4, 2, 11), gl.bindVertexArray(null);
     }
@@ -10055,8 +10152,8 @@ void main() {
       this.gl = gl, this.prog = createProgram(gl, VS2, FS2, "lights"), this.cap = 4096, this.data = new Float32Array(this.cap * STRIDE2), this.count = 0, this.vao = gl.createVertexArray(), gl.bindVertexArray(this.vao);
       let cb = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, cb), gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 0, 1, 1, 0, 1]), gl.STATIC_DRAW), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, this.data.byteLength, gl.DYNAMIC_DRAW);
-      let B2 = STRIDE2 * 4, attr = (loc, n, off) => {
-        gl.enableVertexAttribArray(loc), gl.vertexAttribPointer(loc, n, gl.FLOAT, !1, B2, off * 4), gl.vertexAttribDivisor(loc, 1);
+      let B3 = STRIDE2 * 4, attr = (loc, n, off) => {
+        gl.enableVertexAttribArray(loc), gl.vertexAttribPointer(loc, n, gl.FLOAT, !1, B3, off * 4), gl.vertexAttribDivisor(loc, 1);
       };
       attr(1, 4, 0), attr(2, 4, 4), attr(3, 3, 8), gl.bindVertexArray(null);
     }
@@ -10336,7 +10433,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
         plastic: solid(CS.TRIM, 110),
         cargo: solid(CS.WHITE, 120)
       };
-      let S2 = this.solid, all = (t) => ({ px: t, nx: t, py: t, ny: t, pz: t }), box = (mb, x0, y0, z0, x1, y1, z1, F) => mb.box(x0, y0, z0, x1, y1, z1, F.px ? F : all(F), { topMat: MAT.SNOW, mat: 0 }), wheelTex = (r, rim = CS.CHROME) => {
+      let S2 = this.solid, all = (t) => ({ px: t, nx: t, py: t, ny: t, pz: t }), box = (mb, x0, y0, z0, x1, y1, z1, F2) => mb.box(x0, y0, z0, x1, y1, z1, F2.px ? F2 : all(F2), { topMat: MAT.SNOW, mat: 0 }), wheelTex = (r, rim = CS.CHROME) => {
         let D = Math.round(2 * r * 32);
         return reg(D, D, (sp) => {
           let c = (D - 1) / 2;
@@ -10815,6 +10912,607 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
   };
 
+  // src/render/personLayer.js
+  var CAP = 2048, IS2 = 24, J = { hip: [0, 0.065, 0.52], knee: [0, 0.065, 0.27], waist: [0, 0, 0.56], sh: [0, 0.165, 0.85], el: [0, 0.165, 0.665], neck: [0, 0, 0.88] }, B2 = { PELVIS: 0, TORSO: 1, HEAD: 2, UARM_L: 3, UARM_R: 4, FARM_L: 5, FARM_R: 6, THIGH_L: 7, THIGH_R: 8, SHIN_L: 9, SHIN_R: 10 }, FEATS = [
+    "hairShort",
+    "hairLong",
+    "hairPony",
+    "hairBun",
+    "hairAfro",
+    "hairSpiky",
+    "cap",
+    "fedora",
+    "beanie",
+    "police",
+    "hood",
+    "witch",
+    "helmet",
+    "upperSkin",
+    "upperTop",
+    "upperCoat",
+    "foreSkin",
+    "foreTop",
+    "foreCoat",
+    "coat",
+    "coatLong",
+    "puffer",
+    "thighCloth",
+    "thighSkin",
+    "shinCloth",
+    "shinSkin",
+    "skirt",
+    "dress",
+    "bagBack",
+    "bagShoulder",
+    "bagBrief",
+    "bagShop",
+    "scarf",
+    "glasses",
+    "tie",
+    "stripe",
+    "badge",
+    "cane",
+    "shirtSuit"
+  ], F = Object.fromEntries(FEATS.map((n, i) => [n, i]));
+  function buildMesh() {
+    let pos = [], nrm = [], info = [], idx = [], box = (x0, y0, z0, x1, y1, z1, slot, bone, feat = 255) => {
+      let v = (x, y, z) => [x, y, z], faces = [
+        [[1, 0, 0], [v(x1, y0, z0), v(x1, y1, z0), v(x1, y1, z1), v(x1, y0, z1)]],
+        [[-1, 0, 0], [v(x0, y1, z0), v(x0, y0, z0), v(x0, y0, z1), v(x0, y1, z1)]],
+        [[0, 1, 0], [v(x1, y1, z0), v(x0, y1, z0), v(x0, y1, z1), v(x1, y1, z1)]],
+        [[0, -1, 0], [v(x0, y0, z0), v(x1, y0, z0), v(x1, y0, z1), v(x0, y0, z1)]],
+        [[0, 0, 1], [v(x0, y0, z1), v(x1, y0, z1), v(x1, y1, z1), v(x0, y1, z1)]],
+        [[0, 0, -1], [v(x0, y1, z0), v(x1, y1, z0), v(x1, y0, z0), v(x0, y0, z0)]]
+      ];
+      for (let [n, q] of faces) {
+        let b = pos.length / 3;
+        for (let p of q)
+          pos.push(...p), nrm.push(...n), info.push(slot, bone, feat, 0);
+        idx.push(b, b + 1, b + 2, b, b + 2, b + 3);
+      }
+    }, sym = (fn) => {
+      fn(1, 0), fn(-1, 1);
+    };
+    sym((s, r) => {
+      let y = J.hip[1] * s, w = 0.04, th = r ? B2.THIGH_R : B2.THIGH_L, sh = r ? B2.SHIN_R : B2.SHIN_L;
+      box(-0.05, y - 0.042, 0, 0.1, y + 0.042, 0.055, S.SHOES, sh), box(-w, y - w, 0.05, w, y + w, J.knee[2] + 0.01, S.BOTTOM, sh, F.shinCloth), box(-w + 4e-3, y - w + 4e-3, 0.05, w - 4e-3, y + w - 4e-3, J.knee[2] + 0.01, S.SKIN, sh, F.shinSkin), box(-0.046, y - 0.046, J.knee[2] - 0.01, 0.046, y + 0.046, J.hip[2] + 0.04, S.BOTTOM, th, F.thighCloth), box(-0.042, y - 0.042, J.knee[2] - 0.01, 0.042, y + 0.042, J.hip[2] + 0.02, S.SKIN, th, F.thighSkin);
+    }), box(-0.07, -0.12, 0.48, 0.07, 0.12, 0.6, S.BOTTOM, B2.PELVIS), box(-0.085, -0.13, 0.4, 0.085, 0.13, 0.6, S.BOTTOM, B2.PELVIS, F.skirt), box(-0.1, -0.145, 0.33, 0.1, 0.145, 0.43, S.BOTTOM, B2.PELVIS, F.skirt), box(-0.088, -0.135, 0.38, 0.088, 0.135, 0.62, S.TOP, B2.PELVIS, F.dress), box(-0.104, -0.15, 0.3, 0.104, 0.15, 0.4, S.TOP, B2.PELVIS, F.dress), box(-0.068, -0.115, 0.56, 0.068, 0.115, 0.72, S.TOP, B2.TORSO), box(-0.075, -0.135, 0.7, 0.075, 0.135, 0.88, S.TOP, B2.TORSO), box(-0.078, -0.138, 0.66, 0.078, 0.138, 0.69, S.TOP2, B2.TORSO, F.stripe), box(-0.078, -0.138, 0.76, 0.078, 0.138, 0.79, S.TOP2, B2.TORSO, F.stripe), box(0.074, -0.05, 0.72, 0.079, 0.05, 0.88, S.WHITE, B2.TORSO, F.shirtSuit), box(0.077, -0.016, 0.66, 0.084, 0.016, 0.86, S.TOP2, B2.TORSO, F.tie), box(0.075, 0.05, 0.78, 0.082, 0.09, 0.82, S.ITEM, B2.TORSO, F.badge), box(-0.083, -0.144, 0.55, 0.083, 0.144, 0.885, S.COAT, B2.TORSO, F.coat), box(-0.088, -0.15, 0.33, 0.088, 0.15, 0.58, S.COAT, B2.PELVIS, F.coatLong), box(-0.098, -0.16, 0.54, 0.098, 0.16, 0.89, S.COAT, B2.TORSO, F.puffer), box(-0.1, -0.162, 0.66, 0.1, 0.162, 0.68, S.DARK, B2.TORSO, F.puffer), box(-0.1, -0.162, 0.77, 0.1, 0.162, 0.79, S.DARK, B2.TORSO, F.puffer), box(-0.088, -0.11, 0.84, 0.088, 0.11, 0.92, S.SCARF, B2.TORSO, F.scarf), box(0.06, 0.03, 0.66, 0.095, 0.07, 0.86, S.SCARF, B2.TORSO, F.scarf), box(-0.16, -0.1, 0.6, -0.075, 0.1, 0.84, S.BAG, B2.TORSO, F.bagBack), box(-0.06, 0.13, 0.5, 0.05, 0.17, 0.62, S.BAG, B2.PELVIS, F.bagShoulder), box(-0.012, 0.13, 0.6, 0.012, 0.15, 0.88, S.BAG, B2.TORSO, F.bagShoulder), box(-0.035, -0.035, 0.86, 0.035, 0.035, 0.92, S.SKIN, B2.TORSO), box(-0.085, -0.08, 0.9, 0.085, 0.08, 1.1, S.SKIN, B2.HEAD), box(0.084, 0.02, 0.985, 0.09, 0.052, 1.015, S.DARK, B2.HEAD), box(0.084, -0.052, 0.985, 0.09, -0.02, 1.015, S.DARK, B2.HEAD), box(0.084, -0.02, 0.935, 0.088, 0.02, 0.945, S.DARK, B2.HEAD), box(0.087, -0.07, 0.98, 0.094, 0.07, 1, S.DARK, B2.HEAD, F.glasses);
+    let hair = (f) => box(-0.095, -0.09, 1.04, 0.075, 0.09, 1.13, S.HAIR, B2.HEAD, f), back = (f, z0 = 0.94) => box(-0.097, -0.09, z0, -0.05, 0.09, 1.1, S.HAIR, B2.HEAD, f);
+    for (let f of [F.hairShort, F.hairLong, F.hairPony, F.hairBun, F.hairSpiky])
+      hair(f), back(f);
+    back(F.hairLong, 0.76), box(-0.08, 0.08, 0.84, 0.03, 0.095, 1.08, S.HAIR, B2.HEAD, F.hairLong), box(-0.08, -0.095, 0.84, 0.03, -0.08, 1.08, S.HAIR, B2.HEAD, F.hairLong), box(-0.15, -0.03, 0.92, -0.09, 0.03, 1.07, S.HAIR, B2.HEAD, F.hairPony), box(-0.1, -0.045, 1.12, -0.02, 0.045, 1.19, S.HAIR, B2.HEAD, F.hairBun), box(-0.125, -0.125, 0.95, 0.07, 0.125, 1.21, S.HAIR, B2.HEAD, F.hairAfro);
+    for (let [x, y] of [[-0.06, -0.05], [0, 0.04], [0.04, -0.04], [-0.03, 0.06]]) box(x - 0.02, y - 0.02, 1.12, x + 0.02, y + 0.02, 1.18, S.HAIR, B2.HEAD, F.hairSpiky);
+    return box(-0.092, -0.09, 1.05, 0.08, 0.09, 1.14, S.HAT, B2.HEAD, F.cap), box(0.07, -0.07, 1.05, 0.17, 0.07, 1.07, S.HAT, B2.HEAD, F.cap), box(-0.14, -0.14, 1.07, 0.14, 0.14, 1.09, S.HAT, B2.HEAD, F.fedora), box(-0.085, -0.085, 1.09, 0.085, 0.085, 1.18, S.HAT, B2.HEAD, F.fedora), box(-0.083, -0.083, 1.09, 0.083, 0.083, 1.11, S.DARK, B2.HEAD, F.fedora), box(-0.096, -0.092, 1.02, 0.088, 0.092, 1.16, S.HAT, B2.HEAD, F.beanie), box(-0.04, -0.03, 1.16, 0.02, 0.03, 1.19, S.WHITE, B2.HEAD, F.beanie), box(-0.095, -0.092, 1.05, 0.085, 0.092, 1.15, S.HAT, B2.HEAD, F.police), box(-0.1, -0.1, 1.15, 0.1, 0.1, 1.18, S.HAT, B2.HEAD, F.police), box(0.07, -0.08, 1.05, 0.15, 0.08, 1.065, S.DARK, B2.HEAD, F.police), box(0.085, -0.02, 1.09, 0.1, 0.02, 1.13, S.ITEM, B2.HEAD, F.police), box(-0.1, -0.098, 0.93, 0.07, 0.098, 1.15, S.COAT, B2.HEAD, F.hood), box(-0.16, -0.16, 1.08, 0.16, 0.16, 1.1, S.HAT, B2.HEAD, F.witch), box(-0.075, -0.075, 1.1, 0.075, 0.075, 1.2, S.HAT, B2.HEAD, F.witch), box(-0.05, -0.05, 1.2, 0.05, 0.05, 1.28, S.HAT, B2.HEAD, F.witch), box(-0.025, -0.025, 1.28, 0.025, 0.025, 1.34, S.HAT, B2.HEAD, F.witch), box(-0.1, -0.1, 1, 0.095, 0.1, 1.17, S.HAT, B2.HEAD, F.helmet), sym((s, r) => {
+      let y = J.sh[1] * s, ua = r ? B2.UARM_R : B2.UARM_L, fa = r ? B2.FARM_R : B2.FARM_L, w = 0.036;
+      box(-w, y - w, J.el[2] - 0.01, w, y + w, J.sh[2] + 0.03, S.SKIN, ua, F.upperSkin), box(-w - 4e-3, y - w - 4e-3, J.el[2] - 0.01, w + 4e-3, y + w + 4e-3, J.sh[2] + 0.035, S.TOP, ua, F.upperTop), box(-w - 0.012, y - w - 0.012, J.el[2] - 0.015, w + 0.012, y + w + 0.012, J.sh[2] + 0.04, S.COAT, ua, F.upperCoat), box(-0.032, y - 0.032, 0.5, 0.032, y + 0.032, J.el[2] + 0.01, S.SKIN, fa, F.foreSkin), box(-0.036, y - 0.036, 0.5, 0.036, y + 0.036, J.el[2] + 0.01, S.TOP, fa, F.foreTop), box(-0.045, y - 0.045, 0.5, 0.045, y + 0.045, J.el[2] + 0.015, S.COAT, fa, F.foreCoat), box(-0.03, y - 0.03, 0.445, 0.035, y + 0.03, 0.505, S.SKIN, fa), r && (box(-0.07, y - 0.025, 0.3, 0.08, y + 0.025, 0.42, S.BAG, fa, F.bagBrief), box(-5e-3, y - 0.01, 0.42, 5e-3, y + 0.01, 0.46, S.DARK, fa, F.bagBrief), box(-0.06, y - 0.04, 0.28, 0.06, y + 0.04, 0.45, S.ITEM, fa, F.bagShop), box(0, y - 0.012, 0, 0.024, y + 0.012, 0.47, S.DARK, fa, F.cane));
+    }), { pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) };
+  }
+  var HEAD4 = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DShadow;
+`, POSE = `
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in uvec4 aInfo; // palette slot, bone, feature
+layout(location=3) in vec4 iA; // x, y, z, heading
+layout(location=4) in vec4 iB; // palette row, alpha, scale, bob
+layout(location=5) in vec4 iC; // hip L, hip R, knee L, knee R
+layout(location=6) in vec4 iD; // shoulder L, R, elbow L, R
+layout(location=7) in vec4 iE; // lean, arm out L, arm out R, head pitch
+layout(location=8) in vec4 iF; // feature masks (2), lie, z drop
+// pitch: a rotation in the x-z plane, positive swings a hanging limb forward (+x)
+vec3 P(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x * c - v.z * s, v.y, v.x * s + v.z * c); }
+// roll: a rotation in the y-z plane, positive swings a hanging limb out to +y
+vec3 R(vec3 v, float a) { float c = cos(a), s = sin(a); return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c); }
+const vec3 JH = vec3(0.0, ${J.hip[1]}, ${J.hip[2]}), JK = vec3(0.0, ${J.knee[1]}, ${J.knee[2]});
+const vec3 JS = vec3(0.0, ${J.sh[1]}, ${J.sh[2]}), JE = vec3(0.0, ${J.el[1]}, ${J.el[2]});
+const vec3 JW = vec3(0.0, 0.0, ${J.waist[2]}), JN = vec3(0.0, 0.0, ${J.neck[2]});
+bool shown(uint f) {
+  if (f == 255u) return true;
+  uint m = f < 24u ? uint(iF.x) : uint(iF.y);
+  return ((m >> (f % 24u)) & 1u) == 1u;
+}
+// local (upright, facing +x) -> posed; also turns the normal
+vec3 pose(vec3 p, inout vec3 n, uint bone) {
+  float side = (bone == 3u || bone == 5u || bone == 7u || bone == 9u) ? 1.0 : -1.0;
+  vec3 jh = vec3(JH.x, JH.y * side, JH.z), jk = vec3(JK.x, JK.y * side, JK.z);
+  vec3 js = vec3(JS.x, JS.y * side, JS.z), je = vec3(JE.x, JE.y * side, JE.z);
+  bool left = side > 0.0;
+  if (bone >= 7u) {
+    // legs
+    float hip = left ? iC.x : iC.y, knee = left ? iC.z : iC.w;
+    if (bone >= 9u) { p = jk + P(p - jk, -knee); n = P(n, -knee); }
+    p = jh + P(p - jh, hip); n = P(n, hip);
+    return p;
+  }
+  if (bone >= 1u) {
+    if (bone >= 3u) {
+      float sh = left ? iD.x : iD.y, el = left ? iD.z : iD.w, out_ = (left ? iE.y : -iE.z);
+      if (bone >= 5u) { p = je + P(p - je, el); n = P(n, el); }
+      p = js + R(P(p - js, sh), out_); n = R(P(n, sh), out_);
+    }
+    if (bone == 2u) { p = JN + P(p - JN, iE.w); n = P(n, iE.w); }
+    p = JW + P(p - JW, iE.x); n = P(n, iE.x);
+  }
+  return p;
+}
+vec3 place(vec3 lp, inout vec3 n) {
+  // lying down: the whole figure tips over backwards about its feet
+  float L = iF.z * 1.5708;
+  lp = P(lp, L); n = P(n, L);
+  lp.z += iF.z * 0.1;
+  lp *= iB.z;
+  lp.z += iB.w + iF.w;
+  float c = cos(iA.w), s = sin(iA.w);
+  n = vec3(n.x * c - n.y * s, n.x * s + n.y * c, n.z);
+  return vec3(iA.x + lp.x * c - lp.y * s, iA.y + lp.x * s + lp.y * c, iA.z + lp.z);
+}
+`, VS4 = HEAD4 + POSE + `
+uniform mat4 uViewProj;
+uniform vec2 uBuf;
+out vec3 vWorld;
+flat out vec3 vNrm;
+flat out vec4 vB;
+flat out uint vSlot;
+void main() {
+  if (!shown(aInfo.z)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vec3 n = aNrm;
+  vec3 wp = place(pose(aPos, n, aInfo.y), n);
+  vWorld = wp; vNrm = n; vB = iB; vSlot = aInfo.x;
+  // the figure moves in whole pixels, so it does not shimmer as it walks
+  vec4 cc = uViewProj * vec4(iA.xyz, 1.0);
+  vec2 px = (cc.xy * 0.5 + 0.5) * uBuf;
+  vec2 snap = (floor(px + 0.5) - px) / uBuf * 2.0;
+  vec4 p = uViewProj * vec4(wp, 1.0);
+  p.xy += snap;
+  gl_Position = p;
+}`, FS4 = HEAD4 + `
+in vec3 vWorld;
+flat in vec3 vNrm;
+flat in vec4 vB;
+flat in uint vSlot;
+uniform sampler2D uPal;
+uniform sampler2DShadow uShadow;
+uniform sampler2D uLightMap;
+uniform sampler2D uNoise;
+uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
+uniform float uShadowOn;
+uniform vec3 uSunDir, uSunCol, uAmb, uFace;
+uniform vec2 uRot;
+uniform vec4 uCloud;
+uniform float uFlash;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oGlow;
+float bayer4(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.x + q.y * 4;
+  float m[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
+  return (m[i] + 0.5) / 16.0;
+}
+float faceShade(vec3 n) {
+  vec2 r = vec2(uRot.x * n.x - uRot.y * n.y, uRot.y * n.x + uRot.x * n.y);
+  float wl = max(r.y, 0.0), wr = max(r.x, 0.0);
+  float side = mix(uFace.y, uFace.z, wr / (wl + wr + 1e-4));
+  return mix(side, uFace.x, clamp(n.z, 0.0, 1.0));
+}
+void main() {
+  if (vB.y < 0.999 && bayer4(gl_FragCoord.xy) >= vB.y) discard;
+  vec4 pc = texelFetch(uPal, ivec2(int(vSlot), int(vB.x + 0.5)), 0);
+  vec3 albedo = pc.rgb;
+  vec3 n = normalize(vNrm);
+  float ndl = dot(n, uSunDir);
+  float sh = 1.0;
+  if (uShadowOn > 0.5 && ndl > 0.0) {
+    float tx = uShadowK.x, sinT = sqrt(max(1.0 - ndl * ndl, 0.0));
+    vec4 sp = uShadowMat * vec4(vWorld + n * tx * (1.0 + 1.6 * sinT) + uSunDir * tx * 0.5, 1.0);
+    vec3 s = sp.xyz * 0.5 + 0.5;
+    float bias = tx * (0.6 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
+  } else if (ndl <= 0.0) sh = 0.0;
+  float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
+  float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
+  vec3 lm = vWorld.z < -0.5 ? vec3(0.0) : texture(uLightMap, vWorld.xy / vec2(${419 .toFixed(1)}, ${986 .toFixed(1)})).rgb;
+  // people read a touch brighter than the buildings round them
+  vec3 light = uAmb * faceShade(n) * 1.08 + uSunCol * max(ndl, 0.0) * sh * cl + lm * (0.7 + 0.3 * max(n.z, 0.0)) + vec3(uFlash);
+  if (vWorld.z < -0.5) light = light * 0.4 + vec3(0.62, 0.6, 0.55); // the lit subway platform
+  oColor = vec4(albedo * light, 1.0);
+  oGlow = vec4(0.0, 0.0, 0.0, 1.0);
+}`, SHADOW_VS4 = HEAD4 + POSE + `
+uniform mat4 uShadowVP;
+void main() {
+  if (!shown(aInfo.z)) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  vec3 n = aNrm;
+  gl_Position = uShadowVP * vec4(place(pose(aPos, n, aInfo.y), n), 1.0);
+}`, SHADOW_FS4 = `#version 300 es
+precision highp float;
+out vec4 o;
+void main() { o = vec4(1.0); }`;
+  function outfitMask(tpl) {
+    let on = [], h = tpl.hair, hat = tpl.hat, covered = hat === "beanie" || hat === "helmet" || hat === "hood" || hat === "police";
+    if (h && h !== "bald") {
+      let k = { short: "hairShort", long: "hairLong", pony: "hairPony", bun: "hairBun", afro: "hairAfro", spiky: "hairSpiky" }[h];
+      k && !(covered && (k === "hairShort" || k === "hairSpiky" || k === "hairBun")) && on.push(k === "hairAfro" && hat ? "hairShort" : k), covered && k === "hairLong" && on.push("hairLong");
+    }
+    hat && F[hat] != null && on.push(hat);
+    let coat = tpl.coat, longSleeve = coat || tpl.top === "long" || tpl.top === "suit" || tpl.top === "uniform";
+    on.push(coat ? "upperCoat" : tpl.top === "tank" ? "upperSkin" : "upperTop"), on.push(coat ? "foreCoat" : longSleeve ? "foreTop" : "foreSkin"), coat === "puffer" ? on.push("puffer") : coat && on.push("coat"), coat === "long" && on.push("coatLong");
+    let b = tpl.bottom;
+    b === "pants" ? on.push("thighCloth", "shinCloth") : b === "shorts" ? on.push("thighCloth", "shinSkin") : on.push("thighSkin", "shinSkin", b === "dress" ? "dress" : "skirt");
+    let bag = { back: "bagBack", shoulder: "bagShoulder", brief: "bagBrief", shopping: "bagShop" }[tpl.bag];
+    bag && on.push(bag), tpl.scarf && on.push("scarf"), tpl.glasses && on.push("glasses"), tpl.top === "suit" && !coat && on.push("tie", "shirtSuit"), tpl.top === "stripe" && !coat && on.push("stripe"), tpl.top === "uniform" && on.push("badge"), tpl.cane && on.push("cane");
+    let m0 = 0, m1 = 0;
+    for (let k of on) {
+      let i = F[k];
+      i < 24 ? m0 |= 1 << i : m1 |= 1 << i - 24;
+    }
+    return [m0, m1];
+  }
+  var PersonLayer = class {
+    constructor(gl, city) {
+      this.gl = gl, this.city = city, this.prog = createProgram(gl, VS4, FS4, "people3d"), this.shadowProg = createProgram(gl, SHADOW_VS4, SHADOW_FS4, "people3dShadow");
+      let m = buildMesh();
+      this.count = m.idx.length;
+      let vao = this.vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      let buf = (data, loc, n, type, int) => {
+        let b = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, b), gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW), gl.enableVertexAttribArray(loc), int ? gl.vertexAttribIPointer(loc, n, type, 0, 0) : gl.vertexAttribPointer(loc, n, type, !1, 0, 0);
+      };
+      buf(m.pos, 0, 3, gl.FLOAT), buf(m.nrm, 1, 3, gl.FLOAT), buf(m.info, 2, 4, gl.UNSIGNED_BYTE, !0);
+      let ib = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib), gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAP * IS2 * 4, gl.DYNAMIC_DRAW);
+      for (let a = 0; a < 6; a++)
+        gl.enableVertexAttribArray(3 + a), gl.vertexAttribPointer(3 + a, 4, gl.FLOAT, !1, IS2 * 4, a * 16), gl.vertexAttribDivisor(3 + a, 1);
+      gl.bindVertexArray(null), this.data = new Float32Array(CAP * IS2), this.n = 0;
+    }
+    begin() {
+      this.n = 0;
+    }
+    // one person this frame, in its current animation
+    add(p, o = {}) {
+      if (this.n >= CAP) return;
+      p.mask3 || (p.mask3 = outfitMask(p.tpl || {}));
+      let anim = o.anim ?? p.anim, t = p.animT || 0, hd = Math.atan2(p.dy || 0, p.dx || 1);
+      o.face && (hd = Math.atan2(o.face[1], o.face[0])), p.h3 == null && (p.h3 = hd);
+      let dh = hd - p.h3;
+      for (; dh > Math.PI; ) dh -= 2 * Math.PI;
+      for (; dh < -Math.PI; ) dh += 2 * Math.PI;
+      p.h3 += dh * Math.min(1, (o.dt ?? 0.016) * 14);
+      let hipL = 0, hipR = 0, kL = 0, kR = 0, sL = 0.04, sR = 0.04, eL = 0.12, eR = 0.12, lean = 0, outL = 0.06, outR = 0.06, head = 0, lie = 0, drop = 0, bob = 0, dist5 = o.dist ?? p.dist ?? 0;
+      switch (anim) {
+        case "walk":
+        case "skate": {
+          let ph = dist5 / 0.82 * 2 * Math.PI, s = Math.sin(ph);
+          hipL = 0.42 * s, hipR = -0.42 * s, kL = Math.max(0, -Math.sin(ph + 0.6)) * 0.55 + 0.05, kR = Math.max(0, Math.sin(ph + 0.6)) * 0.55 + 0.05, sL = -0.38 * s, sR = 0.38 * s, eL = 0.2 + Math.max(0, -s) * 0.25, eR = 0.2 + Math.max(0, s) * 0.25, bob = Math.abs(Math.cos(ph)) * 0.018, lean = 0.04;
+          break;
+        }
+        case "run":
+        case "dribble": {
+          let ph = dist5 / 1.25 * 2 * Math.PI, s = Math.sin(ph);
+          hipL = 0.75 * s, hipR = -0.75 * s, kL = 0.25 + Math.max(0, -Math.sin(ph + 0.5)) * 1.1, kR = 0.25 + Math.max(0, Math.sin(ph + 0.5)) * 1.1, sL = -0.7 * s, sR = 0.7 * s, eL = 1.3, eR = 1.3, lean = 0.22, bob = Math.abs(Math.cos(ph)) * 0.04, anim === "dribble" && (sR = 0.5, eR = 0.6 + Math.abs(Math.sin(t * 9)) * 0.4);
+          break;
+        }
+        case "sit":
+          hipL = hipR = 1.5, kL = kR = 1.5, sL = sR = 0.35, eL = eR = 0.9, drop = -0.44, lean = -0.05;
+          break;
+        case "crouch":
+          hipL = hipR = 1.2, kL = kR = 2, lean = 0.45, sL = sR = 0.5, eL = eR = 0.6, drop = -0.22;
+          break;
+        case "down":
+        case "lie":
+          lie = 1, sL = 0.2, sR = -0.3, outL = 0.5, outR = 0.4, hipL = 0.15, hipR = -0.1;
+          break;
+        case "wave":
+          sR = 0.2, outR = 2.4 + Math.sin(t * 10) * 0.35, eR = 0.4;
+          break;
+        case "aim":
+        case "shoot":
+          sR = 1.5, eR = 0.05, sL = 1.2, eL = 0.35, outL = -0.35, head = 0.05, (p.animFrame || 0) > 0 && (sR = 1.75, eR = 0.25);
+          break;
+        case "throw":
+          sR = p.animFrame ? 1.6 : -1.3, eR = 0.5;
+          break;
+        case "phone":
+          sR = 0.4, eR = 2.4, head = 0.15;
+          break;
+        default: {
+          let b = Math.sin(t * 1.6);
+          sL = 0.04 + b * 0.02, sR = 0.04 - b * 0.02, bob = b * 4e-3, head = Math.sin(t * 0.37) * 0.05, p.feeding && (sR = 0.7, eR = 0.6);
+        }
+      }
+      p.elder && (lean += 0.14, head -= 0.08), p.tpl?.cane && anim !== "down" && (sR = Math.max(sR, 0.25), eR = 0.1), p.umbrella && anim !== "down" && anim !== "sit" && (sL = 0.9, eL = 1.2), p.staggerT > 0 && (lean -= p.staggerT * 0.6);
+      let d = this.data, k = this.n * IS2, alpha = o.alpha ?? p.alpha;
+      d[k] = p.x, d[k + 1] = p.y, d[k + 2] = p.z, d[k + 3] = p.h3, d[k + 4] = p.pal, d[k + 5] = Math.max(0, Math.min(1, alpha)), d[k + 6] = p.kid ? 0.74 : p.elder ? 0.95 : 1, d[k + 7] = bob, d[k + 8] = hipL, d[k + 9] = hipR, d[k + 10] = kL, d[k + 11] = kR, d[k + 12] = sL, d[k + 13] = sR, d[k + 14] = eL, d[k + 15] = eR, d[k + 16] = lean, d[k + 17] = outL, d[k + 18] = outR, d[k + 19] = head, d[k + 20] = p.mask3[0], d[k + 21] = p.mask3[1], d[k + 22] = lie, d[k + 23] = drop, this.n++;
+    }
+    end() {
+      if (!this.n) return;
+      let gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.data.subarray(0, this.n * IS2));
+    }
+    shadow(ctx) {
+      if (!this.n) return;
+      let gl = this.gl, p = this.shadowProg;
+      gl.useProgram(p.program), gl.uniformMatrix4fv(p.u.uShadowVP, !1, ctx.shadowMat), gl.bindVertexArray(this.vao), gl.drawElementsInstanced(gl.TRIANGLES, this.count, gl.UNSIGNED_INT, 0, this.n);
+    }
+    draw(ctx) {
+      if (!this.n) return;
+      let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), gl.bindVertexArray(this.vao), gl.drawElementsInstanced(gl.TRIANGLES, this.count, gl.UNSIGNED_INT, 0, this.n);
+    }
+  };
+
+  // src/render/treeLayer.js
+  var IS3 = 8, SPECIES = ["plane", "locust", "oak", "elm", "cherry", "pine"], PI12 = Math.PI;
+  function builder() {
+    let pos = [], nrm = [], info = [], idx = [], tri = (a, b, c, slot, leaf) => {
+      let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], l = Math.hypot(...n) || 1;
+      n = n.map((x) => x / l);
+      let base = pos.length / 3;
+      for (let p of [a, b, c])
+        pos.push(...p), nrm.push(...n), info.push(slot, leaf, 0, 0);
+      idx.push(base, base + 1, base + 2);
+    }, limb = (a, b, ra, rb, k = 6) => {
+      let d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], L = Math.hypot(...d) || 1, w = d.map((x) => x / L), u = Math.abs(w[2]) < 0.95 ? [w[1], -w[0], 0] : [1, 0, 0], ul = Math.hypot(...u);
+      u = u.map((x) => x / ul);
+      let v = [w[1] * u[2] - w[2] * u[1], w[2] * u[0] - w[0] * u[2], w[0] * u[1] - w[1] * u[0]], ring = (o, r, j) => {
+        let t = j / k * 2 * PI12, c = Math.cos(t) * r, s = Math.sin(t) * r;
+        return [o[0] + u[0] * c + v[0] * s, o[1] + u[1] * c + v[1] * s, o[2] + u[2] * c + v[2] * s];
+      };
+      for (let j = 0; j < k; j++) {
+        let a0 = ring(a, ra, j), a1 = ring(a, ra, j + 1), b0 = ring(b, rb, j), b1 = ring(b, rb, j + 1);
+        tri(a0, b0, a1, S.TRUNK, 0), tri(a1, b0, b1, S.TRUNK, 0);
+      }
+    }, ICO = (() => {
+      let t = (1 + Math.sqrt(5)) / 2;
+      return { v: [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]].map((p) => {
+        let l = Math.hypot(...p);
+        return p.map((x) => x / l);
+      }), f: [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]] };
+    })();
+    return { limb, blob: (c, rx, rz, rng) => {
+      let vs = ICO.v.map((p) => {
+        let j = 0.82 + rng.next() * 0.3;
+        return [c[0] + p[0] * rx * j, c[1] + p[1] * rx * j, c[2] + p[2] * rz * j];
+      });
+      for (let [a, b, d] of ICO.f) tri(vs[a], vs[d], vs[b], S.LEAF_M, 1);
+    }, cone: (c, r, z0, z1, k, rng) => {
+      let top = [c[0], c[1], z1], rim = [];
+      for (let j = 0; j < k; j++) {
+        let t = j / k * 2 * PI12 + rng.next() * 0.2, rr = r * (0.85 + rng.next() * 0.25);
+        rim.push([c[0] + Math.cos(t) * rr, c[1] + Math.sin(t) * rr, z0 + (rng.next() - 0.5) * 0.08]);
+      }
+      for (let j = 0; j < k; j++) {
+        let a = rim[j], b = rim[(j + 1) % k];
+        tri(a, top, b, S.LEAF_M, 1), tri(b, [c[0], c[1], z0 + 0.12], a, S.LEAF_D, 1);
+      }
+    }, done: () => ({ pos: new Float32Array(pos), nrm: new Float32Array(nrm), info: new Uint8Array(info), idx: new Uint32Array(idx) }) };
+  }
+  var SHAPE = {
+    plane: { trunk: 1.25, cx: 1.25, cz: 1.05, cy: 2.35, blobs: 8, br: 0.5, rt: 0.13 },
+    locust: { trunk: 1.35, cx: 1.05, cz: 0.95, cy: 2.3, blobs: 11, br: 0.36, rt: 0.1, airy: !0 },
+    oak: { trunk: 1.1, cx: 1.4, cz: 1.05, cy: 2.2, blobs: 9, br: 0.55, rt: 0.15 },
+    elm: { trunk: 1.5, cx: 1.75, cz: 1.15, cy: 3.15, blobs: 11, br: 0.58, rt: 0.15, vase: !0 },
+    cherry: { trunk: 0.85, cx: 1.2, cz: 0.75, cy: 1.65, blobs: 8, br: 0.45, rt: 0.1 }
+  };
+  function treeMesh(sp, variant, lo) {
+    let rng = new RNG(5e3 + variant * 131 + sp.length * 17), M = builder();
+    if (sp === "pine") {
+      let h = 3.2 + rng.next() * 0.4;
+      M.limb([0, 0, 0], [0, 0, 0.9], 0.11, 0.08, 6);
+      let tiers = lo ? 2 : 4;
+      for (let k = 0; k < tiers; k++) {
+        let t = k / tiers, z0 = 0.45 + t * (h - 1.1), r = 1 * (1 - t * 0.72);
+        M.cone([0, 0], r, z0, z0 + (h - 0.45) / tiers + 0.55, lo ? 6 : 8, rng);
+      }
+      return M.done();
+    }
+    let s = SHAPE[sp], top = [0, 0, s.trunk + 0.15];
+    M.limb([0, 0, 0], top, s.rt * 1.25, s.rt * 0.85, lo ? 5 : 7);
+    let n = lo ? 3 : s.blobs, centers = [];
+    for (let i = 0; i < n; i++) {
+      let a = i / n * 2 * PI12 + rng.next() * 0.6, up = i === 0 ? 1 : rng.next(), rr = i === 0 ? 0 : (s.vase ? 0.62 : 0.52) + rng.next() * 0.3, c = [Math.cos(a) * s.cx * rr, Math.sin(a) * s.cx * rr, s.cy + (up - 0.4) * s.cz * (i === 0 ? 0.55 : 0.8) - (s.vase ? 0 : rr * 0.2)];
+      centers.push(c);
+      let r = (s.airy ? 0.45 : 0.6) * (lo ? 1.6 : 1) * (0.85 + rng.next() * 0.35) * (s.cx / 1.25) ** 0.6;
+      M.blob(c, r, r * 0.82, rng);
+    }
+    if (!lo) {
+      for (let c of centers.slice(1)) {
+        let mid = [c[0] * 0.55, c[1] * 0.55, top[2] + (c[2] - top[2]) * 0.55];
+        M.limb(top, mid, s.rt * 0.6, s.rt * 0.4, 4), M.limb(mid, [c[0] * 0.92, c[1] * 0.92, c[2] - 0.1], s.rt * 0.4, s.rt * 0.18, 4);
+      }
+      M.limb(top, [0, 0, s.cy + 0.25], s.rt * 0.7, s.rt * 0.25, 4);
+    }
+    return M.done();
+  }
+  var HEAD5 = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp sampler2DShadow;
+`, PLACE = `
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNrm;
+layout(location=2) in uvec4 aInfo; // palette slot, leaf
+layout(location=3) in vec4 iA; // x, y, z, turn
+layout(location=4) in vec4 iB; // scale, palette row
+vec3 turn(vec3 v) { float c = cos(iA.w), s = sin(iA.w); return vec3(v.x * c - v.y * s, v.x * s + v.y * c, v.z); }
+`, VS5 = HEAD5 + PLACE + `
+uniform mat4 uViewProj;
+uniform vec2 uBuf;
+out vec3 vWorld;
+out vec3 vLocal;
+flat out vec3 vNrm;
+flat out uvec2 vInfo;
+flat out float vRow;
+void main() {
+  vec3 wp = iA.xyz + turn(aPos) * iB.x;
+  vWorld = wp; vLocal = aPos * iB.x; vNrm = turn(aNrm); vInfo = aInfo.xy; vRow = iB.y;
+  vec4 cc = uViewProj * vec4(iA.xyz, 1.0);
+  vec2 px = (cc.xy * 0.5 + 0.5) * uBuf;
+  vec2 snap = (floor(px + 0.5) - px) / uBuf * 2.0;
+  vec4 p = uViewProj * vec4(wp, 1.0);
+  p.xy += snap;
+  gl_Position = p;
+}`, FS5 = HEAD5 + `
+in vec3 vWorld;
+in vec3 vLocal;
+flat in vec3 vNrm;
+flat in uvec2 vInfo;
+flat in float vRow;
+uniform sampler2D uPal;
+uniform sampler2DShadow uShadow;
+uniform sampler2D uLightMap;
+uniform sampler2D uNoise;
+uniform mat4 uShadowMat;
+uniform vec2 uShadowK;
+uniform vec2 uDither;
+uniform float uShadowOn;
+uniform vec3 uSunDir, uSunCol, uAmb, uFace;
+uniform vec2 uRot;
+uniform vec4 uCloud;
+uniform float uFlash;
+layout(location=0) out vec4 oColor;
+layout(location=1) out vec4 oGlow;
+float bayer4(vec2 p) {
+  ivec2 q = ivec2(mod(p, 4.0));
+  int i = q.x + q.y * 4;
+  float m[16] = float[16](0.,8.,2.,10.,12.,4.,14.,6.,3.,11.,1.,9.,15.,7.,13.,5.);
+  return (m[i] + 0.5) / 16.0;
+}
+float hash13(vec3 p3) { p3 = fract(p3 * 0.1031); p3 += dot(p3, p3.zyx + 31.32); return fract((p3.x + p3.y) * p3.z); }
+float faceShade(vec3 n) {
+  vec2 r = vec2(uRot.x * n.x - uRot.y * n.y, uRot.y * n.x + uRot.x * n.y);
+  float wl = max(r.y, 0.0), wr = max(r.x, 0.0);
+  float side = mix(uFace.y, uFace.z, wr / (wl + wr + 1e-4));
+  return mix(side, uFace.x, clamp(n.z, 0.0, 1.0));
+}
+vec4 pal(uint slot) { return texelFetch(uPal, ivec2(int(slot), int(vRow + 0.5)), 0); }
+void main() {
+  vec3 n = normalize(vNrm);
+  vec3 albedo;
+  if (vInfo.y == 1u) {
+    // foliage: chunky speckles of light, mid and dark leaves, lighter on top; gone in winter
+    if (pal(${S.LEAF_M}u).a < 0.1) discard;
+    vec3 q = floor(vWorld * 14.0);
+    float h = hash13(q), h2 = hash13(q + 17.0);
+    float v = h * 0.7 + n.z * 0.4 + 0.12;
+    // holes at the crown's edge, so it reads as leaves rather than a solid shell
+    if (h2 > 0.93 && n.z < 0.6) discard;
+    albedo = (v > 0.66 ? pal(${S.LEAF_L}u) : v > 0.28 ? pal(${S.LEAF_M}u) : pal(${S.LEAF_D}u)).rgb;
+    vec4 bl = pal(${S.BLOSSOM}u);
+    if (h2 > 0.84 && h2 <= 0.93 && bl.a > 0.1) albedo = bl.rgb;
+  } else {
+    // bark, with snow (or the light top colour) on whatever faces up
+    float h = hash13(floor(vLocal * vec3(18.0, 18.0, 6.0)));
+    albedo = (n.z > 0.55 ? pal(${S.BR_TOP}u) : pal(${S.TRUNK}u)).rgb * (0.88 + h * 0.2);
+  }
+  float ndl = dot(n, uSunDir);
+  float sh = 1.0;
+  if (uShadowOn > 0.5 && ndl > 0.0) {
+    float tx = uShadowK.x, sinT = sqrt(max(1.0 - ndl * ndl, 0.0));
+    vec4 sp = uShadowMat * vec4(vWorld + n * tx * (1.5 + 1.6 * sinT) + uSunDir * tx * 0.8, 1.0);
+    vec3 s = sp.xyz * 0.5 + 0.5;
+    float bias = tx * (1.0 + 1.1 * min(sinT / max(ndl, 0.05), 5.0)) * uShadowK.y;
+    if (s.x > 0.0 && s.y > 0.0 && s.x < 1.0 && s.y < 1.0 && s.z < 1.0) sh = step(bayer4(vec2(floor(gl_FragCoord.x) + uDither.x, uDither.y - floor(gl_FragCoord.y))), texture(uShadow, vec3(s.xy, s.z - bias)));
+  } else if (ndl <= 0.0) sh = 0.0;
+  // leaves let light through and scatter it: the crown is never dark on its shaded side
+  if (vInfo.y == 1u) { ndl = ndl * 0.55 + 0.45; sh = sh * 0.6 + 0.4; }
+  float cn = texture(uNoise, vWorld.xy * 0.006 + uCloud.xy).r * 0.65 + texture(uNoise, vWorld.xy * 0.017 + uCloud.xy * 1.7).r * 0.35;
+  float cl = 1.0 - smoothstep(1.0 - uCloud.z - 0.08, 1.0 - uCloud.z + 0.08, cn) * uCloud.w;
+  vec3 lm = texture(uLightMap, vWorld.xy / vec2(${419 .toFixed(1)}, ${986 .toFixed(1)})).rgb * clamp(1.0 - (vWorld.z - 0.3) / 6.0, 0.0, 1.0);
+  vec3 light = uAmb * faceShade(n) * (vInfo.y == 1u ? 1.2 : 1.0) + uSunCol * max(ndl, 0.0) * sh * cl + lm * 0.8 + vec3(uFlash);
+  oColor = vec4(albedo * light, 1.0);
+  oGlow = vec4(0.0, 0.0, 0.0, 1.0);
+}`, SHADOW_VS5 = HEAD5 + PLACE + `
+uniform mat4 uShadowVP;
+flat out uint vLeaf;
+flat out float vRow;
+void main() {
+  vLeaf = aInfo.y; vRow = iB.y;
+  gl_Position = uShadowVP * vec4(iA.xyz + turn(aPos) * iB.x, 1.0);
+}`, SHADOW_FS5 = `#version 300 es
+precision highp float;
+flat in uint vLeaf;
+flat in float vRow;
+uniform sampler2D uPal;
+out vec4 o;
+void main() {
+  // bare in winter: only the wood casts
+  if (vLeaf == 1u && texelFetch(uPal, ivec2(${S.LEAF_M}, int(vRow + 0.5)), 0).a < 0.1) discard;
+  o = vec4(1.0);
+}`, TreeLayer = class {
+    constructor(gl, city) {
+      this.gl = gl, this.city = city, this.prog = createProgram(gl, VS5, FS5, "trees3d"), this.shadowProg = createProgram(gl, SHADOW_VS5, SHADOW_FS5, "trees3dShadow"), this.groups = /* @__PURE__ */ new Map();
+      let trees = city.world.trees, counts = /* @__PURE__ */ new Map();
+      for (let t of trees) {
+        let k = this.key(t);
+        counts.set(k, (counts.get(k) || 0) + 1);
+      }
+      for (let [k, n] of counts) {
+        let [sp, v] = k.split(":");
+        this.groups.set(k, { hi: this.mesh(treeMesh(sp, +v, !1), n), lo: this.mesh(treeMesh(sp, +v, !0), n), data: new Float32Array(n * IS3), n: 0 });
+      }
+      this.lo = !1;
+    }
+    key(t) {
+      return `${SPECIES.includes(t.species) ? t.species : "plane"}:${(t.variant || 0) % 3}`;
+    }
+    mesh(m, cap) {
+      let gl = this.gl, vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      let buf = (data, loc, n, type, int) => {
+        let b = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, b), gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW), gl.enableVertexAttribArray(loc), int ? gl.vertexAttribIPointer(loc, n, type, 0, 0) : gl.vertexAttribPointer(loc, n, type, !1, 0, 0);
+      };
+      buf(m.pos, 0, 3, gl.FLOAT), buf(m.nrm, 1, 3, gl.FLOAT), buf(m.info, 2, 4, gl.UNSIGNED_BYTE, !0);
+      let ib = gl.createBuffer();
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib), gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, m.idx, gl.STATIC_DRAW);
+      let ibuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, ibuf), gl.bufferData(gl.ARRAY_BUFFER, cap * IS3 * 4, gl.DYNAMIC_DRAW);
+      for (let a = 0; a < 2; a++)
+        gl.enableVertexAttribArray(3 + a), gl.vertexAttribPointer(3 + a, 4, gl.FLOAT, !1, IS3 * 4, a * 16), gl.vertexAttribDivisor(3 + a, 1);
+      return gl.bindVertexArray(null), { vao, ibuf, count: m.idx.length };
+    }
+    // the trees in view this frame
+    prepare(view, rows) {
+      let trees = this.city.world.trees;
+      this.lo = this.city.camera.scale < 0.4;
+      for (let g of this.groups.values()) g.n = 0;
+      for (let i = 0; i < trees.length; i++) {
+        let t = trees[i];
+        if (!view.visible(t.x, t.y, t.z + 2, 6)) continue;
+        let g = this.groups.get(this.key(t)), sc = t.scale ?? 1, o = g.n * IS3, d = g.data, turn = (Math.floor(t.x * 7.3) * 73856093 ^ Math.floor(t.y * 5.1) * 19349663) % 628 / 100;
+        d[o] = t.x, d[o + 1] = t.y, d[o + 2] = t.z, d[o + 3] = turn, d[o + 4] = sc, d[o + 5] = (rows[t.species] || rows.plane)[i % 2], d[o + 6] = 0, d[o + 7] = 0, g.n++;
+      }
+      let gl = this.gl;
+      for (let g of this.groups.values()) {
+        if (!g.n) continue;
+        let m = this.lo ? g.lo : g.hi;
+        gl.bindBuffer(gl.ARRAY_BUFFER, m.ibuf), gl.bufferSubData(gl.ARRAY_BUFFER, 0, g.data.subarray(0, g.n * IS3));
+      }
+    }
+    each(fn) {
+      let gl = this.gl;
+      for (let g of this.groups.values()) {
+        if (!g.n) continue;
+        let m = this.lo ? g.lo : g.hi;
+        gl.bindVertexArray(m.vao), fn(m, g), gl.drawElementsInstanced(gl.TRIANGLES, m.count, gl.UNSIGNED_INT, 0, g.n);
+      }
+    }
+    shadow(ctx) {
+      let gl = this.gl, p = this.shadowProg;
+      gl.useProgram(p.program), gl.uniformMatrix4fv(p.u.uShadowVP, !1, ctx.shadowMat), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex), gl.uniform1i(p.u.uPal, 1), this.each(() => {
+      });
+    }
+    draw(ctx) {
+      let gl = this.gl, p = this.prog, u = p.u, r = ctx.renderer, e = ctx.env;
+      gl.useProgram(p.program), gl.uniformMatrix4fv(u.uViewProj, !1, ctx.viewProj), gl.uniform2f(u.uBuf, ctx.bw, ctx.bh), gl.uniformMatrix4fv(u.uShadowMat, !1, ctx.shadowMat), gl.uniform2fv(u.uShadowK, ctx.shadowK), gl.uniform2fv(u.uDither, ctx.ditherOff), gl.uniform1f(u.uShadowOn, ctx.shadowOn ? 1 : 0), gl.uniform3fv(u.uSunDir, e.sunDir), gl.uniform3fv(u.uSunCol, e.sunCol), gl.uniform3fv(u.uAmb, e.amb), gl.uniform3fv(u.uFace, e.face), gl.uniform2f(u.uRot, Math.cos(ctx.camera.angle), Math.sin(ctx.camera.angle)), gl.uniform4fv(u.uCloud, e.cloud), gl.uniform1f(u.uFlash, e.flash), gl.activeTexture(gl.TEXTURE1), gl.bindTexture(gl.TEXTURE_2D, this.city.pal.tex), gl.uniform1i(u.uPal, 1), gl.activeTexture(gl.TEXTURE2), gl.bindTexture(gl.TEXTURE_2D, r.shadowTex), gl.uniform1i(u.uShadow, 2), gl.activeTexture(gl.TEXTURE3), gl.bindTexture(gl.TEXTURE_2D, r.lightTex), gl.uniform1i(u.uLightMap, 3), gl.activeTexture(gl.TEXTURE4), gl.bindTexture(gl.TEXTURE_2D, r.noiseTex), gl.uniform1i(u.uNoise, 4), this.each(() => {
+      });
+    }
+  };
+
   // src/sim/statics.js
   var Statics = class {
     constructor(city) {
@@ -10868,7 +11566,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let world = this.city.world;
       this.updatePalettes(env);
       let vis = (x, y, z, m = 6) => view.visible(x, y, z, m);
-      for (let i = 0; i < world.trees.length; i++) {
+      if (!this.city.treeLayer) for (let i = 0; i < world.trees.length; i++) {
         let t = world.trees[i];
         if (!vis(t.x, t.y, t.z + 2, 6)) continue;
         let fr = this.treeFrames[t.species][t.variant], rows = this.treeRows[t.species];
@@ -10899,7 +11597,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
       if (env.lampsOn)
         for (let h of world.lampHeads)
-          vis(h.x, h.y, h.z, 2) && L.push(h.x, h.y, h.z - 0.02, this.frames.glow, this.glowRows[h.kind] ?? this.glowRows.street, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
+          h.off || vis(h.x, h.y, h.z, 2) && L.push(h.x, h.y, h.z - 0.02, this.frames.glow, this.glowRows[h.kind] ?? this.glowRows.street, SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
       if (world.ball && vis(world.ball.x, world.ball.y, world.ball.z1, 3)) {
         let b = world.ball, h = env.hour, z = b.z1;
         env.season === 3 && (h >= 23.75 || h < 0.1) && (z = b.z1 + (b.z0 - b.z1) * (h >= 23.75 ? (h - 23.75) / 0.25 : 1)), L.push(b.x, b.y, z - 0.2, this.frames.tsqBall, this.ballRows[Math.floor(time * 0.6) % this.ballRows.length], SF.EMISSIVE | SF.NOSHADOW, 1, 0.01);
@@ -10909,7 +11607,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       if (tr) {
         let vd = cam.viewDir();
         for (let s of world.signals) {
-          if (s.face[0] * vd[0] + s.face[1] * vd[1] <= 0.05 || !vis(s.x, s.y, s.z, 1)) continue;
+          if (s.off || s.face[0] * vd[0] + s.face[1] * vd[1] <= 0.05 || !vis(s.x, s.y, s.z, 1)) continue;
           let st = tr.signalState(s.i, s.j);
           if (s.type === "car" && st.flash) {
             let c = s.axis === "x" ? st.ew : st.ns;
@@ -10933,7 +11631,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     lights(LL, env, time) {
       let world = this.city.world, dark = env.darkness, shopsOpen = env.hour >= 7 && env.hour < 22.5;
       for (let i = 0; i < world.lamps.length; i++) {
-        let l = world.lamps[i], k = l.k;
+        let l = world.lamps[i];
+        if (l.off) continue;
+        let k = l.k;
         if (l.kind === "street" || l.kind === "park" || l.kind === "flood" || l.kind === "globe" || l.kind === "shelter" || l.kind === "shed") {
           if (!env.lampsOn) continue;
           let on = Math.min(1, Math.max(0, (dark - 0.35 - this.lampDelay[i] * 0.3) * 6));
@@ -12272,7 +12972,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     faceSeat(p) {
       let f = p.seat ? p.seat.b.seats[p.seat.k].face : p.stoopSeat ? p.stoopSeat.n : [0, 1], d = this.city.camera.screenDir(f[0], f[1]);
-      p.front = d[1] >= 0, p.flip = d[0] < 0;
+      p.dx = f[0], p.dy = f[1], p.front = d[1] >= 0, p.flip = d[0] < 0;
     }
     setFacing(p, dx, dy) {
       Math.abs(dx) + Math.abs(dy) < 1e-4 || (p.dx = dx, p.dy = dy);
@@ -12327,7 +13027,9 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       let set = p.front ? p.frames.front : p.frames.back, arr = set[p.anim] || set.idle, fi = 0;
       p.anim === "walk" ? fi = Math.floor(p.dist / 0.16) % 4 : p.anim === "run" ? fi = Math.floor(p.dist / 0.2) % 4 : p.anim === "idle" ? fi = Math.floor(p.animT * 1.3) % 2 : p.animFrame != null ? fi = p.animFrame % arr.length : fi = Math.floor(p.animT * 3) % arr.length;
       let f = arr[fi] || arr[0], alpha = p.alpha;
-      if (p.z < 0.125 - 0.15 && (alpha *= clamp(1 + (p.z - 0.125 + 0.15) * 1.6, 0, 1)), L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === "down" || p.anim === "lie" ? SF.FLAT : 0), alpha, p.anim === "down" ? 2e-3 : 3e-3), p.umbrella) {
+      p.z < 0.125 - 0.15 && (alpha *= clamp(1 + (p.z - 0.125 + 0.15) * 1.6, 0, 1));
+      let PL = this.city.personLayer;
+      if (PL ? PL.add(p, { alpha }) : L.push(p.x, p.y, p.z, f, p.pal, (p.flip ? SF.FLIP : 0) | (p.anim === "down" || p.anim === "lie" ? SF.FLAT : 0), alpha, p.anim === "down" ? 2e-3 : 3e-3), p.umbrella) {
         let hz = p.z + (p.kid ? 0.82 : 1.12);
         L.push(p.x, p.y, hz, this.umbrellaFrame, p.pal, 0, alpha, 4e-3);
       }
@@ -12801,6 +13503,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     perchFor(pg) {
       let W = this.city.world, best = null, bd = 900;
       for (let p of W.perches) {
+        if (p.off) continue;
         let d = dist2(p.x, p.y, pg.x, pg.y) * this.rng.range(0.6, 1.4);
         d < bd && d > 4 && (bd = d, best = p);
       }
@@ -13088,7 +13791,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
             let t = dx / Math.max(0.5, half) * 0.6 + (1 - v) * 0.7;
             sp.set(x, y, t < 0.45 ? S.C1 : t < 0.8 ? S.C2 : S.C3, 128);
           }
-      }, w >> 1, h - 1)), this.p = [], this.emitters = [], this.rain = [], this.fireworkTimer = 3, this.flashes = [], this.fireflies = [], this.steamAcc = /* @__PURE__ */ new Map();
+      }, w >> 1, h - 1)), this.p = [], this.emitters = [], this.rain = [], this.fireworkTimer = 3, this.flashes = [], this.bullets = [], this.fireflies = [], this.steamAcc = /* @__PURE__ */ new Map();
     }
     add(o) {
       return this.p.length >= MAXP ? null : (this.p.push(o), o);
@@ -13127,17 +13830,28 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     }
     muzzle(x, y, z, dx, dy) {
       let r = this.rng;
+      for (let [ax, ay] of [[dx, dy], [-dy, dx], [dy, -dx]]) for (let k = 1; k <= (ax === dx ? 3 : 1); k++)
+        this.add({ x: x + ax * 0.07 * k, y: y + ay * 0.07 * k, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.07, max: 0.07, f: this.fr.dot2, row: this.rows.fbYellow, kind: "spark" });
       for (let i = 0; i < 4; i++) {
         let s = r.range(0.5, 3);
         this.add({ x: x + dx * 0.05 * i, y: y + dy * 0.05 * i, z, vx: dx * s + r.range(-0.4, 0.4), vy: dy * s + r.range(-0.4, 0.4), vz: r.range(-0.3, 0.3), g: 0, life: 0.06, max: 0.06, f: i ? this.fr.dot : this.fr.dot2, row: this.rows.fbYellow, kind: "spark" });
       }
       this.add({ x: x + dx * 0.1, y: y + dy * 0.1, z, vx: r.range(-0.2, 0.2), vy: r.range(-0.2, 0.2), vz: 0.4, g: 0, life: 0.5, max: 0.5, kind: "smoke", row: this.rows.smokeGrey, grow: 1.2, a: 0.5 }), this.flashes.push({ x, y, k: 0.9, color: [1, 0.8, 0.45], r: 3.2, decay: 12 });
     }
+    // a bullet you can see: a bright head that flies from the muzzle to whatever it hits (fast, but
+    // over a few frames rather than instantly), drawing a short glowing streak behind it
     tracer(x0, y0, z0, x1, y1, z1) {
-      let d = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.ceil(d / 0.3));
-      for (let i = 1; i < n; i++) {
-        let t = i / n;
-        this.add({ x: x0 + (x1 - x0) * t, y: y0 + (y1 - y0) * t, z: z0 + (z1 - z0) * t, vx: 0, vy: 0, vz: 0, g: 0, life: 0.03 + t * 0.05, max: 0.08, f: this.fr.dot, row: this.rows.tracer, kind: "spark" });
+      let d = Math.hypot(x1 - x0, y1 - y0, z1 - z0);
+      d < 0.05 || this.bullets.push({ x: x0, y: y0, z: z0, ux: (x1 - x0) / d, uy: (y1 - y0) / d, uz: (z1 - z0) / d, left: d, sp: 42 });
+    }
+    bulletsUpdate(dt) {
+      for (let i = this.bullets.length - 1; i >= 0; i--) {
+        let b = this.bullets[i], step = Math.min(b.left, b.sp * dt), tail = Math.min(2.2, step + 1), n = Math.max(4, Math.ceil(tail / 0.07)), hx = b.x + b.ux * step, hy = b.y + b.uy * step, hz = b.z + b.uz * step;
+        for (let k = 0; k <= n; k++) {
+          let t = k / n, x = hx - b.ux * tail * t, y = hy - b.uy * tail * t, z = hz - b.uz * tail * t;
+          this.add({ x, y, z, vx: 0, vy: 0, vz: 0, g: 0, life: 0.09 * (1 - t) + 0.03, max: 0.12, f: t < 0.5 ? this.fr.dot2 : this.fr.dot, row: this.rows.tracer, kind: "spark" });
+        }
+        this.flashes.push({ x: hx, y: hy, k: 0.5, color: [1, 0.85, 0.5], r: 1.3, decay: 30 }), b.x = hx, b.y = hy, b.z = hz, b.left -= step, b.left <= 1e-3 && this.bullets.splice(i, 1);
       }
     }
     shell(x, y, z, dx, dy) {
@@ -13257,7 +13971,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     update(dt) {
       let env = this.city.env, view = this.city.view, r = this.rng, wind = env.wind, wx = Math.cos(env.windDir) * wind * 0.8, wy = Math.sin(env.windDir) * wind * 0.8;
       if (!view || !view.bw) return;
-      this.carFx(dt, view);
+      this.bulletsUpdate(dt), this.carFx(dt, view);
       let want = env.precip > 0.05 ? Math.floor((env.snowing ? 1400 : 1700) * env.precip * Math.min(1.6, view.bw * view.bh / 6e5)) : 0;
       for (; this.rain.length < want; ) {
         let z = r.range(0, 26), [x, y] = this.screenPoint(view, z);
@@ -13545,8 +14259,12 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
       }
     }
     emit(L, view) {
-      let cam = this.city.camera, draw = (p, walking) => {
+      let cam = this.city.camera, PL = this.city.personLayer, draw = (p, walking) => {
         if (!view.visible(p.x, p.y, p.z, 2)) return;
+        if (PL) {
+          PL.add(p, { anim: walking ? "walk" : "idle", face: walking ? [-1, 0] : [0, 1], alpha: clamp(p.alpha, 0, 1) });
+          return;
+        }
         let f;
         if (walking) {
           let d = cam.screenDir(-1, 0);
@@ -14497,7 +15215,7 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
     update(dt) {
       let city = this.city, tr = city.traffic, now = city.time, pl = city.player, view = city.view, P = city.people;
       for (let c of tr.cars)
-        !c.free || c.fadeOut != null || (this.init(c), c.drivenAt !== now && this.coast(c, dt), (c.hopV || c.hopZ) && (c.hopV = (c.hopV || 0) - 9.8 * dt, c.hopZ = (c.hopZ || 0) + c.hopV * dt, c.hopZ <= 0 && (c.hopZ = 0, c.hopV = c.hopV < -1.6 ? -c.hopV * 0.25 : 0)), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), (Math.abs(c.v) > 1 || Math.hypot(c.vx, c.vy) > 1) && this.runOver(c, P));
+        !c.free || c.fadeOut != null || (this.init(c), c.drivenAt !== now && this.coast(c, dt), (c.hopV || c.hopZ) && (c.hopV = (c.hopV || 0) - 9.8 * dt, c.hopZ = (c.hopZ || 0) + c.hopV * dt, c.hopZ <= 0 && (c.hopZ = 0, c.hopV = c.hopV < -1.6 ? -c.hopV * 0.25 : 0)), c.z += (this.coll.groundZ(c.x, c.y) - c.z) * Math.min(1, dt * 10), (Math.abs(c.v) > 1 || Math.hypot(c.vx, c.vy) > 1) && this.runOver(c, P), city.poles?.carHit(c));
       this.contacts();
       for (let c of [...this.damaged]) {
         if (c.fadeOut != null && c.fadeOut <= 0) {
@@ -14553,6 +15271,92 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
           st === "activity" && this.city.activities?.leave(q), lethal ? P.kill(q, hx, hy, "car") : P.knock(q, hx * 1.2 + -hy * s * 0.6, hy * 1.2 + hx * s * 0.6), pl?.onRunOver(c, q, lethal);
         } else st !== "activity" && st !== "cop" && (q.dodge = { x: -hy * s, y: hx * s, t: 0.55, back: st }, q.state = "dodge", q.thought = this.rng.pick(["WHOA!", "HEY!", "Look out!", "Crazy driver!"]));
       }
+    }
+  };
+
+  // src/sim/poles.js
+  var CELL = 4, MAX_DOWN = 48, LIE = 1.5, Poles = class {
+    constructor(city) {
+      this.city = city, this.rng = new RNG(4242), this.list = city.world.poles || [], this.grid = /* @__PURE__ */ new Map();
+      for (let p of this.list) {
+        p.down = !1;
+        let k = this.key(Math.floor(p.x / CELL), Math.floor(p.y / CELL));
+        (this.grid.get(k) || this.grid.set(k, []).get(k)).push(p);
+      }
+      this.fallen = [], this.dirty = !1;
+    }
+    key(i, j) {
+      return i * 100003 + j;
+    }
+    near(x, y, r) {
+      let out = [];
+      for (let j = Math.floor((y - r) / CELL); j <= Math.floor((y + r) / CELL); j++)
+        for (let i = Math.floor((x - r) / CELL); i <= Math.floor((x + r) / CELL); i++) {
+          let l = this.grid.get(this.key(i, j));
+          if (l) for (let p of l) out.push(p);
+        }
+      return out;
+    }
+    // a free car moving through: knock over any pole its body overlaps (a slow nudge just stops it)
+    carHit(c) {
+      let sp = Math.hypot(c.vx || 0, c.vy || 0);
+      if (sp < 0.4) return;
+      let ch = Math.cos(c.h), sh = Math.sin(c.h), hl = c.len / 2 + 0.1, hw = c.wid / 2 + 0.1;
+      for (let p of this.near(c.x, c.y, hl + 0.5)) {
+        if (p.down) continue;
+        let dx = p.x - c.x, dy = p.y - c.y, lx = dx * ch + dy * sh, ly = -dx * sh + dy * ch;
+        if (!(Math.abs(lx) > hl || Math.abs(ly) > hw)) {
+          if (sp < 2.5) {
+            let d = Math.hypot(dx, dy) || 1, vn = (c.vx * dx + c.vy * dy) / d;
+            vn > 0 && (c.vx -= vn * 1.3 * dx / d, c.vy -= vn * 1.3 * dy / d);
+            continue;
+          }
+          this.knock(p, Math.atan2(c.vy, c.vx) + this.rng.range(-0.35, 0.35), sp), c.vx *= 0.82, c.vy *= 0.82, this.city.vehicles?.damage?.(c, p.x, p.y, -c.vx / sp, -c.vy / sp, Math.min(4, sp * 0.25), null), this.city.particles?.sparks(p.x, p.y, 0.125 + 0.4, 8), this.city.audio?.event("crash", { x: p.x, y: p.y, z: 0.5, k: 2.6 });
+        }
+      }
+    }
+    knock(p, ang, sp) {
+      if (p.down = !0, p.dir = ang, p.th = 0.05, p.om = 0.6 + sp * 0.12, p.settled = !1, p.downAt = this.city.time, p.lamp && (p.lamp.off = !0), p.head && (p.head.off = !0), p.signals) for (let s of p.signals) s.off = !0;
+      for (p.perch && (p.perch.off = !0), this.fallen.push(p); this.fallen.length > MAX_DOWN; ) this.raise(this.fallen[0]);
+      this.dirty = !0;
+    }
+    raise(p) {
+      if (p.down = !1, p.lamp && (p.lamp.off = !1), p.head && (p.head.off = !1), p.signals) for (let s of p.signals) s.off = !1;
+      p.perch && (p.perch.off = !1), this.fallen.splice(this.fallen.indexOf(p), 1), this.dirty = !0;
+    }
+    update(dt) {
+      let t = this.city.time, cam = this.city.camera;
+      for (let p of [...this.fallen])
+        p.settled ? t - p.downAt > 150 && Math.hypot(p.x - cam.x, p.y - cam.y) > 90 && this.raise(p) : (p.om += 9 / p.h * Math.sin(p.th + 0.08) * dt * 1.6, p.th += p.om * dt, p.th >= LIE && (p.th = LIE, p.om > 1.2 ? (p.om = -p.om * 0.22, this.city.audio?.event("crash", { x: p.x, y: p.y, z: 0.3, k: 1.4 })) : (p.om = 0, p.settled = !0)), this.dirty = !0);
+      this.dirty && (this.rebuild(), this.dirty = !1);
+    }
+    // the hidden list for the shader and the fallen poles' mesh
+    rebuild() {
+      let R2 = this.city.renderer, W = this.city.world, T3 = W.poleTex, n = Math.min(MAX_DOWN, this.fallen.length);
+      R2.down.fill(0);
+      for (let i = 0; i < n; i++) {
+        let p = this.fallen[i];
+        R2.down.set([p.x, p.y, p.kind === "lamp" ? 1.5 : 0.75, p.tag], i * 4);
+      }
+      if (R2.downN = n, !T3 || !n) {
+        R2.setDynamic(null);
+        return;
+      }
+      let mb = new MeshBuilder(), C = { mb };
+      for (let i = 0; i < n; i++) {
+        let p = this.fallen[i], fx = Math.cos(p.dir), fy = Math.sin(p.dir), ct = Math.cos(p.th), st = Math.sin(p.th), W2 = (u, v, z) => {
+          let a = u * fx + v * fy, b = -u * fy + v * fx, a2 = a * ct + z * st, z2 = -a * st + z * ct;
+          return [p.x + a2 * fx - b * fy, p.y + a2 * fy + b * fx, 0.125 + Math.max(-0.125 + 0.05, z2)];
+        }, bm = (a, b, w, tex2) => beam(C, W2(...a), W2(...b), w, tex2);
+        if (p.kind === "lamp")
+          bm([0, 0, 0], [0, 0, p.h], 0.14, T3.pole), bm([0, 0, 0], [0, 0, 0.5], 0.22, T3.pole), bm([0, 0, p.h - 0.04], [p.ax * 1.1, p.ay * 1.1, p.h - 0.04], 0.08, T3.pole), bm([p.ax * 0.85, p.ay * 0.85, p.h - 0.11], [p.ax * 1.22, p.ay * 1.22, p.h - 0.11], 0.2, T3.lampHead);
+        else {
+          bm([0, 0, 0], [0, 0, p.h], 0.12, T3.poleDark), bm([-0.5, 0, p.h - 0.07], [0.5, 0, p.h - 0.07], 0.14, T3.streetSign), bm([0, -0.5, p.h + 0.1], [0, 0.5, p.h + 0.1], 0.14, T3.streetSign);
+          let hz = p.h - 1.05;
+          p.closedX || bm([p.sx * 0.05, -p.sy * 0.18, hz], [p.sx * 0.05, -p.sy * 0.18, hz + 0.75], 0.24, T3.sigHead), p.closedY || bm([-p.sx * 0.18, p.sy * 0.05, hz - 0.1], [-p.sx * 0.18, p.sy * 0.05, hz + 0.65], 0.24, T3.sigHead), bm([-p.sx * 0.12, 0, 1.6], [-p.sx * 0.12, 0, 1.98], 0.2, T3.pedHead);
+        }
+      }
+      R2.setDynamic(mb.finish());
     }
   };
 
@@ -14614,11 +15418,11 @@ void main() { o = vec4(1.0); }`, CS = { BODY: 1, TRIM: 2, GLASS: 3, TIRE: 4, HEA
   };
 
   // src/render/decalLayer.js
-  var CAP = 400, STRIDE3 = 12, HEAD4 = `#version 300 es
+  var CAP2 = 400, STRIDE3 = 12, HEAD6 = `#version 300 es
 precision highp float;
 precision highp int;
 precision highp sampler2DShadow;
-`, VS4 = HEAD4 + `
+`, VS6 = HEAD6 + `
 layout(location=0) in vec2 aCorner;
 layout(location=1) in vec4 iA; // x, y, z, angle
 layout(location=2) in vec4 iB; // half size, palRow, alpha, grow
@@ -14634,7 +15438,7 @@ void main() {
   vec3 wp = vec3(iA.x + q.x * c - q.y * s, iA.y + q.x * s + q.y * c, iA.z + 0.01);
   vUV = aCorner * iR.zw; vR = iR; vB = iB.yzw; vWorld = wp;
   gl_Position = uViewProj * vec4(wp, 1.0);
-}`, FS4 = HEAD4 + `
+}`, FS6 = HEAD6 + `
 in vec2 vUV;
 flat in vec4 vR;
 flat in vec3 vB;
@@ -14684,9 +15488,9 @@ void main() {
   oGlow = vec4(0.0, 0.0, 0.0, 1.0);
 }`, DecalLayer = class {
     constructor(gl, city) {
-      this.gl = gl, this.city = city, this.atlas = city.atlas, this.pal = city.pal, this.rng = new RNG(5150), this.list = [], this.data = new Float32Array(CAP * STRIDE3), this.n = 0, this.prog = createProgram(gl, VS4, FS4, "decals"), this.paint();
+      this.gl = gl, this.city = city, this.atlas = city.atlas, this.pal = city.pal, this.rng = new RNG(5150), this.list = [], this.data = new Float32Array(CAP2 * STRIDE3), this.n = 0, this.prog = createProgram(gl, VS6, FS6, "decals"), this.paint();
       let vao = gl.createVertexArray();
-      gl.bindVertexArray(vao), makeBuffer(gl, new Float32Array([0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1])), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAP * STRIDE3 * 4, gl.DYNAMIC_DRAW);
+      gl.bindVertexArray(vao), makeBuffer(gl, new Float32Array([0, 0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1])), gl.enableVertexAttribArray(0), gl.vertexAttribPointer(0, 2, gl.FLOAT, !1, 0, 0), this.ibuf = gl.createBuffer(), gl.bindBuffer(gl.ARRAY_BUFFER, this.ibuf), gl.bufferData(gl.ARRAY_BUFFER, CAP2 * STRIDE3 * 4, gl.DYNAMIC_DRAW);
       for (let k = 0; k < 3; k++)
         gl.enableVertexAttribArray(1 + k), gl.vertexAttribPointer(1 + k, 4, gl.FLOAT, !1, STRIDE3 * 4, k * 16), gl.vertexAttribDivisor(1 + k, 1);
       gl.bindVertexArray(null), this.vao = vao;
@@ -14723,7 +15527,7 @@ void main() {
     }
     // size: half width in world units; grow: seconds for a pool to spread (0 = at once)
     add(kind, x, y, z, angle, size, alpha = 1, grow2 = 0) {
-      this.list.length >= CAP && this.list.shift();
+      this.list.length >= CAP2 && this.list.shift();
       let tex2 = this.rng.pick(this.tex[kind]), life = kind === "scorch" ? 300 : kind === "pool" ? 180 : 100, d = { kind, x, y, z, ang: Math.round(angle / (Math.PI / 2)) * (Math.PI / 2), size, alpha, grow: grow2, age: 0, life, tex: tex2 };
       return this.list.push(d), d;
     }
@@ -14736,7 +15540,7 @@ void main() {
     prepare(view) {
       let D = this.data, n = 0;
       for (let d of this.list) {
-        if (n >= CAP) break;
+        if (n >= CAP2) break;
         if (!view.visible(d.x, d.y, d.z, 3 + d.size)) continue;
         let o = n * STRIDE3, f = d.tex, g = d.grow > 0 ? Math.min(1, Math.sqrt(d.age / d.grow) * 1.05 + 0.08) : 1, fade = d.age > d.life - 8 ? (d.life - d.age) / 8 : 1;
         D[o] = d.x, D[o + 1] = d.y, D[o + 2] = d.z, D[o + 3] = d.ang, D[o + 4] = d.size, D[o + 5] = this.rows[d.kind], D[o + 6] = clamp(d.alpha * fade, 0, 1), D[o + 7] = g, D[o + 8] = f.x, D[o + 9] = f.y, D[o + 10] = f.w, D[o + 11] = f.h, n++;
@@ -14756,14 +15560,14 @@ void main() {
   // src/sim/city.js
   var City = class {
     constructor(gl, renderer, world, env, camera) {
-      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(4096), this.statics = new Statics(this), this.coll = new Collision(world), this.carLayer = new CarLayer(gl, this), this.decals = new DecalLayer(gl, this), this.traffic = new Traffic(this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
+      this.gl = gl, this.renderer = renderer, this.world = world, this.env = env, this.camera = camera, this.atlas = new SpriteAtlas(), buildPropSprites(this.atlas), this.pal = new PaletteBank(4096), this.statics = new Statics(this), this.coll = new Collision(world), this.carLayer = new CarLayer(gl, this), this.personLayer = new PersonLayer(gl, this), this.treeLayer = new TreeLayer(gl, this), this.decals = new DecalLayer(gl, this), this.traffic = new Traffic(this), this.systems = [], this.sprites = new SpriteLayer(gl, this.atlas, this.pal), this.lightLayer = new LightLayer(gl), renderer.addLayer({ light: (ctx) => this.lightLayer.light(ctx) }), renderer.addLayer({
         shadow: (ctx) => {
-          this.carLayer.shadow(ctx), this.sprites.shadow(ctx);
+          this.carLayer.shadow(ctx), this.personLayer.shadow(ctx), this.treeLayer.shadow(ctx), this.sprites.shadow(ctx);
         },
         draw: (ctx) => {
-          this.decals.draw(ctx), this.carLayer.draw(ctx), this.sprites.draw(ctx);
+          this.decals.draw(ctx), this.carLayer.draw(ctx), this.personLayer.draw(ctx), this.treeLayer.draw(ctx), this.sprites.draw(ctx);
         }
-      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.vehicles = new Vehicles(this), this.addSystem(this.vehicles), this.addSystem({ update: (dt) => this.decals.update(dt) }), this.traffic.init(), this.people.init();
+      }), this.view = { bw: 0, bh: 0, tsx: 0, tsy: 0, visible: () => !0 }, this.time = 0, this.people = new People(this), this.activities = new Activities(this), this.people.activities = this.activities, this.animals = new Animals(this), this.particles = new Particles(this), this.addSystem(this.people), this.addSystem(this.activities), this.addSystem(this.animals), this.addSystem(this.particles), this.subway = new Subway(this), this.addSystem(this.subway), this.player = new Player(this), this.addSystem(this.player), this.vehicles = new Vehicles(this), this.addSystem(this.vehicles), this.poles = this.addSystem(new Poles(this)), this.addSystem({ update: (dt) => this.decals.update(dt) }), this.traffic.init(), this.people.init();
     }
     // where the life of the city is concentrated: the player when playing, otherwise the camera
     focus() {
@@ -14792,9 +15596,9 @@ void main() {
     }
     prepare(canvasW, canvasH) {
       let view = this.computeView(canvasW, canvasH), env = this.env, L = this.sprites;
-      L.begin(), this.statics.emit(L, env, this.camera, this.time, view);
+      L.begin(), this.personLayer.begin(), this.statics.emit(L, env, this.camera, this.time, view);
       for (let s of this.systems) s.emit && s.emit(L, view);
-      L.end(), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view), this.decals.prepare(view);
+      L.end(), this.personLayer.end(), this.treeLayer.prepare(view, this.statics.treeRows), this.carLayer.prepare(this.subway ? this.traffic.cars.concat(this.subway.cars) : this.traffic.cars, this.time, env, view), this.decals.prepare(view);
       let LL = this.lightLayer;
       LL.begin(), this.statics.lights(LL, env, this.time), this.carLayer.lights(LL, this.traffic.cars, env);
       for (let s of this.systems) s.lights && s.lights(LL, env);
