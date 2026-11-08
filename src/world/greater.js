@@ -10,7 +10,7 @@
 //   Ellis Island (the red-brick immigration station with its four domed towers)
 // Brooklyn's waterfront is in landmarks.js (brooklynShore), by the Brooklyn Bridge.
 
-import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS, ROWS, NBY, BLOCK_TYPES, eastShoreX } from './layout.js';
+import { T, CURB, WATER_Z, MAPX, MAPY, PERIOD, roadStart, roadEnd, lotStart, lotEnd, BOROUGHS, ISLANDS, ELLIS, ROWS, NBY, BLOCK_TYPES, eastShoreX, OY, OR } from './layout.js';
 import { dominoSign } from './sights.js';
 import { offIslandBlock } from './blocks.js';
 import { MAT } from './mesh.js';
@@ -178,16 +178,17 @@ function newJersey(C) {
     if (rng.chance(0.55)) addTreeAt(C, rng.range(1.5, xe - 4), y, zp, rng.pick(['oak', 'elm', 'pine']), rng.range(0.9, 1.2));
   }
   // Fort Lee's apartment towers on top of the cliffs either side of the bridge, Edgewater's down the row
-  for (const by of [2, 3, 5, 6, 9, 12, 15]) {
+  for (const by of [2, 3, 5, 6, 8, 10, 12, 14, 17, 19, 21]) {
+    if (lotEnd(by) > cliffEnd) continue;
     const Lt = { x0: 2, y0: lotStart(by), x1: 20, y1: lotEnd(by) };
     if (Math.abs((Lt.y0 + Lt.y1) / 2 - gwbY) < 14) continue;
-    offIslandBlock(C, Lt, by < 8 ? 'modern' : 'glass', 1, by + 6, zp);
+    offIslandBlock(C, Lt, by < 9 ? 'modern' : 'glass', 1, by + 7, zp);
   }
   // below the cliffs: Hoboken's brownstones and walk-ups, Jersey City's glass towers
   for (let by = ROWS.palisadesEnd; by < ROWS.harbor; by++) {
     const Lb = { x0: 2, y0: lotStart(by), x1: 20, y1: lotEnd(by) };
     if (by < ROWS.hobokenEnd) offIslandBlock(C, Lb, rng.pick(['brownstones', 'walkups', 'brownstones', 'shops', 'redbrick']), 0, by);
-    else offIslandBlock(C, Lb, rng.pick(['glass', 'glass', 'modern', 'glass']), 0, 27);
+    else offIslandBlock(C, Lb, rng.pick(['glass', 'glass', 'modern', 'glass']), 0, OR(27));
   }
   // Liberty State Park: lawns and trees at the bottom, the old rail terminal's clock tower
   const lp = lotStart(ROWS.harbor);
@@ -301,7 +302,7 @@ function queens(C) {
   const R = region('queens'), L = looks(C), rng = C.rng, W = C.world;
   const bridgesY = (W.bridges || []).filter((b) => b.y > R.y0 && b.y < R.y1 && b.x1 >= MAPX - 1).map((b) => b.y);
   const gantry = { y0: lotStart(ROWS.gantry) - 2, y1: lotEnd(ROWS.gantry) + 2 };
-  const parkY1 = 302;
+  const parkY1 = OY(302);
   const keep = (x, y) => bridgesY.some((by) => Math.abs(y - by) < 7.5) || (y > gantry.y0 && y < gantry.y1) || y < parkY1 + 3;
   // the promenade along the river, Astoria Park's lawn by Hell Gate
   C.paintGround(R.x0, R.y0, R.x0 + 4, R.y1, 'plaza');

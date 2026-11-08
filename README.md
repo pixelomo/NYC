@@ -24,9 +24,9 @@ npm run build
 
 ![All of Manhattan from above, with the bridges out to New Jersey, the Bronx, Queens and Brooklyn, the islands and the harbour](docs/city.png)
 
-- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 30 rows of blocks
-  (each standing for four to ten real streets, closer together in Midtown and downtown) up to ten
-  avenues wide, about 240 blocks of island, following the real shoreline — narrow in the north,
+- **The whole of Manhattan, Inwood to the Battery**, on a floating diorama slab: 40 rows of blocks
+  (each standing for three to ten real streets, closest together in Midtown and downtown) up to ten
+  avenues wide, about 320 blocks of island, following the real shoreline — narrow in the north,
   bulging through Midtown, the Lower East Side sticking out into the East River, tapering to the
   Battery. Riverside drives ring it. Across the
   rivers lie the **edges of greater New York**: the **Palisades** cliffs, Fort Lee, Hoboken and
@@ -60,10 +60,13 @@ npm run build
     **the Dakota**'s green roofs, gables and corner pavilions on Central Park West
   - on the Hudson: the **Intrepid** on its pier (aircraft carrier with planes on the deck and its
     island, the submarine alongside, the shuttle pavilion), the **High Line**'s planted viaduct
-    running three blocks through Chelsea over the cross streets (people walk it, up the stairs at
+    running five blocks through Chelsea over the cross streets (people walk it, up the stairs at
     each end), and **Little Island** on its field of concrete tulips
   - Midtown: **Radio City Music Hall** with its neon marquee round the corner and the tall sign,
-    **Macy's** on Herald Square with its display windows, red awnings and star sign
+    **Macy's** on Herald Square with its display windows, red awnings and star sign, **Carnegie
+    Hall**'s brown-brick arches and red banners under its slim tower, and **MoMA**: black glass and
+    white stone round the sculpture garden, the tapering tower beside it
+  - Chelsea: **Chelsea Market**, a whole block of the old biscuit factory's brick, by the High Line
   - downtown: **Union Square** with its greenmarket, **City Hall** and the **Woolworth Building**,
     **Trinity Church**'s brownstone spire and graveyard at the head of Wall Street, **Bowling
     Green**'s oval inside its iron fence with the **Charging Bull** and the Custom House, **South
@@ -141,7 +144,7 @@ npm run build
   behind a ticket booth, crowded with people taking in the lights, among café tables, planters,
   carts and floodlights. A bronze statue stands at the north end and a tower with a crystal ball on
   its mast at the south end (the ball drops at midnight on winter nights, then fireworks). All the ads are made up; at night the screens wash the square in colour.
-- **Central Park**, six blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
+- **Central Park**, eight blocks long and two wide (59th to 110th Street), takes over the streets inside it and is laid out like the real
   one from north to south: **Harlem Meer**, the North Woods with the Loch and the Great Hill, the
   **Conservatory Garden** (fountain, beds, hedges, a wisteria pergola) and a dog run; the
   **Reservoir** inside its fence and running track, a gatehouse and cherry trees on its bank; the
@@ -277,7 +280,7 @@ URL parameters are handy for jumping straight to a moment, e.g.
 - `src/world/` – the procedural city: a pixel painter writes facades, roofs and the ground into a
   texture-array atlas (the alpha channel encodes when each window lights up), and a mesh builder
   creates boxes, prisms, cylinders and alpha-tested quads (railings, fences, fire escapes).
-  `layout.js` is the 15×36 block map of Manhattan (merged regions for Central Park and Times
+  `layout.js` is the 15×46 block map of Manhattan (merged regions for Central Park and Times
   Square; the roads follow the land), with the other boroughs and the islands as regions. `ground.js`
   rasterises it into a land map (water, road, sidewalk, other boroughs) that drives the ground
   geometry, the quays and the collision grid; the ground texture is stored as tiles over the land

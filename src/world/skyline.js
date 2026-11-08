@@ -10,7 +10,7 @@
 //   Vanderbilt, the MetLife Building (built over Grand Central in landmarks.js), 40 Wall Street,
 //   70 Pine Street, 8 Spruce Street and 56 Leonard Street's stacked boxes.
 
-import { T, CURB, AVENUE_NAMES, STREET_NAMES } from './layout.js';
+import { T, CURB, AVENUE_NAMES, STREET_NAMES, OR } from './layout.js';
 import { MAT } from './mesh.js';
 import { winCode } from '../core/painter.js';
 import { shade, mixc, hash2i } from '../core/math.js';
@@ -118,7 +118,7 @@ function addressSign(C, x0, x1, y, z, text) {
 }
 
 // ---- the generic tower ---------------------------------------------------------------------------
-const district = (bx, by) => (by <= 16 ? 'upper' : by <= 21 ? 'mid' : by <= 26 ? 'low' : 'down') + (bx <= 3 ? '-west' : '');
+const district = (bx, by) => (by <= OR(16) ? 'upper' : by <= OR(21) ? 'mid' : by <= OR(26) ? 'low' : 'down') + (bx <= 3 ? '-west' : '');
 const HEIGHT = {
   mid: { glass: [44, 74], modern: [30, 48], deco: [42, 66], office: [24, 38] },
   down: { glass: [36, 60], modern: [30, 44], deco: [44, 62], office: [24, 40] },

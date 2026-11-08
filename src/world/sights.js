@@ -468,3 +468,83 @@ export function dominoSign(C, x, y) {
   W.lamps.push({ x: x - 3, y, z: z, r: 6, color: [1, 0.8, 0.2], k: 0.6, kind: 'neon' });
   landmark(C, 'DOMINO SUGAR SIGN', x - 8, y + 5, 0);
 }
+
+// ---- Carnegie Hall: the brown-brick Renaissance hall with its arched windows and vertical banners,
+// the slim Carnegie Hall Tower rising behind it ------------------------------------------------------
+export function carnegie(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0;
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
+  const brick = module(C, 'carnegie_mod', { brick: [0xa8643e, 0x9c5a36, 0xb46e46], frame: 0x2b2b30, lintel: 0xe0d2b4, sill: 0xe0d2b4, arch: true, band: 0xd8c8a8, pier: true });
+  const hx0 = L.x0 + 0.5, hx1 = L.x1 - 0.5, hy0 = L.y0 + 7, hy1 = L.y1 - 0.5;
+  section(C, hx0, hy0, hx1, hy1, z0, z0 + 2.6, lobbyModule(C, 0xc8a882, false), null, { mat: MAT.OFFICE });
+  section(C, hx0, hy0, hx1, hy1, z0 + 2.6, z0 + 11, brick, S.roofTar, { mat: MAT.OFFICE, seed: 901 });
+  mb.box(hx0 - 0.25, hy0 - 0.25, z0 + 11, hx1 + 0.25, hy1 + 0.25, z0 + 11.6, sides(S.limestone, { t: S.limeTop }));
+  // the banners down the front
+  const red = flat(C, 'carnegie_red', 0xa81e22);
+  for (let x = hx0 + 2; x < hx1 - 1; x += 3.2) mb.box(x - 0.3, hy1, z0 + 4, x + 0.3, hy1 + 0.08, z0 + 9, sides(red));
+  const sg = signTex(C, 'CARNEGIE HALL', 120, 14, null, 0xf2e6c8, 1);
+  mb.vquad((hx0 + hx1) / 2 - 60 / T, hy1 + 0.1, (hx0 + hx1) / 2 + 60 / T, hy1 + 0.1, z0 + 2.7, z0 + 2.7 + 14 / T, sg, { mat: MAT.FLAT | MAT.NOSHADOW });
+  // the tower: slim, brick in bands, a cornice at the top
+  const tw = module(C, 'carnegie_tw', { brick: [0x9c5a36, 0x8a4b33, 0xa8643e], frame: 0x2b2b30, lintel: 0xd8c8a8, sill: 0xd8c8a8, band: 0x6a3a26 });
+  section(C, L.x0 + 1, L.y0 + 0.5, L.x0 + 8, L.y0 + 6.5, z0, z0 + 46, tw, S.roofTar, { mat: MAT.OFFICE, seed: 902 });
+  mb.box(L.x0 + 0.6, L.y0 + 0.1, z0 + 46, L.x0 + 8.4, L.y0 + 6.9, z0 + 47, sides(S.limestone, { t: S.limeTop }));
+  W.officeDoors.push({ x: (hx0 + hx1) / 2, y: L.y1 + 0.9, dx: (hx0 + hx1) / 2, dy: hy1 - 0.3, kind: 'office' });
+  W.marquees.push({ x: (hx0 + hx1) / 2, y: hy1 + 1.2 });
+  landmark(C, 'CARNEGIE HALL', (hx0 + hx1) / 2, L.y1 + 3, 0);
+}
+
+// ---- MoMA: black glass and white stone round the sculpture garden, the tapering tower beside it ----
+export function moma(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0;
+  C.paintGround(L.x0, L.y0, L.x1, L.y1, 'plaza');
+  const dark = glassModule(C, GLASS.dark, 'grid'), white = stoneModule(C, 0xeeeae2, 'smooth');
+  // the museum along the south street: glass below, white stone bands above
+  const y0 = L.y1 - 7, y1 = L.y1 - 0.5;
+  mb.box(L.x0 + 0.5, y0, z0, L.x1 - 6, y1, z0 + 5, { ...sides({ t: dark, mat: MAT.GLASS | MAT.OFFICE, seed: 911 }), pz: { t: S.roofSilver } });
+  mb.box(L.x0 + 0.5, y0, z0 + 5, L.x1 - 6, y1, z0 + 8.5, { ...sides({ t: white, mat: MAT.OFFICE, seed: 912 }), pz: { t: S.roofSilver } });
+  markHeight(W, L.x0 + 0.5, y0, L.x1 - 6, y1, z0 + 8.5);
+  const sg = signTex(C, 'MoMA', 40, 14, 0x111114, 0xf2f2ee, 2);
+  mb.vquad(L.x0 + 2, y1 + 0.05, L.x0 + 2 + 40 / T, y1 + 0.05, z0 + 3.2, z0 + 3.2 + 14 / T, sg, { mat: MAT.FLAT | MAT.NOSHADOW });
+  // the sculpture garden: a long pool, birches, a few sculptures
+  C.paintGround(L.x0 + 0.5, L.y0 + 0.5, L.x1 - 6, y0 - 0.5, 'patio');
+  C.fountainPool((L.x0 + L.x1 - 6) / 2, (L.y0 + y0) / 2, 5, 1.2);
+  for (let x = L.x0 + 1.5; x < L.x1 - 7; x += 2.2) { C.addTree(x, L.y0 + 1.6, 'locust', false); }
+  for (const [x, y] of [[L.x0 + 3, y0 - 2], [L.x0 + 7.5, y0 - 2]]) C.addSprite('statue', x, y, z0);
+  for (let x = L.x0 + 2; x < L.x1 - 7; x += 3) C.addBench(x, y0 - 1.2, 'x', -1);
+  // 53 West 53rd: a slender tower tapering to a point, its diagonal steel showing through the glass
+  const tx0 = L.x1 - 5.5, tx1 = L.x1 - 0.5, ty0 = L.y0 + 1, ty1 = L.y1 - 1;
+  const g = glassModule(C, GLASS.smoke, 'diag');
+  let z = z0, w = 0;
+  for (let k = 0; k < 8; k++) {
+    const h = 7, ix = Math.min(1.8, k * 0.22), iy = k * 1.0;
+    section(C, tx0 + ix * 0.4, ty0 + iy, tx1 - ix * 0.6, ty1 - iy * 0.3, z, z + h, g, S.roofSilver, { mat: MAT.GLASS | MAT.OFFICE, seed: 913 + k });
+    z += h; w = k;
+  }
+  crown(C, { x0: tx0 + 0.8, y0: ty0 + w + 0.2, x1: tx1 - 1.2, y1: ty1 - w * 0.3 - 0.2 }, z, 'spire');
+  W.officeDoors.push({ x: (L.x0 + L.x1) / 2, y: L.y1 + 0.9, dx: (L.x0 + L.x1) / 2, dy: y1 - 0.3, kind: 'office' });
+  landmark(C, 'MoMA', (L.x0 + L.x1) / 2, L.y0 - 3, 2);
+}
+
+// ---- Chelsea Market: the old biscuit factory, a whole block of brick lofts, its sign over the door --
+export function chelseaMarket(C, L) {
+  const mb = C.mb, W = C.world, S = sharedTex(C), z0 = C.z0;
+  const brick = module(C, 'chelsea_mod', { brick: PAL.brickRed, frame: 0x2b2b30, lintel: 0x8a8a84, sill: 0x8a8a84, arch: true, pier: true });
+  const x0 = L.x0 + 0.5, x1 = L.x1 - 0.5, y0 = L.y0 + 0.5, y1 = L.y1 - 0.5;
+  const shop = C.atlas.shared('chelsea_shop', 32, 80, (p) => {
+    for (let y = 0; y < 80; y++) for (let x = 0; x < 32; x++) p.set(x, y, shade(0x7a3428, 0.95 + hash2i(x, y >> 2, 921) * 0.08));
+    p.rect(3, 18, 26, 58, 0x1e1e22); p.rect(5, 20, 22, 56, 0xf2d8a0, winCode(0.0, true));
+    for (let x = 5; x < 27; x += 5) p.vline(x, 20, 56, 0x1e1e22);
+  });
+  section(C, x0, y0, x1, y1, z0, z0 + 2.6, shop, null, { mat: MAT.OFFICE });
+  section(C, x0, y0, x1, y1, z0 + 2.6, z0 + 14, brick, S.roofTar, { mat: MAT.OFFICE, seed: 922 });
+  mb.box(x0 - 0.15, y0 - 0.15, z0 + 14, x1 + 0.15, y1 + 0.15, z0 + 14.5, sides(S.darkMetal, { t: S.darkMetal }));
+  // the iron canopy and the sign
+  mb.box(x0 + 3, y1, z0 + 2.5, x1 - 3, y1 + 1.2, z0 + 2.65, sides(S.darkMetal, { t: S.darkMetal }));
+  const sg = signTex(C, 'CHELSEA MARKET', 120, 14, 0x1e1e22, 0xf2e6c8, 1);
+  const cx = (x0 + x1) / 2;
+  mb.vquad(cx - 60 / T, y1 + 1.21, cx + 60 / T, y1 + 1.21, z0 + 2.65, z0 + 2.65 + 14 / T, sg, { mat: MAT.FLAT | MAT.NOSHADOW });
+  W.shops.push({ kind: 'dept', name: 'CHELSEA MARKET', x: cx, y: L.y1 + 1, dx: cx, dy: y1 - 0.3, n: [0, 1] });
+  W.lamps.push({ x: cx, y: y1 + 1.6, z: z0 + 2, r: 4, color: [1, 0.85, 0.6], k: 0.6, kind: 'shop' });
+  for (let k = 0; k < 4; k++) C.addSprite('dish', x0 + 2 + k * 4, y0 + 2, z0 + 14);
+  landmark(C, 'CHELSEA MARKET', cx, L.y1 + 3, 0);
+}
