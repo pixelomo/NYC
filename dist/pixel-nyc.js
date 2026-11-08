@@ -1637,10 +1637,10 @@ void main() {
     // every page), then let go of the finished pages' pixels. Returns the bytes sent.
     flush(gl, tex2) {
       let sent = 0;
-      return gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex2), gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, this.size), this.pages.forEach((pg, i) => {
+      return gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex2), gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, this.size), gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, this.size), this.pages.forEach((pg, i) => {
         let d = pg.dirty;
         d && !pg.freed && (gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, d.x0), gl.pixelStorei(gl.UNPACK_SKIP_ROWS, d.y0), gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, d.x0, d.y0, i, d.x1 - d.x0, d.y1 - d.y0, 1, gl.RGBA, gl.UNSIGNED_BYTE, pg.data), sent += (d.x1 - d.x0) * (d.y1 - d.y0) * 4), pg.dirty = null, i < this.pages.length - OPEN && !pg.freed && this.free(pg);
-      }), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0), gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0), gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0), sent;
+      }), gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0), gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0), gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0), gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0), sent;
     }
     // a page's pixels are on the GPU: drop them (reads of a replayed region then see nothing, and
     // writes go nowhere, which is all a replay does)

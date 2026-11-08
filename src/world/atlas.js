@@ -123,6 +123,7 @@ export class Atlas {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.pixelStorei(gl.UNPACK_ROW_LENGTH, this.size);
+    gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, this.size);
     this.pages.forEach((pg, i) => {
       const d = pg.dirty;
       if (d && !pg.freed) {
@@ -135,6 +136,7 @@ export class Atlas {
       if (i < this.pages.length - OPEN && !pg.freed) this.free(pg);
     });
     gl.pixelStorei(gl.UNPACK_ROW_LENGTH, 0);
+    gl.pixelStorei(gl.UNPACK_IMAGE_HEIGHT, 0);
     gl.pixelStorei(gl.UNPACK_SKIP_PIXELS, 0);
     gl.pixelStorei(gl.UNPACK_SKIP_ROWS, 0);
     return sent;
